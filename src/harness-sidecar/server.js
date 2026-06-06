@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { BudgetManager } from './budget/budgetManager.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { runVerifiers } from './tools/verifierRunner.js';
 
@@ -85,6 +86,14 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     };
     tasks.set(taskId, task);
     pendingApprovals.set(actionId, { actionId, taskId, status: 'pending' });
+    const budgetManager = new BudgetManager({
+      taskId,
+      limits: {
+        maxToolCalls: task.budget.maxToolCalls,
+        maxWallMinutes: task.budget.maxWallMinutes,
+      },
+      emitEvent,
+    });
 
     await emitEvent({
       type: 'task.started',
@@ -97,6 +106,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId,
       summary: 'MVP task will emit deterministic verifier, patch, and approval events.',
     });
+    budgetManager.recordUsage({ toolCalls: 1 });
     await runVerifiers({
       workspaceRoot: resolvedWorkspaceRoot,
       taskId,
@@ -109,6 +119,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       ],
       emitEvent,
     });
+    budgetManager.recordUsage({ toolCalls: 1, verifierCalls: 1 });
     await emitEvent({
       type: 'patch.proposed',
       taskId,
