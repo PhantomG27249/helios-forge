@@ -124,6 +124,9 @@
           </div>
         </div>
         <div class="topbar-right">
+          <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
+          </button>
           <button id="btn-export" class="topbar-icon-btn" title="Export">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </button>
@@ -142,6 +145,28 @@
           </svg>
           <span id="connection-text">Connecting to Pi...</span>
         </div>
+        <section id="harness-panel" class="harness-panel hidden">
+          <div class="harness-panel-header">
+            <div>
+              <div class="harness-title">Research Harness</div>
+              <div id="harness-subtitle" class="harness-subtitle">Sidecar not started</div>
+            </div>
+            <div class="harness-actions">
+              <button id="btn-harness-start" class="harness-btn">Start</button>
+              <button id="btn-harness-stop" class="harness-btn">Stop</button>
+            </div>
+          </div>
+          <div class="harness-task-row">
+            <input id="harness-task-input" class="harness-task-input" type="text" placeholder="Run a harness task..." />
+            <button id="btn-harness-run" class="harness-run-btn">Run</button>
+          </div>
+          <div class="harness-metrics">
+            <span id="harness-state-pill" class="harness-pill">unknown</span>
+            <span id="harness-task-count">0 tasks</span>
+            <span id="harness-approval-count">0 approvals</span>
+          </div>
+          <div id="harness-events" class="harness-events"></div>
+        </section>
         <div id="messages" class="messages"></div>
         <div id="scroll-sentinel"></div>
       </div>
@@ -206,6 +231,15 @@
       <div class="modal-content">
         <div class="modal-header"><h2>Session Stats</h2><button class="modal-close" onclick="closeModal('stats')">&times;</button></div>
         <div class="modal-body"><div id="stats-content">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- Harness Approval -->
+    <div id="modal-harness-approval" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header"><h2>Harness Approval</h2><button class="modal-close" onclick="closeModal('harness-approval')">&times;</button></div>
+        <div class="modal-body"><div id="harness-approval-content">Loading...</div></div>
       </div>
     </div>
 

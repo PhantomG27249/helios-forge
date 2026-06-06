@@ -22,6 +22,13 @@ let uploadedImages = [];
 let savedThinkingBlocks = [];
 let workspacePath = ''; // Persist across text_start
 let currentSessionId = null;
+let harnessState = {
+  status: 'unknown',
+  activeTasks: new Map(),
+  pendingApprovals: new Map(),
+  latestEvents: [],
+  currentApproval: null,
+};
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -104,6 +111,13 @@ const connectionText = $('#connection-text');
 const fileInput = $('#file-input');
 const attachBtn = $('#btn-attach');
 const imagePreview = $('#image-preview');
+const harnessPanel = $('#harness-panel');
+const harnessSubtitle = $('#harness-subtitle');
+const harnessStatePill = $('#harness-state-pill');
+const harnessTaskCount = $('#harness-task-count');
+const harnessApprovalCount = $('#harness-approval-count');
+const harnessEvents = $('#harness-events');
+const harnessTaskInput = $('#harness-task-input');
 
 // ═══════════════════════════════════════════════════════════
 // Workspace Input Handler
@@ -194,6 +208,7 @@ function handleMessage(msg) {
         }
         send({ type: 'get_models' });
         send({ type: 'get_session_files' });
+        send({ type: 'harness_status' });
         if (!messagesEl.children.length || messagesEl.querySelector('.welcome')) showWelcome();
         break;
       case 'pi_disconnected':
@@ -276,6 +291,27 @@ function handleMessage(msg) {
     renderPiSessions(msg.data.sessions);
     return;
   }
+  if (msg.type === 'harness_status' && msg.data) {
+    updateHarnessStatus(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_task_started' && msg.data) {
+    harnessState.activeTasks.set(msg.data.taskId, msg.data);
+    renderHarnessPanel();
+    toast('Harness task started', 'success');
+    return;
+  }
+  if (msg.type === 'harness_task_event' && msg.event) {
+    handleHarnessEvent(msg.event);
+    return;
+  }
+  if (msg.type === 'harness_approval_resolved' && msg.data) {
+    harnessState.pendingApprovals.delete(msg.data.actionId);
+    closeModal('harness-approval');
+    renderHarnessPanel();
+    toast(`Approval ${msg.data.choice}`, 'success');
+    return;
+  }
 
   // Agent events
   switch (msg.type) {
@@ -309,6 +345,97 @@ function handleMessage(msg) {
     case 'compaction_end': toast('Compaction done', 'success'); break;
     case 'extension_ui_request': handleExtensionUI(msg); break;
   }
+}
+
+function updateHarnessStatus(status) {
+  harnessState.status = status.state || 'unknown';
+  renderHarnessPanel();
+}
+
+function handleHarnessEvent(event) {
+  harnessState.latestEvents.unshift(event);
+  harnessState.latestEvents = harnessState.latestEvents.slice(0, 8);
+
+  if (event.taskId) {
+    const existing = harnessState.activeTasks.get(event.taskId) || { taskId: event.taskId };
+    harnessState.activeTasks.set(event.taskId, { ...existing, lastEvent: event.type, summary: event.summary || existing.summary });
+  }
+
+  if (event.type === 'approval.required') {
+    harnessState.pendingApprovals.set(event.actionId, event);
+    harnessState.currentApproval = event;
+    renderHarnessApproval(event);
+    openModal('harness-approval');
+  }
+
+  if (event.type === 'approval.resolved') {
+    harnessState.pendingApprovals.delete(event.actionId);
+  }
+
+  renderHarnessPanel();
+}
+
+function renderHarnessPanel() {
+  if (!harnessPanel) return;
+  harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
+  harnessStatePill.textContent = harnessState.status;
+  harnessStatePill.className = `harness-pill ${harnessState.status}`;
+  harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
+  harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
+  harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
+    <div class="harness-event">
+      <span class="harness-event-type">${esc(event.type)}</span>
+      <span class="harness-event-summary">${esc(event.summary || event.reason || event.intent || event.result || '')}</span>
+    </div>
+  `).join('') || '<div class="harness-empty">No harness events yet</div>';
+}
+
+function toggleHarnessPanel() {
+  harnessPanel.classList.toggle('hidden');
+  if (!harnessPanel.classList.contains('hidden')) {
+    send({ type: 'harness_status' });
+  }
+}
+
+function startHarness() {
+  send({ type: 'harness_start', workspaceRoot: workspacePath || undefined });
+}
+
+function stopHarness() {
+  send({ type: 'harness_stop' });
+}
+
+function runHarnessTask() {
+  const task = harnessTaskInput?.value?.trim();
+  if (!task) return;
+  send({
+    type: 'harness_task_start',
+    task,
+    mode: 'mvp',
+    budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+  });
+  harnessTaskInput.value = '';
+}
+
+function renderHarnessApproval(event) {
+  const action = event.proposedAction || {};
+  $('#harness-approval-content').innerHTML = `
+    <div class="approval-grid">
+      <div><span class="approval-label">Risk</span><strong>${esc(event.risk || 'unknown')}</strong></div>
+      <div><span class="approval-label">Action</span><strong>${esc(action.tool || 'harness')}</strong></div>
+    </div>
+    <p class="approval-reason">${esc(event.reason || '')}</p>
+    <pre class="approval-action">${esc(JSON.stringify(action, null, 2))}</pre>
+    <div class="approval-actions">
+      ${(event.choices || ['approve', 'reject']).map(choice => `
+        <button class="ext-btn ${choice === 'approve' ? 'primary' : ''}" onclick="respondHarnessApproval('${esc(event.actionId)}','${esc(choice)}')">${esc(choice)}</button>
+      `).join('')}
+    </div>
+  `;
+}
+
+function respondHarnessApproval(actionId, choice) {
+  send({ type: 'harness_approval_response', actionId, choice });
 }
 
 function handleMessageUpdate(msg) {
@@ -1131,6 +1258,16 @@ inputEl.addEventListener('keydown', (e) => {
 
 $('#btn-new-chat').addEventListener('click', () => send({ type: 'new_session' }));
 $('#btn-stats').addEventListener('click', () => { send({ type: 'get_session_stats' }); openModal('stats'); });
+$('#btn-harness').addEventListener('click', toggleHarnessPanel);
+$('#btn-harness-start').addEventListener('click', startHarness);
+$('#btn-harness-stop').addEventListener('click', stopHarness);
+$('#btn-harness-run').addEventListener('click', runHarnessTask);
+$('#harness-task-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runHarnessTask();
+  }
+});
 $('#model-search').addEventListener('input', (e) => renderModelList(e.target.value));
 
 document.querySelectorAll('.modal-overlay').forEach(o => {

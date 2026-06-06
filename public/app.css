@@ -1548,6 +1548,188 @@ body {
   50% { opacity: 0.6; }
 }
 
+/* Research Harness */
+.harness-panel {
+  max-width: 760px;
+  margin: 16px auto 0;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+
+.harness-panel.hidden { display: none; }
+
+.harness-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.harness-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.harness-subtitle {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.harness-actions,
+.approval-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.harness-btn,
+.harness-run-btn {
+  border: 1px solid var(--tool-border);
+  background: var(--tool-bg);
+  color: var(--text-primary);
+  border-radius: var(--radius-xs);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.harness-run-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+  font-weight: 600;
+}
+
+.harness-btn:hover,
+.harness-run-btn:hover {
+  border-color: var(--accent);
+}
+
+.harness-task-row {
+  display: flex;
+  gap: 8px;
+}
+
+.harness-task-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius-xs);
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.harness-task-input:focus {
+  border-color: var(--accent);
+}
+
+.harness-metrics {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 10px 0;
+  font-size: 12px;
+}
+
+.harness-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+.harness-pill.running {
+  color: var(--success);
+  border-color: rgba(109, 184, 124, 0.35);
+}
+
+.harness-pill.stopped,
+.harness-pill.unknown {
+  color: var(--warning);
+}
+
+.harness-events {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.harness-event,
+.harness-empty {
+  display: flex;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.harness-event-type {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.harness-event-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-empty {
+  color: var(--text-tertiary);
+}
+
+.approval-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.approval-label {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.approval-reason {
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.approval-action {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 /* ═══════════════════════════════════════════════════════════ */
 /* Connection Dialog
 /* ═══════════════════════════════════════════════════════════ */
@@ -1731,4 +1913,3 @@ body {
 .katex .minner {
   color: var(--text-primary);
 }
-
