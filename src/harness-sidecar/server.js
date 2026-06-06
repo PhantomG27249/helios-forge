@@ -1,6 +1,7 @@
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { planSubgoals } from './bes/subgoalPlanner.js';
 import { BudgetManager } from './budget/budgetManager.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
@@ -108,6 +109,15 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       type: 'scope_contract.created',
       taskId,
       summary: 'MVP task will emit deterministic verifier, patch, and approval events.',
+    });
+    const subgoals = planSubgoals({
+      taskType: 'coding_bugfix',
+      task: task.task,
+    });
+    await emitEvent({
+      type: 'subgoals.planned',
+      taskId,
+      subgoals,
     });
     const workspaceIndex = await indexWorkspace({ workspaceRoot: resolvedWorkspaceRoot });
     const retrievedItems = retrieveWorkspaceContext({

@@ -85,6 +85,7 @@ test('task endpoint emits deterministic MVP events and writes a trace', async ()
     assert.equal(approvalEvent.risk, 'medium');
     assert.equal(approvalEvent.choices.includes('approve'), true);
     assert.equal(events.some((event) => event.type === 'context_pack.created'), true);
+    assert.equal(events.some((event) => event.type === 'subgoals.planned'), true);
     assert.equal(events.some((event) => event.type === 'budget.updated'), true);
     assert.equal(events.some((event) => event.type === 'verifier.output' && /MVP verifier passed/.test(event.stdout)), true);
     assert.equal(events.some((event) => event.type === 'patch.proposed'), true);
