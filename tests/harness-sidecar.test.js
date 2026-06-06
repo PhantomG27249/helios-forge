@@ -1,0 +1,138 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+
+import { createHarnessSidecar } from '../src/harness-sidecar/server.js';
+
+async function withSidecar(testFn) {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-harness-test-'));
+  const sidecar = createHarnessSidecar({ workspaceRoot, port: 0 });
+  await sidecar.start();
+
+  try {
+    await testFn({ sidecar, workspaceRoot });
+  } finally {
+    await sidecar.stop();
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+}
+
+function waitForEvent(events, predicate, timeoutMs = 1500) {
+  return new Promise((resolve, reject) => {
+    const existing = events.find(predicate);
+    if (existing) {
+      resolve(existing);
+      return;
+    }
+
+    const deadline = setTimeout(() => {
+      reject(new Error('Timed out waiting for sidecar event'));
+    }, timeoutMs);
+
+    events.push = new Proxy(events.push, {
+      apply(target, thisArg, args) {
+        const result = Reflect.apply(target, thisArg, args);
+        const event = args[0];
+        if (predicate(event)) {
+          clearTimeout(deadline);
+          resolve(event);
+        }
+        return result;
+      },
+    });
+  });
+}
+
+test('health endpoint reports status and workspace root', async () => {
+  await withSidecar(async ({ sidecar, workspaceRoot }) => {
+    const response = await fetch(`${sidecar.url}/v1/health`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.status, 'ok');
+    assert.equal(body.workspaceRoot, workspaceRoot);
+    assert.equal(body.version, '0.1.0');
+  });
+});
+
+test('task endpoint emits deterministic MVP events and writes a trace', async () => {
+  await withSidecar(async ({ sidecar, workspaceRoot }) => {
+    const events = [];
+    const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+    const response = await fetch(`${sidecar.url}/v1/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: 'local',
+        task: 'fix the failing test',
+        mode: 'mvp',
+        budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    assert.match(body.taskId, /^task_/);
+
+    const approvalEvent = await waitForEvent(
+      events,
+      (event) => event.taskId === body.taskId && event.type === 'approval.required',
+    );
+
+    assert.equal(approvalEvent.risk, 'medium');
+    assert.equal(approvalEvent.choices.includes('approve'), true);
+    assert.equal(events.some((event) => event.type === 'patch.proposed'), true);
+
+    const tracePath = path.join(workspaceRoot, '.harness', 'traces', body.taskId, 'events.jsonl');
+    const traceContent = await readFile(tracePath, 'utf8');
+    assert.match(traceContent, /task\.started/);
+    assert.match(traceContent, /approval\.required/);
+
+    unsubscribe();
+  });
+});
+
+test('approval endpoint resolves a pending approval and emits an event', async () => {
+  await withSidecar(async ({ sidecar }) => {
+    const events = [];
+    const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+    const taskResponse = await fetch(`${sidecar.url}/v1/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: 'local',
+        task: 'approve a toy patch',
+        mode: 'mvp',
+        budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+      }),
+    });
+    const taskBody = await taskResponse.json();
+    const approvalEvent = await waitForEvent(
+      events,
+      (event) => event.taskId === taskBody.taskId && event.type === 'approval.required',
+    );
+
+    const response = await fetch(`${sidecar.url}/v1/approvals/${approvalEvent.actionId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ choice: 'approve' }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.status, 'resolved');
+    assert.equal(body.choice, 'approve');
+
+    const resolvedEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'approval.resolved' && event.actionId === approvalEvent.actionId,
+    );
+    assert.equal(resolvedEvent.choice, 'approve');
+
+    unsubscribe();
+  });
+});
