@@ -1,0 +1,117 @@
+export class HarnessClient {
+  constructor({ baseUrl }) {
+    this.baseUrl = baseUrl.replace(/\/$/, '');
+    this.lastEvents = [];
+    this.eventHandlers = new Set();
+    this.eventStreamPromise = null;
+    this.eventStreamReady = null;
+    this.eventAbortController = null;
+  }
+
+  async getHealth() {
+    return this.getJson('/v1/health');
+  }
+
+  async startTask(taskRequest) {
+    await this.ensureEventStream();
+    return this.postJson('/v1/tasks', taskRequest);
+  }
+
+  async resolveApproval(actionId, choice) {
+    return this.postJson(`/v1/approvals/${encodeURIComponent(actionId)}`, { choice });
+  }
+
+  onEvent(handler) {
+    this.eventHandlers.add(handler);
+    return () => this.eventHandlers.delete(handler);
+  }
+
+  close() {
+    if (this.eventAbortController) {
+      this.eventAbortController.abort();
+      this.eventAbortController = null;
+    }
+    this.eventStreamPromise = null;
+    this.eventStreamReady = null;
+  }
+
+  async getJson(path) {
+    const response = await fetch(`${this.baseUrl}${path}`);
+    if (!response.ok) {
+      throw new Error(`Harness request failed: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async postJson(path, body) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    });
+    if (!response.ok) {
+      throw new Error(`Harness request failed: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async ensureEventStream() {
+    if (!this.eventStreamPromise) {
+      let markReady;
+      this.eventStreamReady = new Promise((resolve) => {
+        markReady = resolve;
+      });
+      this.eventAbortController = new AbortController();
+      this.eventStreamPromise = this.readEventStream(markReady).catch((error) => {
+        if (error.name !== 'AbortError') {
+          throw error;
+        }
+      });
+    }
+    await this.eventStreamReady;
+  }
+
+  async readEventStream(markReady) {
+    const response = await fetch(`${this.baseUrl}/v1/events`, {
+      signal: this.eventAbortController.signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`Harness event stream failed: ${response.status}`);
+    }
+    markReady();
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex = buffer.indexOf('\n\n');
+      while (separatorIndex !== -1) {
+        const rawEvent = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        this.handleRawServerSentEvent(rawEvent);
+        separatorIndex = buffer.indexOf('\n\n');
+      }
+    }
+  }
+
+  handleRawServerSentEvent(rawEvent) {
+    const dataLine = rawEvent
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('data: '));
+    if (!dataLine) return;
+
+    const event = JSON.parse(dataLine.slice('data: '.length));
+    this.lastEvents.push(event);
+    if (this.lastEvents.length > 100) {
+      this.lastEvents.shift();
+    }
+    for (const handler of this.eventHandlers) {
+      handler(event);
+    }
+  }
+}

@@ -8,6 +8,8 @@ import fs, { existsSync, createReadStream } from 'fs';
 import path, { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
+import { HarnessClient } from './harness/harnessClient.js';
+import { HarnessManager } from './harness/harnessManager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -144,7 +146,44 @@ function serveStatic(req, res, url) {
   }
 }
 
-async function handleCommand(ws, msg, pi) {
+function createHarnessRuntime(workspaceRoot) {
+  return {
+    manager: new HarnessManager({ workspaceRoot }),
+    client: null,
+    unsubscribeEvents: null,
+  };
+}
+
+function closeHarnessClient(harness) {
+  if (harness.unsubscribeEvents) {
+    harness.unsubscribeEvents();
+    harness.unsubscribeEvents = null;
+  }
+  if (harness.client) {
+    harness.client.close();
+    harness.client = null;
+  }
+}
+
+async function ensureHarnessRunning(harness, pi) {
+  const status = harness.manager.getStatus();
+  if (status.state === 'stopped' && harness.manager.workspaceRoot !== pi.cwd) {
+    closeHarnessClient(harness);
+    harness.manager = new HarnessManager({ workspaceRoot: pi.cwd });
+  }
+  if (status.state !== 'running') {
+    await harness.manager.start();
+  }
+  if (!harness.client) {
+    harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
+    harness.unsubscribeEvents = harness.client.onEvent((event) => {
+      pi.broadcast({ type: 'harness_task_event', event });
+    });
+  }
+  return harness.manager.getStatus();
+}
+
+async function handleCommand(ws, msg, pi, harness) {
   try {
     switch (msg.type) {
       case 'prompt': {
@@ -215,6 +254,58 @@ async function handleCommand(ws, msg, pi) {
         // Just update the cwd - pi will use it for file operations
         pi.cwd = newCwd;
         ws.send(JSON.stringify({ type: 'workspace_changed', success: true, path: newCwd }));
+        break;
+      }
+      case 'harness_status': {
+        ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
+        break;
+      }
+      case 'harness_start': {
+        if (msg.workspaceRoot || harness.manager.workspaceRoot !== pi.cwd) {
+          closeHarnessClient(harness);
+          if (harness.manager.getStatus().state !== 'stopped') {
+            await harness.manager.stop();
+          }
+          harness.manager = new HarnessManager({
+            workspaceRoot: msg.workspaceRoot || pi.cwd,
+            port: msg.port || 49321,
+          });
+        }
+        await ensureHarnessRunning(harness, pi);
+        ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
+        break;
+      }
+      case 'harness_stop': {
+        closeHarnessClient(harness);
+        await harness.manager.stop();
+        ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
+        break;
+      }
+      case 'harness_restart': {
+        closeHarnessClient(harness);
+        await harness.manager.restart();
+        harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
+        harness.unsubscribeEvents = harness.client.onEvent((event) => {
+          pi.broadcast({ type: 'harness_task_event', event });
+        });
+        ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
+        break;
+      }
+      case 'harness_task_start': {
+        await ensureHarnessRunning(harness, pi);
+        const task = await harness.client.startTask({
+          workspaceId: msg.workspaceId || 'local',
+          task: msg.task || msg.message || '',
+          mode: msg.mode || 'mvp',
+          budget: msg.budget || { maxToolCalls: 20, maxWallMinutes: 15 },
+        });
+        ws.send(JSON.stringify({ type: 'harness_task_started', data: task }));
+        break;
+      }
+      case 'harness_approval_response': {
+        await ensureHarnessRunning(harness, pi);
+        const approval = await harness.client.resolveApproval(msg.actionId, msg.choice);
+        ws.send(JSON.stringify({ type: 'harness_approval_resolved', data: approval }));
         break;
       }
       case 'delete_session': {
@@ -383,6 +474,7 @@ async function handleCommand(ws, msg, pi) {
 async function main() {
   const port = parseInt(process.env.PORT || '3777', 10);
   const pi = new PiRpcManager();
+  const harness = createHarnessRuntime(pi.cwd);
 
   const server = createServer((req, res) => serveStatic(req, res, req.url));
   const wss = new WebSocketServer({ server });
@@ -395,10 +487,11 @@ async function main() {
     pi.sendReadyToClient(ws);
 
     ws.on('message', async (data) => {
+      let msg = null;
       try {
-        const msg = JSON.parse(data.toString());
+        msg = JSON.parse(data.toString());
         console.log('[Server] Received command:', msg.type);
-        await handleCommand(ws, msg, pi);
+        await handleCommand(ws, msg, pi, harness);
         console.log('[Server] Command completed:', msg.type);
       }
       catch (e) {

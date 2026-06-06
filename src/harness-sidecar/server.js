@@ -182,6 +182,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
           res.write(`data: ${JSON.stringify(event)}\n\n`);
         };
         subscribers.add(subscriber);
+        res.write(': connected\n\n');
         req.on('close', () => subscribers.delete(subscriber));
         return;
       }
