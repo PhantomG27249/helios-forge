@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pi Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/app.css?v=20250610">
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/css.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/xml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/rust.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/languages/java.min.js"></script>
+</head>
+<body>
+  <div class="grain-overlay"></div>
+  
+  <!-- Connection Dialog -->
+  <div id="connection-dialog" class="connection-dialog">
+    <div class="connection-dialog-content">
+      <div class="connection-dialog-header">
+        <svg class="logo-icon" width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor" opacity="0.9"/>
+          <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h2>Connect to Pi</h2>
+      </div>
+      <div class="connection-dialog-body">
+        <label for="server-url">Server URL</label>
+        <div class="url-input-row">
+          <input type="text" id="server-url" placeholder="ws://localhost:3777" value="" />
+          <button id="btn-connect" class="connect-btn">Connect</button>
+        </div>
+        <label for="workspace-path" style="margin-top: 16px;">Workspace</label>
+        <div class="url-input-row">
+          <input type="text" id="workspace-path" placeholder="/home/user/project" value="" />
+        </div>
+        <p class="connection-hint">Choose the folder where Pi will work</p>
+        <div class="preset-urls">
+          <button class="preset-btn" onclick="setServerUrl('localhost')">localhost:3777</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App (hidden until connected) -->
+  <div id="app" style="display:none;">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo">
+          <svg class="logo-icon" width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="currentColor" opacity="0.9"/>
+            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="logo-text">Pi</span>
+        </div>
+      </div>
+
+      <div class="sidebar-nav">
+        <button id="btn-new-chat" class="new-chat-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>New chat</span>
+        </button>
+
+        <div class="sidebar-section">
+          <button class="section-header" onclick="toggleSection(this)">
+            <svg class="section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <span>Pinned</span>
+          </button>
+          <div id="pinned-list" class="session-list"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <button class="section-header" onclick="toggleSection(this)">
+            <svg class="section-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            <span>Recents</span>
+          </button>
+          <div id="recents-list" class="session-list"></div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-7 8-7s8 3 8 7"/></svg>
+          </div>
+          <div class="user-meta">
+            <span class="user-name">Pi Chat</span>
+            <span id="user-status" class="user-status">Connecting...</span>
+          </div>
+        </div>
+        <button id="btn-debug" class="debug-toggle" title="Debug console">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="main">
+      <header id="topbar">
+        <div class="topbar-left">
+          <div id="session-title-bar" class="session-title-bar" onclick="renameSession()">
+            <span id="session-title">New Chat</span>
+            <svg class="title-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button id="btn-export" class="topbar-icon-btn" title="Export">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </button>
+          <button id="btn-stats" class="topbar-icon-btn" title="Stats">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="chat-container">
+        <div id="connection-banner" class="connection-banner hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="12" y1="8" x2="12" y2="12"/>
+            <line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span id="connection-text">Connecting to Pi...</span>
+        </div>
+        <div id="messages" class="messages"></div>
+        <div id="scroll-sentinel"></div>
+      </div>
+
+      <div id="input-area">
+        <div class="input-box">
+          <div id="image-preview" class="image-preview"></div>
+          <textarea id="message-input" placeholder="Write a message..." rows="1"></textarea>
+          <div class="input-bottom">
+            <button id="btn-attach" class="input-icon-btn" title="Attach image">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <div class="input-meta">
+              <div class="meta-select workspace-wrapper" onclick="document.getElementById('workspace-input').focus()">
+                <svg class="meta-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                <input type="text" id="workspace-input" class="workspace-input" placeholder="workspace" />
+              </div>
+              <div id="model-select-wrapper" class="meta-select" onclick="openDropdown('model')">
+                <span id="model-display" class="meta-text">—</span>
+                <svg class="meta-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+              <div id="thinking-select-wrapper" class="meta-select" onclick="openDropdown('thinking')">
+                <span id="thinking-display" class="meta-text">—</span>
+                <svg class="meta-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </div>
+            </div>
+            <div class="input-actions">
+              <button id="btn-steer" class="action-btn hidden" title="Steer">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              </button>
+              <button id="btn-send" class="action-btn send-btn" title="Send">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+              <button id="btn-abort" class="action-btn abort-btn hidden" title="Stop">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="white" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Model Dropdown -->
+    <div id="dropdown-model" class="dropdown hidden">
+      <div class="dropdown-search-bar">
+        <svg class="search-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="model-search" placeholder="Search models..." />
+      </div>
+      <div id="model-list" class="dropdown-list"></div>
+    </div>
+
+    <!-- Thinking Dropdown -->
+    <div id="dropdown-thinking" class="dropdown hidden">
+      <div id="thinking-list" class="dropdown-list"></div>
+    </div>
+
+    <!-- Stats Modal -->
+    <div id="modal-stats" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header"><h2>Session Stats</h2><button class="modal-close" onclick="closeModal('stats')">&times;</button></div>
+        <div class="modal-body"><div id="stats-content">Loading...</div></div>
+      </div>
+    </div>
+
+    <!-- Extension UI -->
+    <div id="modal-extension" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header"><h2 id="ext-title"></h2><button class="modal-close" id="ext-cancel">&times;</button></div>
+        <div class="modal-body" id="ext-body"></div>
+      </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <!-- Debug Panel -->
+    <div id="debug-panel" class="debug-panel hidden">
+      <div class="debug-panel-header">
+        <span>Debug Pipeline</span>
+        <button id="btn-debug-close" class="debug-close">&times;</button>
+      </div>
+      <textarea id="debug-log" readonly class="debug-log"></textarea>
+    </div>
+  </div>
+  <script src="/app.js?v=20250610"></script>
+</body>
+</html>
