@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TraceWriter } from './core/traceWriter.js';
+import { runVerifiers } from './tools/verifierRunner.js';
 
 const VERSION = '0.1.0';
 
@@ -96,17 +97,17 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId,
       summary: 'MVP task will emit deterministic verifier, patch, and approval events.',
     });
-    await emitEvent({
-      type: 'verifier.started',
+    await runVerifiers({
+      workspaceRoot: resolvedWorkspaceRoot,
       taskId,
-      verifier: 'mvp-scripted-verifier',
-    });
-    await emitEvent({
-      type: 'verifier.finished',
-      taskId,
-      verifier: 'mvp-scripted-verifier',
-      result: 'passed',
-      exitCode: 0,
+      verifiers: [
+        {
+          name: 'mvp-scripted-verifier',
+          command: `"${process.execPath}" -e "console.log('MVP verifier passed')"`,
+          timeoutMs: 5000,
+        },
+      ],
+      emitEvent,
     });
     await emitEvent({
       type: 'patch.proposed',
