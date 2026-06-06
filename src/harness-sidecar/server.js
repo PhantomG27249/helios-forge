@@ -3,6 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { BudgetManager } from './budget/budgetManager.js';
 import { TraceWriter } from './core/traceWriter.js';
+import { buildContextPack } from './rag/contextPackBuilder.js';
+import { retrieveWorkspaceContext } from './rag/retriever.js';
+import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { runVerifiers } from './tools/verifierRunner.js';
 
 const VERSION = '0.1.0';
@@ -105,6 +108,27 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       type: 'scope_contract.created',
       taskId,
       summary: 'MVP task will emit deterministic verifier, patch, and approval events.',
+    });
+    const workspaceIndex = await indexWorkspace({ workspaceRoot: resolvedWorkspaceRoot });
+    const retrievedItems = retrieveWorkspaceContext({
+      index: workspaceIndex,
+      query: task.task,
+      maxItems: 8,
+    });
+    const contextPack = buildContextPack({
+      taskId,
+      profile: 'coding_small',
+      items: retrievedItems,
+      maxTokens: 6000,
+    });
+    await emitEvent({
+      type: 'context_pack.created',
+      taskId,
+      contextPackId: contextPack.contextPackId,
+      profile: contextPack.profile,
+      itemCount: contextPack.items.length,
+      tokensEstimated: contextPack.tokensEstimated,
+      excludedDueToBudget: contextPack.excludedDueToBudget,
     });
     budgetManager.recordUsage({ toolCalls: 1 });
     await runVerifiers({
