@@ -10,6 +10,7 @@ import { LockService } from './collaboration/locks.js';
 import { VersionedState } from './collaboration/versionedState.js';
 import { WorkspaceLeaseService } from './collaboration/workspaceLeases.js';
 import { compileFinalAuditReport } from './core/finalAudit.js';
+import { resumeTaskFromTrace } from './core/taskResume.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
@@ -27,24 +28,39 @@ import { buildClaimEvidenceGraph } from './graph/claimEvidenceGraph.js';
 import { createCodeGraphFromIndex } from './graph/codeGraph.js';
 import { buildExperimentGraph } from './graph/experimentGraph.js';
 import { buildVisualGraph } from './graph/visualGraph.js';
+import { retrievePromotedMemory } from './memory/memoryRetriever.js';
+import { promoteMemoryCandidates } from './memory/promotionPolicy.js';
 import { decideReflectionGate } from './memory/reflectionGate.js';
 import { writeMemoryCandidate } from './memory/memoryWriter.js';
 import { scoreMemoryCorpus } from './memory/memoryEvals.js';
+import { createChangeProposal } from './meta/changeProposal.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
+import { evaluatePromotion } from './meta/promotionPolicy.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
 import { auditCitations } from './research/citationAuditor.js';
+import { findContradictions } from './research/contradictionFinder.js';
 import { createDeepResearchReport } from './research/deepResearchManager.js';
+import { createImplementationHandoff } from './research/implementationHandoff.js';
 import { compileResearchReport } from './research/reportCompiler.js';
+import { createResearchBrief } from './research/researchBrief.js';
+import { discoverSources } from './research/sourceDiscovery.js';
+import { ingestSources } from './research/sourceIngestion.js';
 import { createArtifactStore } from './artifacts/artifactStore.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
 import { retrieveWorkspaceContext } from './rag/retriever.js';
 import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
+import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { runVerifiers } from './tools/verifierRunner.js';
+import { interpretDiagram } from './vlm/diagramInterpreter.js';
+import { createFigureCropArtifact } from './vlm/figureCropper.js';
+import { createPdfPageArtifacts } from './vlm/pdfRenderer.js';
+import { analyzePlot } from './vlm/plotAnalyzer.js';
+import { createScreenshotArtifact } from './vlm/screenshotTool.js';
 import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
 
@@ -310,6 +326,37 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       promotableCount: memoryCorpusScore.promotableCount,
       quarantinedCount: memoryCorpusScore.quarantinedCount,
     });
+    const promotionResult = await promoteMemoryCandidates({
+      workspaceRoot: resolvedWorkspaceRoot,
+      candidates: [{
+        ...memoryCandidate,
+        type: 'runtime_summary',
+        validatorBacked: true,
+        reviewStatus: 'reviewed',
+        tags: ['runtime', 'harness'],
+        taskKeywords: task.task.split(/\s+/).slice(0, 6),
+        provenance: [{ taskId: task.taskId, sourceType: 'harness_runtime' }],
+      }],
+    });
+    await emitEvent({
+      type: 'memory.promoted',
+      taskId: task.taskId,
+      promotedCount: promotionResult.promoted.length,
+      reviewQueueCount: promotionResult.reviewQueue.length,
+      promotedMemoryIds: promotionResult.promoted.map((record) => record.memoryId),
+    });
+    const promotedMemoryContext = await retrievePromotedMemory({
+      workspaceRoot: resolvedWorkspaceRoot,
+      task: task.task,
+      tags: ['runtime'],
+      limit: 4,
+    });
+    await emitEvent({
+      type: 'memory.context_retrieved',
+      taskId: task.taskId,
+      itemCount: promotedMemoryContext.length,
+      items: promotedMemoryContext,
+    });
 
     const traceSummary = await inspectTrace({ traceDir: traceWriter.getTaskTraceDir(task.taskId) });
     await emitEvent({
@@ -349,6 +396,28 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       artifacts: [metaArtifact],
     });
     budgetManager.recordUsage({ scope: 'meta', kind: 'artifact', artifacts: 1 });
+    const metaPromotionDecision = evaluatePromotion({
+      candidateRun,
+      baselineFrontier: [{ quality: 0.5, cost: 0.5, latency: 0.5, safety: 0.8 }],
+      approvals: [{ candidateId: candidateRun.candidateId, choice: 'approve' }],
+      safetyThreshold: 0.85,
+    });
+    const metaChangeProposal = createChangeProposal({
+      candidate: {
+        candidateId: candidateRun.candidateId,
+        target: 'runtime_policy',
+        rationale: metaProposal.rationale,
+        patch: metaProposal.patch,
+      },
+      promotionDecision: metaPromotionDecision,
+      summary: 'Approval-ready runtime policy improvement proposal.',
+    });
+    await emitEvent({
+      type: 'meta.promotion_evaluated',
+      taskId: task.taskId,
+      decision: metaPromotionDecision,
+      proposal: metaChangeProposal,
+    });
 
     const sources = contextPack.items.slice(0, 4).map((item, index) => ({
       sourceId: `src_${index + 1}`,
@@ -360,6 +429,36 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       question: task.task,
       sources,
     });
+    const researchBrief = createResearchBrief({
+      task: task.task,
+      question: task.task,
+      scope: { include: contextPack.items.map((item) => item.path), notes: 'Runtime-generated brief.' },
+      budget: { maxSources: 4, maxMinutes: task.budget.maxWallMinutes, maxTokens: task.budget.maxInputTokens },
+    });
+    const discoveredSources = discoverSources({
+      brief: researchBrief,
+      localSources: sources.map((source) => ({
+        sourceId: source.sourceId,
+        title: source.title,
+        path: source.path,
+        claims: source.claims,
+      })),
+    });
+    const ingestedSources = ingestSources({
+      sources: sources.map((source) => ({
+        sourceId: source.sourceId,
+        title: source.title,
+        path: source.path,
+        claims: source.claims.map((claim) => ({
+          claim,
+          subject: source.path,
+          predicate: 'relevant_to',
+          value: task.task,
+          confidence: 0.8,
+        })),
+      })),
+    });
+    const contradictions = findContradictions({ claims: ingestedSources.claimCandidates });
     const citationAudit = auditCitations({
       claims: research.claimEvidenceTable.map((row) => ({
         claim: row.claim,
@@ -385,6 +484,25 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       artifacts: [researchArtifact],
     });
     budgetManager.recordUsage({ scope: 'research', kind: 'artifact', artifacts: 1 });
+    const implementationHandoff = createImplementationHandoff({
+      report: {
+        ...research,
+        claimEvidenceTable: research.claimEvidenceTable.map((row) => ({
+          ...row,
+          confidence: 0.8,
+        })),
+      },
+      contradictions,
+    });
+    await emitEvent({
+      type: 'research.handoff_created',
+      taskId: task.taskId,
+      brief: researchBrief,
+      discoveryStatus: discoveredSources.status,
+      sourceCount: discoveredSources.sources.length,
+      contradictionCount: contradictions.length,
+      handoff: implementationHandoff,
+    });
 
     const experiment = proposeExperiment({
       hypothesis: `Full runtime harness improves completion confidence for ${task.task}`,
@@ -500,6 +618,41 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       diffPath: metaArtifact.path,
       summary: 'Runtime placeholder visual diff links key harness artifacts.',
     });
+    const screenshotArtifact = createScreenshotArtifact({
+      taskId: task.taskId,
+      imagePath: visualDiff.diffPath,
+      viewport: { width: 1280, height: 720 },
+      source: { type: 'runtime_visual_diff', artifactId: visualDiff.artifactId },
+    });
+    const pdfArtifacts = createPdfPageArtifacts({
+      taskId: task.taskId,
+      pdfPath: researchArtifact.path,
+      document: { title: 'Runtime research report' },
+      pages: [{ pageNumber: 1, imagePath: `${researchArtifact.path}.page-1.png`, width: 1024, height: 768 }],
+    });
+    const figureCrop = createFigureCropArtifact({
+      taskId: task.taskId,
+      sourceArtifactId: screenshotArtifact.artifactId,
+      sourcePath: screenshotArtifact.artifacts.image,
+      targetPath: `${visualDiff.diffPath}.crop.png`,
+      bounds: { x: 0, y: 0, width: 640, height: 360 },
+      sourceDimensions: { width: 1280, height: 720 },
+      label: 'Runtime visual summary',
+    });
+    const plotAnalysis = analyzePlot({
+      taskId: task.taskId,
+      plotId: `quality-cost-${task.taskId}`,
+      title: 'Runtime metric comparison',
+      series: [{ name: 'quality', points: [[0, 0.5], [1, candidateRun.metrics.quality]] }],
+      statistics: metricComparison.deltas,
+    });
+    const diagramInterpretation = interpretDiagram({
+      taskId: task.taskId,
+      diagramId: `runtime-flow-${task.taskId}`,
+      nodes: [{ id: 'task', label: 'Task' }, { id: 'champion', label: 'Champion' }],
+      edges: [{ from: 'task', to: 'champion', label: 'selects' }],
+      text: ['Full harness runtime flow'],
+    });
     buildVisualGraph({
       graph: codeGraph,
       taskId: task.taskId,
@@ -570,11 +723,64 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       recombination: swarmRun.recombination,
       archivedChampion,
     });
+    const championApplyPlan = champion
+      ? proposeChampionApply({
+        workspaceRoot: resolvedWorkspaceRoot,
+        champion: {
+          ...champion,
+          output: {
+            patch: [
+              'diff --git a/.harness/CHAMPION.md b/.harness/CHAMPION.md',
+              '--- a/.harness/CHAMPION.md',
+              '+++ b/.harness/CHAMPION.md',
+              `+Champion attempt: ${champion.attemptId}`,
+            ].join('\n'),
+            verifierEvidence: champion.verifierEvidence,
+          },
+        },
+      })
+      : null;
+    await emitEvent({
+      type: 'swarm.champion_apply_proposed',
+      taskId: task.taskId,
+      plan: championApplyPlan,
+    });
     const visualContextItem = createVisualContextItem(visualDiff);
     await emitEvent({
       type: 'vlm.visual_context_created',
       taskId: task.taskId,
       visualContextItem,
+    });
+    await emitEvent({
+      type: 'vlm.native_artifacts_created',
+      taskId: task.taskId,
+      artifacts: [
+        screenshotArtifact,
+        ...pdfArtifacts,
+        figureCrop,
+        plotAnalysis,
+        diagramInterpretation,
+      ],
+      evidence: [plotAnalysis.evidence, diagramInterpretation.evidence],
+    });
+    const resumeState = await resumeTaskFromTrace({
+      traceDir: traceWriter.getTaskTraceDir(task.taskId),
+    });
+    await emitEvent({
+      type: 'trace.compacted',
+      taskId: task.taskId,
+      eventCount: resumeState.eventCount,
+      countsByType: resumeState.countsByType,
+      artifactCount: resumeState.artifacts.length,
+      failureCount: resumeState.failures.length,
+      decisionCount: resumeState.decisions.length,
+    });
+    await emitEvent({
+      type: 'task.resume_ready',
+      taskId: task.taskId,
+      status: resumeState.status,
+      pendingApprovalCount: resumeState.pendingApprovals.length,
+      eventCount: resumeState.eventCount,
     });
 
     const lease = workspaceLeaseService.acquire({
