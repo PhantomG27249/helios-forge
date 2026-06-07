@@ -6,6 +6,7 @@ import { DecisionLedger } from '../src/harness-sidecar/context/decisionLedger.js
 import { getContextProfile } from '../src/harness-sidecar/context/contextProfiles.js';
 import { ModelGateway } from '../src/harness-sidecar/model/modelGateway.js';
 import { getModelProfile } from '../src/harness-sidecar/model/modelProfiles.js';
+import { buildMultimodalRequest } from '../src/harness-sidecar/model/multimodalRequestBuilder.js';
 import { repairJsonObject } from '../src/harness-sidecar/model/structuredOutputRepair.js';
 import { parseToolCall } from '../src/harness-sidecar/model/toolCallParser.js';
 import { createApprovalRequest } from '../src/harness-sidecar/security/approvalGates.js';
@@ -52,6 +53,33 @@ test('model gateway records profile, token accounting, and structured repair eve
   assert.equal(result.structured.decision, 'approve');
   assert.equal(events.some((event) => event.type === 'model_call.started'), true);
   assert.equal(events.some((event) => event.type === 'model_call.completed' && event.totalTokens === 20), true);
+});
+
+test('multimodal request builder packages text and visual artifacts with budget estimates', () => {
+  const request = buildMultimodalRequest({
+    profileName: 'qwen36_vlm_deep',
+    prompt: 'Compare these screenshots.',
+    visualItems: [
+      {
+        artifactId: 'vis_1',
+        type: 'visual_artifact',
+        artifact: {
+          type: 'visual_diff',
+          artifacts: {
+            before: 'before.png',
+            after: 'after.png',
+            diff: 'diff.png',
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(request.profile.name, 'qwen36_vlm_deep');
+  assert.equal(request.messages[0].content[0].type, 'text');
+  assert.equal(request.messages[0].content[1].type, 'image_reference');
+  assert.equal(request.visionInputs.length, 3);
+  assert.equal(request.tokensEstimated > 0, true);
 });
 
 test('tool call parser validates required fields', () => {
