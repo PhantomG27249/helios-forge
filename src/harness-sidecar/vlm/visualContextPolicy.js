@@ -3,7 +3,7 @@ export function createVisualContextItem(artifact) {
     type: 'visual_artifact',
     artifactId: artifact.artifactId,
     reason: artifact.summary || 'Visual artifact relevant to task',
-    tokensEstimated: 1200,
+    tokensEstimated: artifact.visualContext?.tokensEstimated || 1200,
     artifact,
   };
 }
