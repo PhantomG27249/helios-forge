@@ -13,6 +13,11 @@ import { compileFinalAuditReport } from './core/finalAudit.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
+import { writeExperimentDecision } from './experiments/decisionWriter.js';
+import { ExperimentQueue } from './experiments/experimentQueue.js';
+import { compileExperimentReport } from './experiments/experimentReports.js';
+import { classifyNoise } from './experiments/noiseGate.js';
+import { RunTracker } from './experiments/runTracker.js';
 import { createCodeGraphFromIndex } from './graph/codeGraph.js';
 import { writeMemoryCandidate } from './memory/memoryWriter.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
@@ -307,16 +312,77 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       commands: ['npm test'],
       budget: task.budget,
     });
+    const experimentQueue = new ExperimentQueue();
+    const queuedExperiment = experimentQueue.enqueue(experiment);
+    await emitEvent({
+      type: 'experiment.queued',
+      taskId: task.taskId,
+      experiment: queuedExperiment,
+    });
+    const claimedExperiment = experimentQueue.claimNext({
+      approvals: [{ experimentId: experiment.experimentId, choice: 'approve' }],
+      budget: { remainingWallMinutes: task.budget.maxWallMinutes ?? Number.POSITIVE_INFINITY },
+    });
+    const runTracker = new RunTracker();
+    const experimentRun = runTracker.startRun({
+      experimentId: experiment.experimentId,
+      command: experiment.commands[0],
+      artifacts: [patchArtifact],
+    });
+    const finishedRun = runTracker.finishRun({
+      runId: experimentRun.runId,
+      exitCode: 0,
+      metrics: candidateRun.metrics,
+      artifacts: [metaArtifact],
+    });
     const metricComparison = compareMetrics({
       baseline: { quality: 0.5, cost: 0.5, latency: 0.5, safety: 0.8 },
       candidate: candidateRun.metrics,
       noiseThreshold: 0.05,
     });
+    const noiseDecision = classifyNoise({
+      deltas: metricComparison.deltas,
+      defaultThreshold: 0.05,
+    });
+    const experimentDecision = writeExperimentDecision({
+      experiment,
+      runs: [finishedRun],
+      metricComparison,
+      noiseDecision,
+      artifacts: [patchArtifact, metaArtifact],
+    });
+    const experimentReport = compileExperimentReport({
+      experiment,
+      runs: [finishedRun],
+      metricComparison,
+      decision: experimentDecision,
+    });
+    const experimentArtifact = await artifactStore.writeTextArtifact({
+      taskId: task.taskId,
+      type: 'experiment_report',
+      title: 'Experiment report',
+      filename: 'experiment-report.md',
+      content: experimentReport,
+    });
+    artifacts.set(experimentArtifact.artifactId, experimentArtifact);
     await emitEvent({
       type: 'experiment.proposed',
       taskId: task.taskId,
       experiment,
       metricComparison,
+    });
+    await emitEvent({
+      type: 'experiment.run_recorded',
+      taskId: task.taskId,
+      experimentId: claimedExperiment?.experimentId || experiment.experimentId,
+      run: finishedRun,
+    });
+    await emitEvent({
+      type: 'experiment.decision_written',
+      taskId: task.taskId,
+      experimentId: experiment.experimentId,
+      decision: experimentDecision,
+      artifacts: [experimentArtifact],
     });
 
     const attempts = scheduleAttempts({

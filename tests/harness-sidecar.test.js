@@ -154,6 +154,9 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'meta.optimizer_proposed',
       'research.report_created',
       'experiment.proposed',
+      'experiment.queued',
+      'experiment.run_recorded',
+      'experiment.decision_written',
       'swarm.attempts_scheduled',
       'swarm.champion_selected',
       'vlm.visual_context_created',
@@ -181,6 +184,7 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     const traceContent = await readFile(tracePath, 'utf8');
     assert.match(traceContent, /meta\.optimizer_proposed/);
     assert.match(traceContent, /research\.report_created/);
+    assert.match(traceContent, /experiment\.decision_written/);
 
     unsubscribe();
   });
