@@ -1673,12 +1673,19 @@ body {
 .harness-event,
 .harness-empty {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 6px 8px;
   background: var(--tool-bg);
   border: 1px solid var(--tool-border);
   border-radius: var(--radius-xs);
   font-size: 12px;
+  min-width: 0;
+}
+
+.harness-event-main {
+  display: flex;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -1691,6 +1698,41 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.harness-artifact-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.harness-artifact-link {
+  border: 1px solid var(--tool-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.harness-artifact-link:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.harness-artifact-content {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .harness-empty {

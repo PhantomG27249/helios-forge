@@ -308,6 +308,12 @@ async function handleCommand(ws, msg, pi, harness) {
         ws.send(JSON.stringify({ type: 'harness_approval_resolved', data: approval }));
         break;
       }
+      case 'harness_artifact_get': {
+        await ensureHarnessRunning(harness, pi);
+        const artifact = await harness.client.getArtifact(msg.artifactId);
+        ws.send(JSON.stringify({ type: 'harness_artifact', data: artifact }));
+        break;
+      }
       case 'delete_session': {
         const sessionPath = msg.path;
         try {

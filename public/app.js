@@ -26,6 +26,7 @@ let harnessState = {
   status: 'unknown',
   activeTasks: new Map(),
   pendingApprovals: new Map(),
+  artifacts: new Map(),
   latestEvents: [],
   currentApproval: null,
 };
@@ -312,6 +313,10 @@ function handleMessage(msg) {
     toast(`Approval ${msg.data.choice}`, 'success');
     return;
   }
+  if (msg.type === 'harness_artifact' && msg.data) {
+    renderHarnessArtifact(msg.data);
+    return;
+  }
 
   // Agent events
   switch (msg.type) {
@@ -361,6 +366,10 @@ function handleHarnessEvent(event) {
     harnessState.activeTasks.set(event.taskId, { ...existing, lastEvent: event.type, summary: event.summary || existing.summary });
   }
 
+  for (const artifact of event.artifacts || []) {
+    harnessState.artifacts.set(artifact.artifactId, artifact);
+  }
+
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
     harnessState.currentApproval = event;
@@ -384,8 +393,17 @@ function renderHarnessPanel() {
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
-      <span class="harness-event-type">${esc(event.type)}</span>
-      <span class="harness-event-summary">${esc(event.summary || event.reason || event.intent || event.result || '')}</span>
+      <div class="harness-event-main">
+        <span class="harness-event-type">${esc(event.type)}</span>
+        <span class="harness-event-summary">${esc(event.summary || event.reason || event.intent || event.result || '')}</span>
+      </div>
+      ${(event.artifacts || []).length ? `
+        <div class="harness-artifact-links">
+          ${event.artifacts.map(artifact => `
+            <button class="harness-artifact-link" onclick="openHarnessArtifact('${esc(artifact.artifactId)}')">${esc(artifact.title || artifact.type || 'artifact')}</button>
+          `).join('')}
+        </div>
+      ` : ''}
     </div>
   `).join('') || '<div class="harness-empty">No harness events yet</div>';
 }
@@ -436,6 +454,21 @@ function renderHarnessApproval(event) {
 
 function respondHarnessApproval(actionId, choice) {
   send({ type: 'harness_approval_response', actionId, choice });
+}
+
+function openHarnessArtifact(artifactId) {
+  const artifact = harnessState.artifacts.get(artifactId);
+  $('#harness-artifact-title').textContent = artifact?.title || 'Harness Artifact';
+  $('#harness-artifact-content').textContent = 'Loading...';
+  openModal('harness-artifact');
+  send({ type: 'harness_artifact_get', artifactId });
+}
+
+function renderHarnessArtifact(payload) {
+  const artifact = payload.artifact || {};
+  $('#harness-artifact-title').textContent = artifact.title || artifact.type || 'Harness Artifact';
+  $('#harness-artifact-content').textContent = payload.content || '';
+  openModal('harness-artifact');
 }
 
 function handleMessageUpdate(msg) {
