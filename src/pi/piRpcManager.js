@@ -21,6 +21,7 @@ export class PiRpcManager {
     this.spawnImpl = spawnImpl;
     this.resolvePiCommandImpl = resolvePiCommandImpl;
     this.readyDelayMs = readyDelayMs;
+    this.scopedEnv = {};
   }
 
   async start() {
@@ -30,7 +31,7 @@ export class PiRpcManager {
       const piCommand = this.resolvePiCommandImpl();
       const child = this.spawnImpl(piCommand.command, [...piCommand.args, '--mode', 'rpc'], {
         cwd: this.cwd,
-        env: { ...process.env, FORCE_COLOR: '1' },
+        env: { ...process.env, ...this.scopedEnv, FORCE_COLOR: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.process = child;
@@ -77,6 +78,14 @@ export class PiRpcManager {
     }
     await this.start();
     return true;
+  }
+
+  setCapabilitiesManifest(manifestPath) {
+    if (manifestPath) {
+      this.scopedEnv.HELIOS_CAPABILITIES_MANIFEST = manifestPath;
+    } else {
+      delete this.scopedEnv.HELIOS_CAPABILITIES_MANIFEST;
+    }
   }
 
   async stopForRestart() {
@@ -169,4 +178,3 @@ export class PiRpcManager {
     }
   }
 }
-

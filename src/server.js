@@ -229,6 +229,12 @@ function closeHarnessClient(harness) {
   }
 }
 
+function syncPiCapabilitiesManifest(pi, manifestPath) {
+  if (typeof pi.setCapabilitiesManifest === 'function') {
+    pi.setCapabilitiesManifest(manifestPath || null);
+  }
+}
+
 async function ensureHarnessRunning(harness, pi, feedback) {
   const status = harness.manager.getStatus();
   if (status.state === 'stopped' && harness.manager.workspaceRoot !== pi.cwd) {
@@ -241,6 +247,9 @@ async function ensureHarnessRunning(harness, pi, feedback) {
   if (!harness.client) {
     harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
     harness.unsubscribeEvents = harness.client.onEvent((event) => {
+      if (event?.type === 'capabilities.runtime_mounted') {
+        syncPiCapabilitiesManifest(pi, event.manifestPath);
+      }
       feedback?.record(event);
       pi.broadcast({ type: 'harness_task_event', event });
     });
@@ -398,6 +407,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
           profileId: msg.profileId || msg.capabilityProfileId || 'default',
         });
+        syncPiCapabilitiesManifest(pi, result.manifestPath);
         ws.send(JSON.stringify({ type: 'harness_capabilities_mounted', data: result }));
         break;
       }

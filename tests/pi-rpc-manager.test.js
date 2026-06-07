@@ -56,3 +56,31 @@ test('pi rpc manager restarts the pi process in the selected workspace', async (
   assert.equal(spawns[0].child.exitCode, 0);
 });
 
+test('pi rpc manager scopes capability manifest env to spawned pi process', async () => {
+  const spawns = [];
+  const manager = new PiRpcManager({
+    initialCwd: 'C:\\Users\\jackj\\Github\\chat-app',
+    readyDelayMs: 0,
+    resolvePiCommandImpl: () => ({ command: 'pi', args: [] }),
+    spawnImpl: (command, args, options) => {
+      const child = createFakePiProcess();
+      spawns.push({ command, args, options, child });
+      return child;
+    },
+  });
+
+  manager.setCapabilitiesManifest('C:\\Users\\jackj\\Github\\chat-app\\.harness\\runtime\\capabilities.mount.json');
+  await manager.start();
+
+  assert.equal(
+    spawns[0].options.env.HELIOS_CAPABILITIES_MANIFEST,
+    'C:\\Users\\jackj\\Github\\chat-app\\.harness\\runtime\\capabilities.mount.json',
+  );
+  assert.equal(spawns[0].options.env.FORCE_COLOR, '1');
+
+  manager.setCapabilitiesManifest(null);
+  await manager.changeWorkspace('C:\\Users\\jackj\\Github\\Another Project');
+
+  assert.equal(spawns.length, 2);
+  assert.equal('HELIOS_CAPABILITIES_MANIFEST' in spawns[1].options.env, false);
+});

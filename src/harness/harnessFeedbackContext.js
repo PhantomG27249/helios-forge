@@ -1,5 +1,6 @@
 const HIGH_SIGNAL_EVENT_TYPES = new Set([
   'bes.recombination_proposed',
+  'capabilities.runtime_mounted',
   'graph.context_composed',
   'memory.reflection_evaluated',
   'memory.corpus_scored',
@@ -16,6 +17,13 @@ export function summarizeHarnessEvent(event = {}) {
   switch (event.type) {
     case 'bes.recombination_proposed':
       return `${taskPrefix(event)}recombined BES genome ${event.genome?.id || 'unknown'} is available`;
+    case 'capabilities.runtime_mounted': {
+      const counts = event.enabledCounts || {};
+      const countText = ['skill', 'mcp', 'pi_extension', 'profile']
+        .map((type) => `${counts[type] || 0} ${type}`)
+        .join(', ');
+      return `${taskPrefix(event)}scoped capabilities mounted from ${event.manifestPath || 'unknown manifest'} (${countText})`;
+    }
     case 'graph.context_composed':
       return `${taskPrefix(event)}GraphRAG composed ${event.itemCount || 0} provenance-backed context item(s)`;
     case 'memory.reflection_evaluated':
