@@ -891,6 +891,19 @@ function renderHarnessArtifact(payload) {
   openModal('harness-artifact');
 }
 
+function toggleThinkingTrace(button) {
+  const block = button.closest('.thinking-block');
+  if (!block) return;
+  const expanded = block.classList.toggle('expanded');
+  button.setAttribute('aria-expanded', String(expanded));
+
+  if (activeStream?.contentEl?.contains(block)) {
+    savedThinkingBlocks = Array.from(activeStream.contentEl.querySelectorAll('.thinking-block')).map(el => el.outerHTML);
+  } else if (activeThinking?.el === block && savedThinkingBlocks.length) {
+    savedThinkingBlocks[savedThinkingBlocks.length - 1] = block.outerHTML;
+  }
+}
+
 function handleMessageUpdate(msg) {
   const ev = msg.assistantMessageEvent;
   if (!ev) return;
@@ -1023,9 +1036,14 @@ function createThinkingBlockStatic(text) {
   const el = document.createElement('div');
   el.className = 'thinking-block thinking-done';
   el.innerHTML = `
-    <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+    <div class="thinking-header">
       <div class="thinking-header-left">
         <span class="thinking-icon">✦</span>
+        <button type="button" class="thinking-toggle" aria-label="Show thinking trace" aria-expanded="false" onclick="toggleThinkingTrace(this)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <span class="thinking-header-text">Thinking</span>
       </div>
       <span class="thinking-status">Done</span>
@@ -1136,9 +1154,14 @@ function createThinkingBlock() {
   const el = document.createElement('div');
   el.className = 'thinking-block';
   el.innerHTML = `
-    <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
+    <div class="thinking-header">
       <div class="thinking-header-left">
         <span class="thinking-icon">✦</span>
+        <button type="button" class="thinking-toggle" aria-label="Show thinking trace" aria-expanded="false" onclick="toggleThinkingTrace(this)">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <span class="thinking-header-text">Thinking</span>
       </div>
       <span class="thinking-status">Thinking...</span>
