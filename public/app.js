@@ -293,7 +293,7 @@ function handleMessage(msg) {
         send({ type: 'get_models' });
         send({ type: 'get_session_files' });
         send({ type: 'harness_status' });
-        if (!messagesEl.children.length || messagesEl.querySelector('.welcome')) showWelcome();
+        if (!messagesEl.children.length) showWelcome();
         break;
       case 'pi_disconnected':
         isConnected = false;
@@ -1207,6 +1207,7 @@ function createUserMsg(text, images) {
 }
 
 function showWelcome() {
+  messagesEl.querySelector('.welcome')?.remove();
   const el = document.createElement('div');
   el.className = 'welcome';
   el.innerHTML = `

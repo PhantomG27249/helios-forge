@@ -14,6 +14,6 @@ test('harness controls expose deep research and capabilities as first-class tool
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250612/);
-  assert.match(html, /app\.js\?v=20250612/);
+  assert.match(html, /app\.css\?v=20250613/);
+  assert.match(html, /app\.js\?v=20250613/);
 });
