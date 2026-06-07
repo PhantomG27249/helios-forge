@@ -16,7 +16,7 @@ The product should feel like a research-native AlphaHelion workbench:
 
 Keep the wrapper thin and user-facing. Put expensive, stateful, multi-agent, and long-running systems in a sidecar.
 
-Pi chat app responsibilities:
+Helios Forge wrapper responsibilities:
 
 - Start and supervise Pi RPC.
 - Start or connect to the research sidecar.
@@ -99,7 +99,7 @@ Build:
 
 MVP success scenario:
 
-1. User opens the chat app.
+1. User opens Helios Forge.
 2. User selects a workspace.
 3. App starts Pi RPC and the research sidecar.
 4. User starts a research task from the UI or slash command.
@@ -150,7 +150,7 @@ Add frontier and optimization capabilities:
 
 ### Wrapper Integration Agent
 
-Owns the current chat app integration surface.
+Owns the current Helios Forge integration surface.
 
 Responsibilities:
 
@@ -365,4 +365,3 @@ This spec consolidates:
 
 - `C:/Users/jackj/Downloads/pi_agent_research_harness_plan.md`
 - `C:/Users/jackj/Downloads/research_agent_harness_plan_v6.md`
-

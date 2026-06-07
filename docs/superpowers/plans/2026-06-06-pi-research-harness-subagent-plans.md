@@ -848,10 +848,9 @@ Implement Chunk 1 and Chunk 2 only.
 
 First sprint definition of done:
 
-- `npm run dev` starts the current chat app.
+- `npm run dev` starts the current Helios Forge agent harness.
 - The wrapper starts a local sidecar.
 - Browser can launch a scripted harness task.
 - Sidecar streams events into the UI.
 - UI displays status, patch proposal, and approval modal.
 - Trace files are written under `.harness/traces/<task-id>/`.
-

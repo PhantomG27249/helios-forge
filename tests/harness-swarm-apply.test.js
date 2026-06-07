@@ -58,7 +58,7 @@ test('failed command attempt includes verifier evidence and zero score', async (
 });
 
 test('champion apply refuses unapproved apply', async () => {
-  const workspaceRoot = path.resolve('C:/workspace/chat-app');
+  const workspaceRoot = path.resolve('C:/workspace/helios-forge');
   const champion = {
     attemptId: 'attempt_1',
     patch: 'diff --git a/src/harness-sidecar/swarm/a.js b/src/harness-sidecar/swarm/a.js\n+ok\n',
@@ -75,7 +75,7 @@ test('champion apply refuses unapproved apply', async () => {
 });
 
 test('champion apply rejects unsafe patch paths', async () => {
-  const workspaceRoot = path.resolve('C:/workspace/chat-app');
+  const workspaceRoot = path.resolve('C:/workspace/helios-forge');
   const champion = {
     attemptId: 'attempt_escape',
     patch: 'diff --git a/../outside.txt b/../outside.txt\n+escape\n',
@@ -92,7 +92,7 @@ test('champion apply rejects unsafe patch paths', async () => {
 });
 
 test('approved champion apply uses adapter and returns audit-ready result', async () => {
-  const workspaceRoot = path.resolve('C:/workspace/chat-app');
+  const workspaceRoot = path.resolve('C:/workspace/helios-forge');
   const champion = {
     attemptId: 'attempt_apply',
     output: {

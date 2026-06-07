@@ -478,7 +478,7 @@ Goal: a running sidecar that the wrapper can start, observe, and command.
 
 Acceptance:
 
-- `npm run dev` starts the chat app.
+- `npm run dev` starts the Helios Forge agent harness.
 - Sidecar can start independently.
 - A task streams events into the UI.
 - Trace files are written.
@@ -768,4 +768,3 @@ docs(harness): add BES and meta-harness plan
 3. Split each later chunk into a fresh daily execution plan when starting it.
 4. Use subagents for disjoint file sets only.
 5. Keep mainline always runnable after each commit.
-
