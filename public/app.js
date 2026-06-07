@@ -489,7 +489,7 @@ function runHarnessTask() {
   send({
     type: 'harness_task_start',
     task,
-    mode: 'mvp',
+    mode: 'full',
     budget: { maxToolCalls: 20, maxWallMinutes: 15 },
   });
   harnessTaskInput.value = '';

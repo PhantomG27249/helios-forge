@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -113,6 +113,74 @@ test('task endpoint emits deterministic MVP events and writes a trace', async ()
     assert.equal(taskDetail.task.taskId, body.taskId);
     assert.equal(taskDetail.state.version >= 2, true);
     assert.equal(taskDetail.audit.some((entry) => entry.operation === 'patch.propose'), true);
+
+    unsubscribe();
+  });
+});
+
+test('task endpoint runs all enabled harness subsystems at runtime', async () => {
+  await withSidecar(async ({ sidecar, workspaceRoot }) => {
+    await writeFile(
+      path.join(workspaceRoot, 'sample.js'),
+      'export function sampleHarnessTarget() { return true; }\n',
+    );
+    const events = [];
+    const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+    const response = await fetch(`${sidecar.url}/v1/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: 'local',
+        task: 'exercise every harness subsystem',
+        mode: 'full',
+        budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    await waitForEvent(
+      events,
+      (event) => event.taskId === body.taskId && event.type === 'harness_runtime.enabled',
+    );
+
+    const requiredTypes = [
+      'bes.strategies_seeded',
+      'bes.subgoals_scored',
+      'graph.code_graph_created',
+      'memory.candidate_written',
+      'meta.trace_inspected',
+      'meta.optimizer_proposed',
+      'research.report_created',
+      'experiment.proposed',
+      'swarm.attempts_scheduled',
+      'swarm.champion_selected',
+      'vlm.visual_context_created',
+      'collaboration.workspace_lease_acquired',
+    ];
+    for (const type of requiredTypes) {
+      assert.equal(events.some((event) => event.type === type), true, `missing ${type}`);
+    }
+
+    const graphEvent = events.find((event) => event.type === 'graph.code_graph_created');
+    assert.equal(graphEvent.symbolCount >= 1, true);
+
+    const runtimeEvent = events.find((event) => event.type === 'harness_runtime.enabled');
+    assert.equal(runtimeEvent.mode, 'full');
+    assert.equal(runtimeEvent.enabledSubsystems.includes('meta'), true);
+    assert.equal(runtimeEvent.enabledSubsystems.includes('bes'), true);
+
+    const memoryContent = await readFile(
+      path.join(workspaceRoot, '.harness', 'memory', 'candidates.jsonl'),
+      'utf8',
+    );
+    assert.match(memoryContent, /exercise every harness subsystem/);
+
+    const tracePath = path.join(workspaceRoot, '.harness', 'traces', body.taskId, 'events.jsonl');
+    const traceContent = await readFile(tracePath, 'utf8');
+    assert.match(traceContent, /meta\.optimizer_proposed/);
+    assert.match(traceContent, /research\.report_created/);
 
     unsubscribe();
   });
