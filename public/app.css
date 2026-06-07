@@ -416,10 +416,36 @@ body {
   transition: all 180ms var(--ease-out);
 }
 
+.topbar-text-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 180ms var(--ease-out);
+}
+
 .topbar-icon-btn:hover {
   background: var(--bg-hover);
   border-color: var(--border);
   color: var(--text-secondary);
+}
+
+.topbar-text-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 /* ═══════════════════════════════════════════════════════════ */
@@ -1446,6 +1472,13 @@ body {
   #sidebar.open { transform: translateX(0); }
   #messages { padding: 16px 14px; }
   #input-area { padding: 10px 12px 14px; }
+  .topbar-text-btn {
+    width: 32px;
+    padding: 0;
+  }
+  .topbar-text-btn span {
+    display: none;
+  }
 }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

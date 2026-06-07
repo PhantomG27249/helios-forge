@@ -513,6 +513,12 @@ function switchHarnessTab(tabId) {
   }
 }
 
+function openHarnessTab(tabId) {
+  if (harnessPanel) harnessPanel.classList.remove('hidden');
+  send({ type: 'harness_status' });
+  switchHarnessTab(tabId);
+}
+
 function requestHarnessCapabilities() {
   if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Refreshing capabilities...';
   if (harnessCapabilitiesRequestTimer) clearTimeout(harnessCapabilitiesRequestTimer);
@@ -1731,6 +1737,8 @@ inputEl.addEventListener('keydown', (e) => {
 $('#btn-new-chat').addEventListener('click', () => send({ type: 'new_session' }));
 $('#btn-stats').addEventListener('click', () => { send({ type: 'get_session_stats' }); openModal('stats'); });
 $('#btn-harness').addEventListener('click', toggleHarnessPanel);
+$('#btn-deep-research')?.addEventListener('click', () => openHarnessTab('deep-research'));
+$('#btn-capabilities')?.addEventListener('click', () => openHarnessTab('capabilities'));
 $('#btn-harness-start').addEventListener('click', startHarness);
 $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
