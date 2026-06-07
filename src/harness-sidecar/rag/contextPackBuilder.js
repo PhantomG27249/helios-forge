@@ -1,3 +1,16 @@
+function budgetExclusionFor(item) {
+  if (item.chunkId) {
+    return {
+      chunkId: item.chunkId,
+      path: item.path,
+      lineStart: item.lineStart,
+      lineEnd: item.lineEnd,
+      tokensEstimated: item.tokensEstimated || 1,
+    };
+  }
+  return item.path || item.id || item.type;
+}
+
 export function buildContextPack({
   taskId,
   profile = 'coding_small',
@@ -11,7 +24,7 @@ export function buildContextPack({
   for (const item of items) {
     const itemTokens = item.tokensEstimated || 1;
     if (usedTokens + itemTokens > maxTokens) {
-      excludedDueToBudget.push(item.path || item.id || item.type);
+      excludedDueToBudget.push(budgetExclusionFor(item));
       continue;
     }
     included.push(item);

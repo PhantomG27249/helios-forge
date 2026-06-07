@@ -1,6 +1,8 @@
 import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 
+import { chunkTextFile } from './chunker.js';
+
 const EXCLUDED_DIRS = new Set([
   '.git',
   'node_modules',
@@ -36,11 +38,11 @@ function shouldExclude(relativePath) {
   return EXCLUDED_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }
 
-function estimateTokens(text) {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-export async function indexWorkspace({ workspaceRoot, maxFileBytes = 64 * 1024 }) {
+export async function indexWorkspace({
+  workspaceRoot,
+  maxFileBytes = 64 * 1024,
+  maxLinesPerChunk = 80,
+}) {
   const items = [];
 
   async function walk(directory) {
@@ -64,20 +66,23 @@ export async function indexWorkspace({ workspaceRoot, maxFileBytes = 64 * 1024 }
       if (fileStat.size > maxFileBytes) continue;
 
       const content = await readFile(absolutePath, 'utf8');
-      const snippet = content.slice(0, 1200);
-      items.push({
-        type: 'file_snippet',
+      const chunks = chunkTextFile({
         path: relativePath,
-        extension,
-        sizeBytes: fileStat.size,
-        snippet,
-        tokensEstimated: estimateTokens(snippet),
+        content,
+        maxLinesPerChunk,
       });
+      items.push(
+        ...chunks.map((chunk) => ({
+          ...chunk,
+          extension,
+          sizeBytes: fileStat.size,
+        })),
+      );
     }
   }
 
   await walk(workspaceRoot);
-  items.sort((a, b) => a.path.localeCompare(b.path));
+  items.sort((a, b) => a.path.localeCompare(b.path) || a.lineStart - b.lineStart);
   return {
     workspaceRoot,
     indexedAt: new Date().toISOString(),
