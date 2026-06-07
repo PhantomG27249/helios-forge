@@ -6,6 +6,7 @@ import { BudgetManager } from './budget/budgetManager.js';
 import { AuditLog } from './collaboration/auditLog.js';
 import { LockService } from './collaboration/locks.js';
 import { VersionedState } from './collaboration/versionedState.js';
+import { compileFinalAuditReport } from './core/finalAudit.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { createArtifactStore } from './artifacts/artifactStore.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
@@ -317,6 +318,35 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       actionId,
       choice,
     });
+
+    if (task) {
+      const state = taskStates.get(task.taskId);
+      const auditEntries = auditLog.entries().filter((entry) => entry.taskId === task.taskId);
+      const finalAuditArtifact = await artifactStore.writeTextArtifact({
+        taskId: task.taskId,
+        type: 'final_audit',
+        title: 'Final audit report',
+        filename: 'final-audit.md',
+        content: compileFinalAuditReport({
+          task,
+          state,
+          audit: auditEntries,
+          approval,
+        }),
+      });
+      artifacts.set(finalAuditArtifact.artifactId, finalAuditArtifact);
+      await updateTaskState(
+        task.taskId,
+        { finalAuditArtifactId: finalAuditArtifact.artifactId },
+        'sidecar-orchestrator',
+      );
+      await emitEvent({
+        type: 'final_audit.created',
+        taskId: task.taskId,
+        approvalChoice: choice,
+        artifacts: [finalAuditArtifact],
+      });
+    }
 
     return approval;
   }

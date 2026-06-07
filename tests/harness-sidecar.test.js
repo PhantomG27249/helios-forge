@@ -156,10 +156,23 @@ test('approval endpoint resolves a pending approval and emits an event', async (
     );
     assert.equal(resolvedEvent.choice, 'approve');
 
+    const finalAuditEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'final_audit.created' && event.taskId === taskBody.taskId,
+    );
+    assert.equal(finalAuditEvent.artifacts.length, 1);
+    assert.equal(finalAuditEvent.approvalChoice, 'approve');
+
     const taskDetailResponse = await fetch(`${sidecar.url}/v1/tasks/${taskBody.taskId}`);
     const taskDetail = await taskDetailResponse.json();
     assert.equal(taskDetail.audit.some((entry) => entry.operation === 'approval.resolve'), true);
     assert.equal(taskDetail.state.value.approvalChoice, 'approve');
+    assert.equal(taskDetail.state.value.finalAuditArtifactId, finalAuditEvent.artifacts[0].artifactId);
+
+    const artifactResponse = await fetch(`${sidecar.url}/v1/artifacts/${finalAuditEvent.artifacts[0].artifactId}`);
+    const artifactBody = await artifactResponse.json();
+    assert.equal(artifactBody.content.includes('Final Audit'), true);
+    assert.equal(artifactBody.content.includes('approve'), true);
 
     unsubscribe();
   });
