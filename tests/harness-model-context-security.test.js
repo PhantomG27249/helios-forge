@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { compactContextItems } from '../src/harness-sidecar/context/compaction.js';
@@ -7,6 +7,7 @@ import { getContextProfile } from '../src/harness-sidecar/context/contextProfile
 import { ModelGateway } from '../src/harness-sidecar/model/modelGateway.js';
 import { getModelProfile } from '../src/harness-sidecar/model/modelProfiles.js';
 import { buildMultimodalRequest } from '../src/harness-sidecar/model/multimodalRequestBuilder.js';
+import { createOpenAICompatibleProvider, extractChoiceText } from '../src/harness-sidecar/model/openaiCompatibleProvider.js';
 import { repairJsonObject } from '../src/harness-sidecar/model/structuredOutputRepair.js';
 import { parseToolCall } from '../src/harness-sidecar/model/toolCallParser.js';
 import { createApprovalRequest } from '../src/harness-sidecar/security/approvalGates.js';
@@ -16,10 +17,14 @@ import { brokerMcpToolCall } from '../src/harness-sidecar/tools/mcpBroker.js';
 test('model profiles expose qwen vision defaults and critic profile', () => {
   const deep = getModelProfile('qwen36_vlm_deep');
   const critic = getModelProfile('critic_low_temp');
+  const ebft5 = getModelProfile('alphahelion_ebft5');
 
   assert.equal(deep.supportsVision, true);
   assert.equal(deep.maxContextTokens, 262000);
   assert.equal(critic.defaultTemperature, 0.1);
+  assert.equal(ebft5.model, 'example/ebft-model');
+  assert.equal(ebft5.maxContextTokens, 262144);
+  assert.equal(ebft5.chatTemplateKwargs.enable_thinking, false);
 });
 
 test('structured output repair parses fenced or trailing-comma JSON objects', () => {
@@ -53,6 +58,50 @@ test('model gateway records profile, token accounting, and structured repair eve
   assert.equal(result.structured.decision, 'approve');
   assert.equal(events.some((event) => event.type === 'model_call.started'), true);
   assert.equal(events.some((event) => event.type === 'model_call.completed' && event.totalTokens === 20), true);
+});
+
+test('OpenAI-compatible provider posts chat completions and extracts visible content', async () => {
+  const requests = [];
+  const provider = createOpenAICompatibleProvider({
+    baseUrl: 'http://model.test/v1',
+    apiKey: 'dummy',
+    fetchImpl: async (url, request) => {
+      requests.push({ url, request });
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: 'FINAL: HELIOS_OK', reasoning: null } }],
+          usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 },
+        }),
+      };
+    },
+  });
+
+  const response = await provider({
+    profile: getModelProfile('alphahelion_ebft5'),
+    messages: [{ role: 'user', content: 'ping' }],
+  });
+
+  assert.equal(requests[0].url, 'http://model.test/v1/chat/completions');
+  assert.equal(JSON.parse(requests[0].request.body).model, 'example/ebft-model');
+  assert.equal(JSON.parse(requests[0].request.body).chat_template_kwargs.enable_thinking, false);
+  assert.equal(response.text, 'FINAL: HELIOS_OK');
+  assert.deepEqual(response.usage, { inputTokens: 10, outputTokens: 4 });
+});
+
+test('choice text extraction preserves reasoning when content is absent', () => {
+  const text = extractChoiceText({
+    choices: [
+      {
+        message: {
+          content: null,
+          reasoning: 'private reasoning trace',
+        },
+      },
+    ],
+  });
+
+  assert.equal(text, 'private reasoning trace');
 });
 
 test('multimodal request builder packages text and visual artifacts with budget estimates', () => {

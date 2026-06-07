@@ -1,4 +1,4 @@
-const MODEL_PROFILES = {
+﻿const MODEL_PROFILES = {
   qwen36_vlm_fast: {
     name: 'qwen36_vlm_fast',
     maxContextTokens: 64000,
@@ -19,6 +19,19 @@ const MODEL_PROFILES = {
     supportsVision: true,
     supportsTools: true,
     defaultTemperature: 0.1,
+  },
+  alphahelion_ebft5: {
+    name: 'alphahelion_ebft5',
+    provider: 'Zeus',
+    model: 'example/ebft-model',
+    baseUrl: null,
+    maxContextTokens: 262144,
+    supportsVision: false,
+    supportsTools: true,
+    defaultTemperature: 0.6,
+    chatTemplateKwargs: {
+      enable_thinking: false,
+    },
   },
 };
 
