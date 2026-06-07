@@ -3,6 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { planSubgoals } from './bes/subgoalPlanner.js';
 import { BudgetManager } from './budget/budgetManager.js';
+import { AuditLog } from './collaboration/auditLog.js';
+import { LockService } from './collaboration/locks.js';
+import { VersionedState } from './collaboration/versionedState.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { createArtifactStore } from './artifacts/artifactStore.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
@@ -60,8 +63,11 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
   const traceWriter = new TraceWriter({ workspaceRoot: resolvedWorkspaceRoot });
   const artifactStore = createArtifactStore({ workspaceRoot: resolvedWorkspaceRoot });
   const artifacts = new Map();
+  const auditLog = new AuditLog();
+  const lockService = new LockService();
   const pendingApprovals = new Map();
   const tasks = new Map();
+  const taskStates = new Map();
   let server = null;
   let actualPort = port;
 
@@ -78,6 +84,39 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     }
   }
 
+  async function recordAudit(entry) {
+    const auditEntry = auditLog.record(entry);
+    await emitEvent({
+      type: 'audit.recorded',
+      taskId: auditEntry.taskId,
+      auditId: auditEntry.auditId,
+      actor: auditEntry.actor,
+      target: auditEntry.target,
+      operation: auditEntry.operation,
+      reason: auditEntry.reason,
+    });
+    return auditEntry;
+  }
+
+  async function updateTaskState(taskId, patch, updatedBy) {
+    const state = taskStates.get(taskId);
+    const result = state.update({
+      expectedVersion: state.version,
+      patch,
+      updatedBy,
+    });
+    if (result.applied) {
+      await emitEvent({
+        type: 'task_state.updated',
+        taskId,
+        version: result.version,
+        patch,
+        updatedBy,
+      });
+    }
+    return result;
+  }
+
   async function createTask(body) {
     const taskId = makeId('task');
     const patchId = makeId('patch');
@@ -92,6 +131,13 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       createdAt: new Date().toISOString(),
     };
     tasks.set(taskId, task);
+    taskStates.set(taskId, new VersionedState({
+      initialValue: {
+        taskId,
+        status: 'created',
+        mode: task.mode,
+      },
+    }));
     pendingApprovals.set(actionId, { actionId, taskId, status: 'pending' });
     const budgetManager = new BudgetManager({
       taskId,
@@ -101,6 +147,30 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       },
       emitEvent,
     });
+
+    const lockResult = lockService.acquire({
+      resource: `task:${taskId}`,
+      ownerId: 'sidecar-orchestrator',
+      taskId,
+    });
+    if (lockResult.acquired) {
+      await emitEvent({
+        type: 'collaboration.lock_acquired',
+        taskId,
+        lockId: lockResult.lockId,
+        resource: lockResult.resource,
+        ownerId: lockResult.ownerId,
+        expiresAt: lockResult.expiresAt,
+      });
+    }
+    await recordAudit({
+      actor: 'sidecar-orchestrator',
+      target: `task:${taskId}`,
+      operation: 'task.create',
+      reason: 'Create harness task and claim orchestration lock.',
+      taskId,
+    });
+    await updateTaskState(taskId, { status: 'running' }, 'sidecar-orchestrator');
 
     await emitEvent({
       type: 'task.started',
@@ -175,6 +245,14 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       ),
     });
     artifacts.set(patchArtifact.artifactId, patchArtifact);
+    await recordAudit({
+      actor: 'sidecar-orchestrator',
+      target: `patch:${patchId}`,
+      operation: 'patch.propose',
+      reason: 'Propose scripted MVP patch artifact for approval.',
+      taskId,
+    });
+    await updateTaskState(taskId, { status: 'approval_required', patchId }, 'sidecar-orchestrator');
 
     await emitEvent({
       type: 'patch.proposed',
@@ -217,6 +295,21 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       task.status = choice === 'approve' ? 'approved' : 'approval_resolved';
       tasks.set(task.taskId, task);
     }
+    await recordAudit({
+      actor: body.actor || 'human',
+      target: `approval:${actionId}`,
+      operation: 'approval.resolve',
+      reason: `Human selected ${choice}.`,
+      taskId: approval.taskId,
+    });
+    await updateTaskState(
+      approval.taskId,
+      {
+        status: choice === 'approve' ? 'approved' : 'approval_resolved',
+        approvalChoice: choice,
+      },
+      body.actor || 'human',
+    );
 
     await emitEvent({
       type: 'approval.resolved',
@@ -260,6 +353,26 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         const body = await readJsonBody(req);
         const task = await createTask(body);
         sendJson(res, 202, { taskId: task.taskId, status: task.status });
+        return;
+      }
+
+      const taskMatch = url.pathname.match(/^\/v1\/tasks\/([^/]+)$/);
+      if (req.method === 'GET' && taskMatch) {
+        const task = tasks.get(taskMatch[1]);
+        if (!task) {
+          sendJson(res, 404, { error: 'Task not found' });
+          return;
+        }
+        const state = taskStates.get(task.taskId);
+        sendJson(res, 200, {
+          task,
+          state: {
+            version: state.version,
+            value: { ...state.value },
+            history: [...state.history],
+          },
+          audit: auditLog.entries().filter((entry) => entry.taskId === task.taskId),
+        });
         return;
       }
 

@@ -87,6 +87,9 @@ test('task endpoint emits deterministic MVP events and writes a trace', async ()
     assert.equal(events.some((event) => event.type === 'context_pack.created'), true);
     assert.equal(events.some((event) => event.type === 'subgoals.planned'), true);
     assert.equal(events.some((event) => event.type === 'budget.updated'), true);
+    assert.equal(events.some((event) => event.type === 'collaboration.lock_acquired'), true);
+    assert.equal(events.some((event) => event.type === 'task_state.updated'), true);
+    assert.equal(events.some((event) => event.type === 'audit.recorded' && event.operation === 'task.create'), true);
     assert.equal(events.some((event) => event.type === 'verifier.output' && /MVP verifier passed/.test(event.stdout)), true);
     const patchEvent = events.find((event) => event.type === 'patch.proposed');
     assert.equal(Boolean(patchEvent), true);
@@ -103,6 +106,13 @@ test('task endpoint emits deterministic MVP events and writes a trace', async ()
     const traceContent = await readFile(tracePath, 'utf8');
     assert.match(traceContent, /task\.started/);
     assert.match(traceContent, /approval\.required/);
+
+    const taskResponse = await fetch(`${sidecar.url}/v1/tasks/${body.taskId}`);
+    const taskDetail = await taskResponse.json();
+    assert.equal(taskResponse.status, 200);
+    assert.equal(taskDetail.task.taskId, body.taskId);
+    assert.equal(taskDetail.state.version >= 2, true);
+    assert.equal(taskDetail.audit.some((entry) => entry.operation === 'patch.propose'), true);
 
     unsubscribe();
   });
@@ -145,6 +155,11 @@ test('approval endpoint resolves a pending approval and emits an event', async (
       (event) => event.type === 'approval.resolved' && event.actionId === approvalEvent.actionId,
     );
     assert.equal(resolvedEvent.choice, 'approve');
+
+    const taskDetailResponse = await fetch(`${sidecar.url}/v1/tasks/${taskBody.taskId}`);
+    const taskDetail = await taskDetailResponse.json();
+    assert.equal(taskDetail.audit.some((entry) => entry.operation === 'approval.resolve'), true);
+    assert.equal(taskDetail.state.value.approvalChoice, 'approve');
 
     unsubscribe();
   });
