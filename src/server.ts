@@ -1,5 +1,5 @@
 /**
- * Pi Chat App - WebSocket Server
+ * Helios Forge - WebSocket Server
  * 
  * Spawns a pi --mode rpc subprocess and bridges it to WebSocket clients.
  * Handles the full pi RPC protocol including extension UI dialogs.

@@ -1,10 +1,10 @@
-# Full Research Harness Subagent Master Plan
+# Helios Forge Full Harness Subagent Master Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking. This is the master plan for the full product; use smaller slice plans for daily execution.
 
-**Goal:** Build a production-grade Pi research harness with sidecar orchestration, verifier-driven coding, RAG, graph memory, BES-style swarms, deep research, experiments, VLM tools, collaboration, and meta-harness optimization.
+**Goal:** Build Helios Forge as a production-grade AlphaHelion research harness with sidecar orchestration, verifier-driven coding, RAG, graph memory, BES-style swarms, deep research, experiments, VLM tools, collaboration, and meta-harness optimization.
 
-**Architecture:** The current chat app remains the human-facing Pi RPC and harness control surface. The sidecar owns all long-running, stateful, multi-agent, budgeted, and auditable workflows. Full capability is delivered through staged vertical slices, with each slice preserving traceability, approvals, and verifier evidence.
+**Architecture:** Helios Forge remains the human-facing Pi RPC and harness control surface. The sidecar owns all long-running, stateful, multi-agent, budgeted, and auditable workflows. Full capability is delivered through staged vertical slices, with each slice preserving traceability, approvals, and verifier evidence.
 
 **Tech Stack:** Node.js ESM, WebSocket, local HTTP/event sidecar, file-backed traces for MVP, later pluggable vector/graph stores, git worktrees, typed JSON message contracts, shell/verifier brokers, artifact manifests, and Pi RPC integration.
 
@@ -12,7 +12,7 @@
 
 ## Product-Level Invariants
 
-- Pi chat wrapper stays thin: process supervision, event relay, UI, approvals, previews.
+- Helios Forge wrapper stays thin: process supervision, event relay, UI, approvals, previews.
 - Sidecar owns orchestration, state, tools, memory, retrieval, budgets, and agents.
 - No hidden edits. Patches are artifacts until approved.
 - No success claim without verifier evidence.

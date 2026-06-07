@@ -1,7 +1,7 @@
 /**
  * Electron Main Process
  * 
- * Wraps the Pi Chat web interface in a desktop application.
+ * Wraps the Helios Forge web interface in a desktop application.
  * Runs the Node.js server internally and opens a BrowserWindow.
  */
 
@@ -18,7 +18,7 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Pi Chat',
+    title: 'Helios Forge',
     icon: path.join(__dirname, '..', 'public', 'icon.png'),
     webPreferences: {
       nodeIntegration: false,

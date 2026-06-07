@@ -1,7 +1,7 @@
 {
-  "name": "pi-chat-app",
+  "name": "helios-forge",
   "version": "1.0.0",
-  "description": "A modern chat interface for the pi coding agent",
+  "description": "Helios Forge: an AlphaHelion research-agent workbench for Pi",
   "type": "module",
   "scripts": {
     "dev": "node src/server.js",

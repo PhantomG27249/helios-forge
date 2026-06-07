@@ -1,5 +1,5 @@
 /**
- * Pi Chat App — Frontend
+ * Helios Forge — Frontend
  * v3: Thinking bubbles, file attachments, real pi sessions
  */
 
@@ -173,8 +173,8 @@ function setStatus(state, text) {
   userStatus.className = 'user-status ' + state;
   if (connectionBanner) {
     connectionBanner.className = 'connection-banner ' + state;
-    connectionText.textContent = state === 'connected' ? 'Connected to Pi'
-      : state === 'connecting' ? 'Connecting to Pi...'
+    connectionText.textContent = state === 'connected' ? 'Connected to Helios Forge'
+      : state === 'connecting' ? 'Connecting to Helios Forge...'
       : state === 'error' ? text || 'Connection error'
       : 'Disconnected — reconnecting...';
   }
@@ -764,7 +764,7 @@ function showWelcome() {
         <path d="M4 24L24 32L44 24" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
       </svg>
     </div>
-    <h2>Welcome to Pi Chat</h2>
+    <h2>Welcome to Helios Forge</h2>
     <p>Ask anything — read files, run commands, edit code, and more.</p>`;
   messagesEl.appendChild(el);
 }

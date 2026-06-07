@@ -1,10 +1,10 @@
-# Pi Research Harness Product Spec
+# Helios Forge Product Spec
 
 ## Purpose
 
-This project is currently a browser and Electron-ready wrapper around `pi --mode rpc`. The next product step is to make it the local control surface for a research-agent harness without turning the wrapper into the whole agent platform.
+Helios Forge is currently a browser and Electron-ready wrapper around `pi --mode rpc`. The next product step is to make it the local control surface for a research-agent harness without turning the wrapper into the whole agent platform.
 
-The product should feel like a research-native Pi workbench:
+The product should feel like a research-native AlphaHelion workbench:
 
 - Chat with Pi in the current workspace.
 - Launch research harness tasks from the same UI.
@@ -35,7 +35,7 @@ Research sidecar responsibilities:
 
 ## Target Layers
 
-### Layer 1: Pi Chat App
+### Layer 1: Helios Forge App
 
 Existing files:
 

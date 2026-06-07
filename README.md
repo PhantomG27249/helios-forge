@@ -1,9 +1,10 @@
-# Pi Chat App
+# Helios Forge
 
-A modern, feature-complete web-based chat interface for the [pi](https://github.com/earendil-works/pi) coding agent.
+An AlphaHelion research-agent workbench built on top of the [pi](https://github.com/earendil-works/pi) coding agent.
 
 ## Features
 
+- **Research harness sidecar** - task events, approvals, traces, verifiers, RAG, memory, graph, BES, swarm, research, and experiment scaffolds
 - **Full pi integration** via RPC mode — all tools, settings, and capabilities are preserved
 - **Real-time streaming** — see responses as they're generated
 - **Tool call visualization** — expandable panels showing tool name, arguments, and results
@@ -19,7 +20,7 @@ A modern, feature-complete web-based chat interface for the [pi](https://github.
 
 ```bash
 # Install dependencies
-cd chat-app
+cd helios-forge
 npm install
 
 # Start the server
@@ -93,7 +94,7 @@ Alternatively, use `electron-builder` for packaging:
 ```json
 {
   "build": {
-    "appId": "com.yourdomain.pichat",
+    "appId": "ai.alphahelion.heliosforge",
     "win": { "target": "nsis" },
     "mac": { "target": "dmg" },
     "linux": { "target": "AppImage" }
@@ -114,7 +115,7 @@ See [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packag
 ## Project Structure
 
 ```
-chat-app/
+helios-forge/
 ├── package.json          # Dependencies and scripts
 ├── public/
 │   ├── index.html        # Main HTML template

@@ -1,5 +1,5 @@
 /**
- * Pi Chat App - WebSocket Server
+ * Helios Forge - WebSocket Server
  */
 
 import { WebSocketServer } from 'ws';

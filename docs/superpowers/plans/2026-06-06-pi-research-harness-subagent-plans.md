@@ -1,10 +1,10 @@
-# Pi Research Harness Implementation Plan
+# Helios Forge Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Pi chat wrapper plus local research sidecar that can launch, observe, approve, and audit research-agent tasks.
+**Goal:** Build Helios Forge as a Pi-backed chat wrapper plus local research sidecar that can launch, observe, approve, and audit research-agent tasks.
 
-**Architecture:** Keep the existing chat app as the interactive Pi and harness UI. Add a local sidecar for task orchestration, verifier loops, trace storage, budgets, retrieval, memory, swarms, and research workflows. Start with a working MVP bridge before adding RAG, VLM, swarms, and collaboration.
+**Architecture:** Keep Helios Forge as the interactive Pi and harness UI. Add a local sidecar for task orchestration, verifier loops, trace storage, budgets, retrieval, memory, swarms, and research workflows. Start with a working MVP bridge before adding RAG, VLM, swarms, and collaboration.
 
 **Tech Stack:** Node.js ESM, WebSocket server with `ws`, browser HTML/CSS/JS, Pi RPC subprocess, local sidecar HTTP/event API, file-based traces for MVP.
 

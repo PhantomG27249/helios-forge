@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════ */
-/* Pi Chat — Atmospheric Dark UI with Rich Depth             */
+/* Helios Forge — Atmospheric Dark UI with Rich Depth        */
 /* ═══════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -1548,7 +1548,7 @@ body {
   50% { opacity: 0.6; }
 }
 
-/* Research Harness */
+/* Helios Harness */
 .harness-panel {
   max-width: 760px;
   margin: 16px auto 0;
