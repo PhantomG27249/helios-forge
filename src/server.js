@@ -9,6 +9,7 @@ import path, { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
+import { applyHarnessFeedbackToPrompt, createHarnessFeedbackBuffer } from './harness/harnessFeedbackContext.js';
 import { HarnessManager } from './harness/harnessManager.js';
 import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
@@ -228,7 +229,7 @@ function closeHarnessClient(harness) {
   }
 }
 
-async function ensureHarnessRunning(harness, pi) {
+async function ensureHarnessRunning(harness, pi, feedback) {
   const status = harness.manager.getStatus();
   if (status.state === 'stopped' && harness.manager.workspaceRoot !== pi.cwd) {
     closeHarnessClient(harness);
@@ -240,20 +241,26 @@ async function ensureHarnessRunning(harness, pi) {
   if (!harness.client) {
     harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
     harness.unsubscribeEvents = harness.client.onEvent((event) => {
+      feedback?.record(event);
       pi.broadcast({ type: 'harness_task_event', event });
     });
   }
   return harness.manager.getStatus();
 }
 
-async function handleCommand(ws, msg, pi, harness) {
+async function handleCommand(ws, msg, pi, harness, feedback) {
   try {
     switch (msg.type) {
       case 'prompt': {
         const opts = {};
         if (msg.streamingBehavior) opts.streamingBehavior = msg.streamingBehavior;
         if (msg.images && msg.images.length) opts.images = msg.images;
-        await pi.sendCommand({ type: 'prompt', message: msg.message, ...opts });
+        const message = applyHarnessFeedbackToPrompt({
+          message: msg.message,
+          feedback,
+          enabled: msg.useHarnessFeedback !== false,
+        });
+        await pi.sendCommand({ type: 'prompt', message, ...opts });
         break;
       }
       case 'steer': {
@@ -338,7 +345,7 @@ async function handleCommand(ws, msg, pi, harness) {
             port: msg.port || 49321,
           });
         }
-        await ensureHarnessRunning(harness, pi);
+        await ensureHarnessRunning(harness, pi, feedback);
         ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
         break;
       }
@@ -353,13 +360,14 @@ async function handleCommand(ws, msg, pi, harness) {
         await harness.manager.restart();
         harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
         harness.unsubscribeEvents = harness.client.onEvent((event) => {
+          feedback?.record(event);
           pi.broadcast({ type: 'harness_task_event', event });
         });
         ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
         break;
       }
       case 'harness_task_start': {
-        await ensureHarnessRunning(harness, pi);
+        await ensureHarnessRunning(harness, pi, feedback);
         const task = await harness.client.startTask({
           workspaceId: msg.workspaceId || 'local',
           task: msg.task || msg.message || '',
@@ -371,13 +379,13 @@ async function handleCommand(ws, msg, pi, harness) {
         break;
       }
       case 'harness_approval_response': {
-        await ensureHarnessRunning(harness, pi);
+        await ensureHarnessRunning(harness, pi, feedback);
         const approval = await harness.client.resolveApproval(msg.actionId, msg.choice);
         ws.send(JSON.stringify({ type: 'harness_approval_resolved', data: approval }));
         break;
       }
       case 'harness_artifact_get': {
-        await ensureHarnessRunning(harness, pi);
+        await ensureHarnessRunning(harness, pi, feedback);
         const artifact = await harness.client.getArtifact(msg.artifactId);
         ws.send(JSON.stringify({ type: 'harness_artifact', data: artifact }));
         break;
@@ -549,6 +557,7 @@ async function main() {
   const port = parseInt(process.env.PORT || '3777', 10);
   const pi = new ManagedPiRpcManager();
   const harness = createHarnessRuntime(pi.cwd);
+  const feedback = createHarnessFeedbackBuffer();
 
   const server = createServer((req, res) => {
     handleHttpRequest(req, res).catch((error) => {
@@ -569,7 +578,7 @@ async function main() {
       try {
         msg = JSON.parse(data.toString());
         console.log('[Server] Received command:', msg.type);
-        await handleCommand(ws, msg, pi, harness);
+        await handleCommand(ws, msg, pi, harness, feedback);
         console.log('[Server] Command completed:', msg.type);
       }
       catch (e) {
