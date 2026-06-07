@@ -1325,6 +1325,27 @@ function handleFileSelect(files) {
   });
 }
 
+function handlePasteImages(event) {
+  const clipboard = event.clipboardData;
+  if (!clipboard) return;
+
+  const imageFiles = [];
+  for (const item of Array.from(clipboard.items || [])) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) imageFiles.push(file);
+    }
+  }
+
+  if (!imageFiles.length && clipboard.files?.length) {
+    imageFiles.push(...Array.from(clipboard.files).filter(file => file.type.startsWith('image/')));
+  }
+
+  if (!imageFiles.length) return;
+  event.preventDefault();
+  handleFileSelect(imageFiles);
+}
+
 function updateImagePreview() {
   if (!imagePreview) return;
   imagePreview.innerHTML = '';
@@ -1376,6 +1397,7 @@ document.addEventListener('change', (e) => {
 // Drag and drop on input area
 const inputArea = $('#input-area');
 if (inputArea) {
+  inputArea.addEventListener('paste', handlePasteImages);
   inputArea.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); inputArea.classList.add('drag-over'); });
   inputArea.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); inputArea.classList.remove('drag-over'); });
   inputArea.addEventListener('drop', (e) => {
