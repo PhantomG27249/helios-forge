@@ -1,0 +1,11 @@
+{
+  "command": "forge",
+  "mode": "direct",
+  "harnessMode": "full",
+  "description": "Run the full Helios Forge harness with BES, swarm, memory, graph, and meta loops.",
+  "budget": {
+    "maxToolCalls": 45,
+    "maxWallMinutes": 30
+  },
+  "capabilities": ["bes", "swarm", "memory", "graph", "meta-harness", "trace-replay"]
+}

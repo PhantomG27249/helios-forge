@@ -31,12 +31,16 @@ test('capability store returns UI-ready defaults when registry is absent', async
       mcp: [],
       pi_extension: [],
       profile: [],
+      template: [],
+      slash_command: [],
     });
     assert.deepEqual(registry.counts, {
       skill: 0,
       mcp: 0,
       pi_extension: 0,
       profile: 0,
+      template: 0,
+      slash_command: 0,
       enabled: 0,
     });
   });
@@ -89,7 +93,7 @@ test('capability store normalizes supported types and writes only project regist
     assert.equal(savedProfile.type, 'profile');
 
     const registry = await loadCapabilityRegistry({ workspaceRoot });
-    assert.deepEqual(Object.keys(registry.byType).sort(), ['mcp', 'pi_extension', 'profile', 'skill']);
+    assert.deepEqual(Object.keys(registry.byType).sort(), ['mcp', 'pi_extension', 'profile', 'skill', 'slash_command', 'template']);
     assert.equal(registry.byType.skill.length, 1);
     assert.equal(registry.byType.mcp.length, 1);
     assert.equal(registry.byType.pi_extension.length, 1);
@@ -183,23 +187,56 @@ test('capability store deletes records and builds enabled-only runtime manifest'
         enabled: true,
       },
     });
+    await saveCapabilityRecord({
+      workspaceRoot,
+      record: {
+        id: 'enabled-research-command',
+        type: 'slash-command',
+        name: 'Research Command',
+        enabled: true,
+      },
+    });
+    await saveCapabilityRecord({
+      workspaceRoot,
+      record: {
+        id: 'enabled-brief-template',
+        type: 'template',
+        name: 'Brief Template',
+        enabled: true,
+      },
+    });
 
     const afterDelete = await deleteCapabilityRecord({ workspaceRoot, capabilityId: 'enabled-profile' });
-    assert.deepEqual(afterDelete.capabilities.map((record) => record.id), ['enabled-skill', 'disabled-mcp']);
+    assert.deepEqual(afterDelete.capabilities.map((record) => record.id), [
+      'enabled-skill',
+      'disabled-mcp',
+      'enabled-research-command',
+      'enabled-brief-template',
+    ]);
 
     const manifest = await buildRuntimeMountManifest({ workspaceRoot, profileId: 'default' });
     assert.equal(manifest.profileId, 'default');
     assert.equal(manifest.manifestPath, path.join(workspaceRoot, '.harness', 'runtime', 'capabilities.mount.json'));
-    assert.deepEqual(manifest.capabilities.map((record) => record.id), ['enabled-skill']);
+    assert.deepEqual(manifest.capabilities.map((record) => record.id), [
+      'enabled-skill',
+      'enabled-research-command',
+      'enabled-brief-template',
+    ]);
     assert.deepEqual(manifest.counts, {
       skill: 1,
       mcp: 0,
       pi_extension: 0,
       profile: 0,
-      enabled: 1,
+      template: 1,
+      slash_command: 1,
+      enabled: 3,
     });
 
     const writtenManifest = JSON.parse(await readFile(manifest.manifestPath, 'utf8'));
-    assert.deepEqual(writtenManifest.capabilities.map((record) => record.id), ['enabled-skill']);
+    assert.deepEqual(writtenManifest.capabilities.map((record) => record.id), [
+      'enabled-skill',
+      'enabled-research-command',
+      'enabled-brief-template',
+    ]);
   });
 });

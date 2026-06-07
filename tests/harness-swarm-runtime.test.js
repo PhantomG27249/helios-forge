@@ -5,6 +5,7 @@ import { buildRolePrompt, ROLE_REGISTRY } from '../src/harness-sidecar/swarm/rol
 import { runSubagentAttempt } from '../src/harness-sidecar/swarm/subagentRunner.js';
 import { reviewAttempt } from '../src/harness-sidecar/swarm/reviewer.js';
 import { recombineApprovedOutputs } from '../src/harness-sidecar/swarm/recombiner.js';
+import { scheduleAttempts } from '../src/harness-sidecar/swarm/attemptScheduler.js';
 import { orchestrateSwarm } from '../src/harness-sidecar/swarm/swarmOrchestrator.js';
 
 test('role prompt builder scopes role instructions to allowed files and output contract', () => {
@@ -189,4 +190,157 @@ test('swarm orchestrator schedules multiple attempts and selects champion from v
   assert.equal(result.champion.verifierPassed, true);
   assert.deepEqual(result.champion.verifierEvidence, ['node --test focused']);
   assert.deepEqual(result.recombination.sourceAttemptIds, ['attempt_2', 'attempt_3']);
+});
+
+test('swarm orchestrator preserves deterministic dry-run fallback without a model executor', async () => {
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_dry_run', goal: 'Stay deterministic offline.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 2,
+  });
+
+  assert.equal(result.runMode.mode, 'dry-run');
+  assert.deepEqual(result.attempts.map((attempt) => attempt.strategy), ['reproduce_first', 'minimal_patch']);
+  assert.deepEqual(result.attempts.map((attempt) => attempt.status), ['completed', 'completed']);
+  assert.equal(result.attempts[0].worker.kind, 'deterministic_subagent');
+});
+
+test('swarm orchestrator calls a supplied model executor for independent attempts', async () => {
+  const modelCalls = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_model_orchestrate', goal: 'Run independent model workers.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 2,
+    modelExecutor: async (input) => {
+      modelCalls.push(input);
+      return {
+        callId: `call_${input.attempt.attemptId}`,
+        structured: {
+          summary: `Model completed ${input.attempt.strategy}.`,
+          patch: `diff --git a/${input.attempt.attemptId} b/${input.attempt.attemptId}`,
+          verifierEvidence: [`verified ${input.attempt.attemptId}`],
+          score: input.attempt.attemptId === 'attempt_1' ? 70 : 80,
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(modelCalls.map((call) => call.attempt.attemptId), ['attempt_1', 'attempt_2']);
+  assert.deepEqual(modelCalls.map((call) => call.requestId), [
+    'task_model_orchestrate:attempt_1:model_worker',
+    'task_model_orchestrate:attempt_2:model_worker',
+  ]);
+  assert.equal(result.runMode.mode, 'model-driven');
+  assert.deepEqual(result.attempts.map((attempt) => attempt.worker.kind), ['model_driven', 'model_driven']);
+  assert.deepEqual(result.attempts.map((attempt) => attempt.model.requestId), [
+    'task_model_orchestrate:attempt_1:model_worker',
+    'task_model_orchestrate:attempt_2:model_worker',
+  ]);
+  assert.equal(result.champion.attemptId, 'attempt_2');
+});
+
+test('swarm orchestrator ignores non-callable provider metadata for model execution', async () => {
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_provider_metadata', goal: 'Do not treat provider config as executor.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    provider: { name: 'metadata-only' },
+  });
+
+  assert.equal(result.runMode.mode, 'dry-run');
+  assert.equal(result.attempts[0].worker.kind, 'deterministic_subagent');
+  assert.equal(result.attempts[0].status, 'completed');
+});
+
+test('swarm orchestrator accepts model gateways with call methods', async () => {
+  const calls = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_gateway_call', goal: 'Use gateway call method.' },
+    maxAttempts: 1,
+    modelGateway: {
+      async call(input) {
+        calls.push(input);
+        return {
+          structured: {
+            summary: 'Gateway completed the attempt.',
+            verifierEvidence: ['gateway evidence'],
+            score: 81,
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(result.runMode.mode, 'model-driven');
+  assert.equal(result.attempts[0].worker.kind, 'model_driven');
+  assert.equal(result.attempts[0].status, 'completed');
+});
+
+test('ToolTree planner strategy ranks and schedules attempts with plan metadata', () => {
+  const attempts = scheduleAttempts({
+    taskId: 'task_tooltree_schedule',
+    taskType: 'coding_bugfix',
+    maxAttempts: 2,
+    planner: {
+      enabled: true,
+      strategy: 'tooltree',
+      rootState: { key: 'root' },
+      budget: { maxIterations: 3, maxDepth: 1, exploration: 0 },
+      expandNode: ({ state }) => {
+        if (state.key !== 'root') return [];
+        return [
+          { action: { strategy: 'slow_broad', focus: 'survey' }, state: { key: 'slow' } },
+          { action: { strategy: 'fast_patch', focus: 'owned-files' }, state: { key: 'fast' } },
+        ];
+      },
+      evaluateNode: ({ state }) => (state.key === 'fast' ? 0.9 : 0.2),
+    },
+  });
+
+  assert.deepEqual(attempts.map((attempt) => attempt.strategy), ['fast_patch', 'slow_broad']);
+  assert.deepEqual(attempts.map((attempt) => attempt.planning.strategy), ['tooltree', 'tooltree']);
+  assert.deepEqual(attempts[0].planning.toolPlan.action, { strategy: 'fast_patch', focus: 'owned-files' });
+  assert.equal(attempts[0].planning.rank, 1);
+  assert.equal(attempts[0].planning.score, 0.9);
+});
+
+test('model worker failure in one attempt does not collapse remaining attempts', async () => {
+  const attemptEvents = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_model_failure', goal: 'Keep trying after one model failure.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 3,
+    onAttemptEvent: async (event) => attemptEvents.push(event),
+    modelExecutor: async ({ attempt }) => {
+      if (attempt.attemptId === 'attempt_2') {
+        throw new Error('provider timeout');
+      }
+      return {
+        callId: `call_${attempt.attemptId}`,
+        structured: {
+          summary: `Completed ${attempt.attemptId}.`,
+          patch: `diff --git a/${attempt.attemptId} b/${attempt.attemptId}`,
+          verifierEvidence: [`verified ${attempt.attemptId}`],
+          score: attempt.attemptId === 'attempt_1' ? 50 : 90,
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(result.attempts.map((attempt) => attempt.status), ['completed', 'failed', 'completed']);
+  assert.equal(result.attempts[1].failure.reason, 'model_worker_failed');
+  assert.match(result.attempts[1].failure.message, /provider timeout/);
+  assert.equal(result.attempts[2].status, 'completed');
+  assert.equal(result.champion.attemptId, 'attempt_3');
+  assert.deepEqual(
+    attemptEvents
+      .filter((event) => event.type === 'swarm.subagent_completed')
+      .map((event) => [event.attemptId, event.status, event.failure?.reason || null]),
+    [
+      ['attempt_1', 'completed', null],
+      ['attempt_2', 'failed', 'model_worker_failed'],
+      ['attempt_3', 'completed', null],
+    ],
+  );
 });

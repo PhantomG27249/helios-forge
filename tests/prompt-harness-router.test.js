@@ -34,6 +34,18 @@ test('slash harness prompts launch direct tasks without the command prefix', () 
   assert.equal(route.task, 'inspect the current repo graph');
 });
 
+test('installed research slash commands route through the harness', () => {
+  const researchRoute = classifyHarnessPrompt('/research compare graph RAG options');
+  const forgeRoute = classifyHarnessPrompt('/forge fix this project with BES');
+
+  assert.equal(researchRoute.shouldRun, true);
+  assert.equal(researchRoute.mode, 'direct');
+  assert.equal(researchRoute.task, 'compare graph RAG options');
+  assert.equal(forgeRoute.shouldRun, true);
+  assert.equal(forgeRoute.mode, 'direct');
+  assert.equal(forgeRoute.task, 'fix this project with BES');
+});
+
 test('streaming follow-up prompts do not auto-launch harness tasks', () => {
   const route = classifyHarnessPrompt('also check the tests', { isStreaming: true });
 

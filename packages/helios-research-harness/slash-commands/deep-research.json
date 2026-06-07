@@ -1,0 +1,11 @@
+{
+  "command": "deep-research",
+  "mode": "direct",
+  "harnessMode": "full",
+  "description": "Run Deep Research v2 with evidence and contradiction tracking.",
+  "budget": {
+    "maxToolCalls": 40,
+    "maxWallMinutes": 35
+  },
+  "capabilities": ["deep-research", "source-connectors", "claim-evidence", "bibliography"]
+}

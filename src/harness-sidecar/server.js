@@ -9,8 +9,10 @@ import { AuditLog } from './collaboration/auditLog.js';
 import { LockService } from './collaboration/locks.js';
 import { VersionedState } from './collaboration/versionedState.js';
 import { WorkspaceLeaseService } from './collaboration/workspaceLeases.js';
+import { loadHarnessConfig } from './config/configLoader.js';
 import { compileFinalAuditReport } from './core/finalAudit.js';
 import { resumeTaskFromTrace } from './core/taskResume.js';
+import { listTraces, readTrace, replayTrace } from './core/traceReader.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
@@ -51,6 +53,9 @@ import { createArtifactStore } from './artifacts/artifactStore.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
 import { retrieveWorkspaceContext } from './rag/retriever.js';
 import { indexWorkspace } from './rag/workspaceIndexer.js';
+import { ModelGateway } from './model/modelGateway.js';
+import { getModelProfile } from './model/modelProfiles.js';
+import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
@@ -103,6 +108,10 @@ function sendJson(res, statusCode, body) {
 
 function sendNotFound(res) {
   sendJson(res, 404, { error: 'Not found' });
+}
+
+function sendBadRequest(res, error) {
+  sendJson(res, 400, { error: error.message || String(error) });
 }
 
 function countEnabledCapabilities(capabilities = []) {
@@ -245,7 +254,53 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     contextPack,
     patchArtifact,
     budgetManager,
+    harnessConfig,
   }) {
+    async function createRuntimeSwarmModelGateway() {
+      const enabled = harnessConfig?.features?.modelDrivenSwarm === true
+        || process.env.HELIOS_SWARM_MODEL_DRIVEN === '1';
+      if (!enabled) return null;
+
+      const profileName = process.env.HELIOS_SWARM_MODEL_PROFILE
+        || harnessConfig?.defaults?.swarmModelProfile
+        || 'alphahelion_ebft5';
+      let profile;
+      try {
+        profile = getModelProfile(profileName);
+      } catch (error) {
+        await emitEvent({
+          type: 'swarm.model_gateway_unavailable',
+          taskId: task.taskId,
+          profileName,
+          reason: error.message,
+        });
+        return null;
+      }
+
+      const baseUrl = process.env.HELIOS_SWARM_MODEL_BASE_URL
+        || harnessConfig?.models?.swarmBaseUrl
+        || profile.baseUrl;
+      if (!baseUrl) {
+        await emitEvent({
+          type: 'swarm.model_gateway_unavailable',
+          taskId: task.taskId,
+          profileName,
+          reason: 'No baseUrl configured for model-driven swarm.',
+        });
+        return null;
+      }
+
+      const provider = createOpenAICompatibleProvider({
+        baseUrl,
+        apiKey: process.env.HELIOS_SWARM_MODEL_API_KEY || harnessConfig?.models?.swarmApiKey || 'dummy',
+      });
+
+      return {
+        profileName,
+        gateway: new ModelGateway({ provider, emitEvent }),
+      };
+    }
+
     const enabledSubsystems = [
       'bes',
       'rag',
@@ -260,11 +315,13 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       'budget',
       'audit',
     ];
+    const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
     await emitEvent({
       type: 'harness_runtime.enabled',
       taskId: task.taskId,
       mode: task.mode,
       enabledSubsystems,
+      modelDrivenSwarm: Boolean(runtimeSwarmModel),
     });
 
     const strategies = seedAttemptStrategies({ taskType: 'coding_bugfix', maxAttempts: 4 });
@@ -749,11 +806,51 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       task,
       taskType: 'coding_bugfix',
       maxAttempts: strategies.length,
+      planner: {
+        enabled: true,
+        strategy: 'tooltree',
+        task: task.task,
+        rootState: {
+          taskId: task.taskId,
+          taskType: 'coding_bugfix',
+          contextPackId: contextPack.contextPackId,
+          subgoalScore: subgoalScore.percent,
+        },
+        budget: {
+          maxIterations: Math.max(strategies.length, 4),
+          maxDepth: 1,
+          exploration: 0,
+        },
+        expandNode: ({ state }) => {
+          if (state?.expanded) return [];
+          return strategies.map((strategy, index) => ({
+            action: {
+              strategy: strategy.name,
+              budgetWeight: strategy.budgetWeight,
+              rankHint: index + 1,
+            },
+            state: {
+              expanded: true,
+              strategy: strategy.name,
+              budgetWeight: strategy.budgetWeight,
+              subgoalScore: subgoalScore.percent,
+              contextItems: contextPack.items.length,
+            },
+          }));
+        },
+        evaluateNode: ({ state }) => {
+          const strategyWeight = Number(state?.budgetWeight || 0);
+          const contextWeight = Math.min(1, (state?.contextItems || 0) / 8);
+          return (subgoalScore.percent / 100) + strategyWeight + contextWeight;
+        },
+      },
       context: {
         contextPackId: contextPack.contextPackId,
         allowedFiles: contextPack.items.map((item) => item.path),
       },
       budget: { maxOutputChars: 1200 },
+      modelGateway: runtimeSwarmModel?.gateway,
+      modelProfileName: runtimeSwarmModel?.profileName,
       onAttemptEvent: emitEvent,
       commandAdapter: async ({ attempt }) => ({
         summary: `Dry-run attempt ${attempt.attemptId} evaluated by full runtime.`,
@@ -780,6 +877,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       type: 'swarm.attempts_scheduled',
       taskId: task.taskId,
       attempts,
+      planning: swarmRun.planning,
     });
     await emitEvent({
       type: 'swarm.champion_selected',
@@ -791,6 +889,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId: task.taskId,
       reviewCount: swarmRun.reviews.length,
       recombination: swarmRun.recombination,
+      planning: swarmRun.planning,
       archivedChampion,
     });
     const championApplyPlan = champion
@@ -919,6 +1018,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       },
       emitEvent,
     });
+    const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
 
     const lockResult = lockService.acquire({
       resource: `task:${taskId}`,
@@ -1060,6 +1160,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         contextPack,
         patchArtifact,
         budgetManager,
+        harnessConfig,
       });
     }
     await emitEvent({
@@ -1202,6 +1303,39 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     return normalizeMountResult(mountResult, profileId);
   }
 
+  async function listRecentTraces({ limit } = {}) {
+    const traces = await listTraces({ workspaceRoot: resolvedWorkspaceRoot });
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 25;
+    return { traces: traces.slice(0, safeLimit) };
+  }
+
+  async function getTraceDetail(taskId) {
+    const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId });
+    return {
+      taskId: trace.taskId,
+      traceDir: trace.traceDir,
+      events: trace.events,
+      summary: trace.summary,
+      parseErrors: trace.parseErrors,
+    };
+  }
+
+  async function prepareTraceReplay(taskId, { cursor = 0, limit = 100 } = {}) {
+    const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId });
+    const replay = await replayTrace({
+      workspaceRoot: resolvedWorkspaceRoot,
+      taskId,
+      cursor: Number(cursor),
+      limit: Number(limit),
+    });
+    return {
+      taskId: trace.taskId,
+      summary: trace.summary,
+      parseErrors: trace.parseErrors,
+      ...replay,
+    };
+  }
+
   async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -1263,6 +1397,37 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
           profileId: body.profileId,
         });
         sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/traces') {
+        const result = await listRecentTraces({
+          limit: Number(url.searchParams.get('limit')),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      const traceMatch = url.pathname.match(/^\/v1\/traces\/([^/]+)$/);
+      if (req.method === 'GET' && traceMatch) {
+        try {
+          const result = await getTraceDetail(decodeURIComponent(traceMatch[1]));
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      const traceReplayMatch = url.pathname.match(/^\/v1\/traces\/([^/]+)\/replay$/);
+      if (req.method === 'POST' && traceReplayMatch) {
+        try {
+          const body = await readJsonBody(req);
+          const result = await prepareTraceReplay(decodeURIComponent(traceReplayMatch[1]), body);
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
         return;
       }
 

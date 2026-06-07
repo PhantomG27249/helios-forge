@@ -35,6 +35,19 @@ export class HarnessClient {
     return this.postJson('/v1/capabilities/mount', { workspaceRoot, profileId });
   }
 
+  async listTraces({ limit } = {}) {
+    const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+    return this.getJson(`/v1/traces${query}`);
+  }
+
+  async getTrace(taskId) {
+    return this.getJson(`/v1/traces/${encodeURIComponent(taskId)}`);
+  }
+
+  async prepareTraceReplay(taskId, { cursor = 0, limit = 100 } = {}) {
+    return this.postJson(`/v1/traces/${encodeURIComponent(taskId)}/replay`, { cursor, limit });
+  }
+
   async resolveApproval(actionId, choice) {
     return this.postJson(`/v1/approvals/${encodeURIComponent(actionId)}`, { choice });
   }

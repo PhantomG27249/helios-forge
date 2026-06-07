@@ -1,5 +1,6 @@
 const DIRECT_HARNESS_PATTERNS = [
   /^\/harness\b/i,
+  /^\/(?:research|deep-research|forge)\b/i,
   /\b(?:use|run|launch|start)\b.*\b(?:harness|bes|meta|sidecar)\b/i,
   /\b(?:harness|bes|meta)\b.*\b(?:this|project|task|prompt|repo|repository)\b/i,
 ];
@@ -14,7 +15,7 @@ function normalizePrompt(text) {
 }
 
 function stripHarnessCommand(text) {
-  return text.replace(/^\/harness\b[\s:;-]*/i, '').trim();
+  return text.replace(/^\/(?:harness|research|deep-research|forge)\b[\s:;-]*/i, '').trim();
 }
 
 export function classifyHarnessPrompt(text, { hasImages = false, isStreaming = false } = {}) {
@@ -38,7 +39,7 @@ export function classifyHarnessPrompt(text, { hasImages = false, isStreaming = f
     };
   }
 
-  const isSlashHarness = /^\/harness\b/i.test(normalized);
+  const isSlashHarness = /^\/(?:harness|research|deep-research|forge)\b/i.test(normalized);
   const direct = DIRECT_HARNESS_PATTERNS.some((pattern) => pattern.test(normalized));
   const task = isSlashHarness ? stripHarnessCommand(normalized) || normalized : normalized || '[Image prompt]';
 

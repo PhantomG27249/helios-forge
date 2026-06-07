@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "description": "Helios Forge: an AlphaHelion research-agent workbench for Pi",
   "type": "module",
+  "main": "src/electron/main.js",
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "electron": "electron src/electron/main.js",
     "test": "node --test",
+    "release:smoke": "node scripts/release-smoke.js",
     "install:pi-kwargs": "node scripts/install-pi-kwargs-extension.js"
   },
   "dependencies": {

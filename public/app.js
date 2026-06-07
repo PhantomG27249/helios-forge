@@ -41,11 +41,23 @@ const CAPABILITY_TYPES = [
   { id: 'mcp', label: 'MCPs' },
   { id: 'pi_extension', label: 'Pi Extensions' },
   { id: 'profile', label: 'Profiles' },
+  { id: 'template', label: 'Templates' },
+  { id: 'slash_command', label: 'Slash Commands' },
 ];
 let activeHarnessTab = 'run';
 let harnessCapabilitiesLoaded = false;
 let harnessCapabilities = [];
 let harnessCapabilitiesRequestTimer = null;
+let harnessTraceState = {
+  traces: [],
+  selectedTaskId: null,
+  selectedTrace: null,
+  replayEvents: [],
+  replayCursor: 0,
+  replayDone: true,
+};
+let harnessTracesLoaded = false;
+let harnessTracesRequestTimer = null;
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -141,6 +153,12 @@ const harnessDeepToolCalls = $('#harness-deep-tool-calls');
 const harnessDeepMinutes = $('#harness-deep-minutes');
 const harnessCapabilityStatus = $('#harness-capability-status');
 const harnessCapabilityForm = $('#harness-capability-form');
+const harnessTraceStatus = $('#harness-trace-status');
+const harnessTraceList = $('#harness-trace-list');
+const harnessTraceEvents = $('#harness-trace-events');
+const harnessTraceEventCount = $('#harness-trace-event-count');
+const harnessTraceCostCount = $('#harness-trace-cost-count');
+const harnessTraceContextCount = $('#harness-trace-context-count');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -162,6 +180,7 @@ function applyWorkspaceSelection(path, { notify = true } = {}) {
     send({ type: 'set_workspace', path: workspacePath });
     send({ type: 'get_session_files' });
     if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
+    if (activeHarnessTab === 'traces') requestHarnessTraces();
   }
   if (notify && changed) toast('Workspace selected', 'success');
 }
@@ -425,6 +444,18 @@ function handleMessage(msg) {
     handleHarnessCapabilityDeleted(msg.data || msg);
     return;
   }
+  if (msg.type === 'harness_traces') {
+    handleHarnessTraces(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_trace') {
+    handleHarnessTrace(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_trace_replay') {
+    handleHarnessTraceReplay(msg.data || msg);
+    return;
+  }
 
   // Agent events
   switch (msg.type) {
@@ -574,6 +605,7 @@ function renderHarnessPanel() {
   harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
   renderHarnessSubagents();
+  renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
       <div class="harness-event-main">
@@ -601,6 +633,9 @@ function switchHarnessTab(tabId) {
   });
   if (activeHarnessTab === 'capabilities' && !harnessCapabilitiesLoaded) {
     requestHarnessCapabilities();
+  }
+  if (activeHarnessTab === 'traces' && !harnessTracesLoaded) {
+    requestHarnessTraces();
   }
 }
 
@@ -641,6 +676,8 @@ function extractCapabilityRecords(payload) {
     ...capabilityBucketFromPayload(direct, ['mcp', 'mcps', 'mcpServers']),
     ...capabilityBucketFromPayload(direct, ['pi_extension', 'piExtensions', 'pi_extensions']),
     ...capabilityBucketFromPayload(direct, ['profile', 'profiles']),
+    ...capabilityBucketFromPayload(direct, ['template', 'templates']),
+    ...capabilityBucketFromPayload(direct, ['slash_command', 'slashCommands', 'slash_commands']),
   ];
   if (grouped.length) return grouped;
 
@@ -653,6 +690,8 @@ function normalizeCapabilityType(type) {
   if (value === 'mcps' || value === 'mcp_server') return 'mcp';
   if (value === 'pi-extension' || value === 'pi extension' || value === 'pi_extensions') return 'pi_extension';
   if (value === 'profiles') return 'profile';
+  if (value === 'templates') return 'template';
+  if (value === 'slash-command' || value === 'slash command' || value === 'slash_commands') return 'slash_command';
   return CAPABILITY_TYPES.some(item => item.id === value) ? value : 'skill';
 }
 
@@ -732,14 +771,14 @@ function renderHarnessCapabilities() {
     if (countEl) countEl.textContent = String(records.length);
     if (!listEl) return;
     listEl.innerHTML = records.map(record => `
-      <div class="harness-capability-item ${record.enabled ? '' : 'disabled'}" data-capability-id="${esc(record.id)}">
+      <div class="harness-capability-item ${record.enabled ? '' : 'disabled'}" data-capability-id="${escAttr(record.id)}">
         <div class="harness-capability-item-main">
           <span class="harness-capability-name">${esc(record.name)}</span>
           <span class="harness-capability-meta">${esc(record.pathOrCommandOrUrl || record.approvalMode || 'local')}</span>
         </div>
         <div class="harness-capability-item-actions">
-          <button class="harness-artifact-link" type="button" data-capability-action="edit" data-capability-id="${esc(record.id)}">Edit</button>
-          <button class="harness-artifact-link" type="button" data-capability-action="delete" data-capability-id="${esc(record.id)}">Delete</button>
+          <button class="harness-artifact-link" type="button" data-capability-action="edit" data-capability-id="${escAttr(record.id)}">Edit</button>
+          <button class="harness-artifact-link" type="button" data-capability-action="delete" data-capability-id="${escAttr(record.id)}">Delete</button>
         </div>
       </div>
     `).join('') || '<div class="harness-empty compact">No records</div>';
@@ -832,10 +871,194 @@ function resetHarnessCapabilityForm() {
   $('#capability-approval').value = 'inherit';
 }
 
+function requestHarnessTraces() {
+  if (harnessTraceStatus) harnessTraceStatus.textContent = 'Refreshing traces...';
+  if (harnessTracesRequestTimer) clearTimeout(harnessTracesRequestTimer);
+  harnessTracesRequestTimer = setTimeout(() => {
+    if (harnessTraceStatus?.textContent === 'Refreshing traces...') {
+      harnessTraceStatus.textContent = harnessTracesLoaded
+        ? `${harnessTraceState.traces.length} trace${harnessTraceState.traces.length === 1 ? '' : 's'}`
+        : 'No traces returned yet';
+    }
+  }, 2500);
+  send({ type: 'harness_traces_get', limit: 25 });
+}
+
+function handleHarnessTraces(payload) {
+  if (harnessTracesRequestTimer) clearTimeout(harnessTracesRequestTimer);
+  harnessTracesLoaded = true;
+  harnessTraceState.traces = Array.isArray(payload?.traces) ? payload.traces : [];
+  const selectedStillExists = harnessTraceState.traces.some(trace => trace.taskId === harnessTraceState.selectedTaskId);
+  if (!selectedStillExists) {
+    harnessTraceState.selectedTaskId = harnessTraceState.traces[0]?.taskId || null;
+    harnessTraceState.selectedTrace = null;
+    harnessTraceState.replayEvents = [];
+    harnessTraceState.replayCursor = 0;
+    harnessTraceState.replayDone = true;
+  }
+  renderHarnessTraces();
+  if (harnessTraceState.selectedTaskId && !harnessTraceState.selectedTrace) {
+    requestHarnessTrace(harnessTraceState.selectedTaskId);
+  }
+}
+
+function requestHarnessTrace(taskId) {
+  if (!taskId) return;
+  harnessTraceState.selectedTaskId = taskId;
+  harnessTraceState.replayEvents = [];
+  harnessTraceState.replayCursor = 0;
+  harnessTraceState.replayDone = true;
+  if (harnessTraceStatus) harnessTraceStatus.textContent = `Loading ${taskId}...`;
+  send({ type: 'harness_trace_get', taskId });
+  renderHarnessTraces();
+}
+
+function handleHarnessTrace(payload) {
+  harnessTraceState.selectedTrace = payload || null;
+  harnessTraceState.selectedTaskId = payload?.taskId || harnessTraceState.selectedTaskId;
+  harnessTraceState.replayEvents = [];
+  harnessTraceState.replayCursor = 0;
+  harnessTraceState.replayDone = true;
+  renderHarnessTraces();
+}
+
+function prepareHarnessTraceReplay({ next = false } = {}) {
+  const taskId = harnessTraceState.selectedTaskId;
+  if (!taskId) return;
+  const cursor = next ? harnessTraceState.replayCursor : 0;
+  if (!next) {
+    harnessTraceState.replayEvents = [];
+    harnessTraceState.replayCursor = 0;
+    harnessTraceState.replayDone = true;
+  }
+  if (harnessTraceStatus) harnessTraceStatus.textContent = next ? 'Replaying next events...' : 'Preparing replay...';
+  send({ type: 'harness_trace_replay_prepare', taskId, cursor, limit: 25 });
+  renderHarnessTraces();
+}
+
+function resetHarnessTraceReplay() {
+  harnessTraceState.replayEvents = [];
+  harnessTraceState.replayCursor = 0;
+  harnessTraceState.replayDone = true;
+  renderHarnessTraces();
+}
+
+function handleHarnessTraceReplay(payload) {
+  if (payload?.taskId && payload.taskId !== harnessTraceState.selectedTaskId) {
+    harnessTraceState.selectedTaskId = payload.taskId;
+  }
+  const events = Array.isArray(payload?.events) ? payload.events : [];
+  harnessTraceState.replayEvents = harnessTraceState.replayCursor > 0
+    ? [...harnessTraceState.replayEvents, ...events]
+    : events;
+  harnessTraceState.replayCursor = Number.isFinite(payload?.nextCursor) ? payload.nextCursor : harnessTraceState.replayEvents.length;
+  harnessTraceState.replayDone = payload?.done !== false;
+  if (payload?.summary && harnessTraceState.selectedTrace) {
+    harnessTraceState.selectedTrace = { ...harnessTraceState.selectedTrace, summary: payload.summary };
+  }
+  renderHarnessTraces();
+}
+
+function traceLabel(trace) {
+  return trace?.summary?.task?.summary || trace?.summary?.task?.task || trace?.latestTaskEvent?.type || trace?.taskId || 'trace';
+}
+
+function formatTraceTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function numberFrom(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function summarizeTraceCounters(trace) {
+  const events = trace?.events || [];
+  const summary = trace?.summary || {};
+  let cost = null;
+  let contextUsed = null;
+  let contextMax = null;
+
+  for (const event of events) {
+    cost = numberFrom(event?.cost?.usd ?? event?.costUsd ?? event?.usage?.costUsd) ?? cost;
+    contextUsed = numberFrom(event?.context?.tokensUsed ?? event?.contextTokens ?? event?.tokensEstimated ?? event?.usage?.inputTokens) ?? contextUsed;
+    contextMax = numberFrom(event?.context?.maxTokens ?? event?.maxTokens ?? event?.usage?.contextWindow) ?? contextMax;
+  }
+
+  const costText = cost === null ? 'cost n/a' : `$${cost.toFixed(4)}`;
+  const contextText = contextUsed === null
+    ? 'ctx n/a'
+    : contextMax === null ? `${contextUsed.toLocaleString()} ctx` : `${contextUsed.toLocaleString()}/${contextMax.toLocaleString()} ctx`;
+  return {
+    eventText: `${summary.eventCount || events.length || 0} events`,
+    costText,
+    contextText,
+  };
+}
+
+function renderTraceEventRow(event, index) {
+  const meta = [
+    formatTraceTime(event?.timestamp),
+    event?.taskId,
+    event?.status,
+    Number.isFinite(event?.tokensEstimated) ? `${event.tokensEstimated.toLocaleString()} tok` : '',
+  ].filter(Boolean).join(' | ');
+  return `
+    <div class="harness-trace-event">
+      <div class="harness-trace-event-top">
+        <span class="harness-trace-event-index">${index + 1}</span>
+        <span class="harness-trace-event-type">${esc(event?.type || 'event')}</span>
+      </div>
+      <div class="harness-trace-event-summary">${esc(event?.summary || event?.reason || event?.intent || event?.result || '')}</div>
+      ${meta ? `<div class="harness-trace-event-meta">${esc(meta)}</div>` : ''}
+    </div>
+  `;
+}
+
+function renderHarnessTraces() {
+  if (!harnessTraceList || !harnessTraceEvents) return;
+
+  harnessTraceList.innerHTML = harnessTraceState.traces.map(trace => `
+    <button class="harness-trace-item ${trace.taskId === harnessTraceState.selectedTaskId ? 'active' : ''}" type="button" data-trace-action="select" data-task-id="${escAttr(trace.taskId)}">
+      <span class="harness-trace-item-name">${esc(traceLabel(trace))}</span>
+      <span class="harness-trace-item-meta">${esc(trace.taskId)} | ${trace.eventCount || 0} events</span>
+    </button>
+  `).join('') || '<div class="harness-empty compact">No traces found</div>';
+
+  const selectedTrace = harnessTraceState.selectedTrace;
+  const counters = summarizeTraceCounters(selectedTrace);
+  if (harnessTraceEventCount) harnessTraceEventCount.textContent = counters.eventText;
+  if (harnessTraceCostCount) harnessTraceCostCount.textContent = counters.costText;
+  if (harnessTraceContextCount) harnessTraceContextCount.textContent = counters.contextText;
+
+  if (harnessTraceStatus) {
+    if (selectedTrace?.taskId) {
+      harnessTraceStatus.textContent = `${harnessTraceState.traces.length} trace${harnessTraceState.traces.length === 1 ? '' : 's'} | ${selectedTrace.taskId}`;
+    } else {
+      harnessTraceStatus.textContent = harnessTracesLoaded
+        ? `${harnessTraceState.traces.length} trace${harnessTraceState.traces.length === 1 ? '' : 's'}`
+        : 'No traces loaded';
+    }
+  }
+
+  const events = harnessTraceState.replayEvents.length ? harnessTraceState.replayEvents : (selectedTrace?.events || []);
+  harnessTraceEvents.innerHTML = events.map(renderTraceEventRow).join('')
+    || '<div class="harness-empty compact">Select a trace to inspect events</div>';
+}
+
 function handleHarnessPanelClick(event) {
   const tab = event.target.closest('[data-harness-tab]');
   if (tab) {
     switchHarnessTab(tab.dataset.harnessTab);
+    return;
+  }
+
+  const traceButton = event.target.closest('[data-trace-action]');
+  if (traceButton) {
+    if (traceButton.dataset.traceAction === 'select') requestHarnessTrace(traceButton.dataset.taskId);
     return;
   }
 
@@ -851,6 +1074,7 @@ function toggleHarnessPanel() {
   if (!harnessPanel.classList.contains('hidden')) {
     send({ type: 'harness_status' });
     if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
+    if (activeHarnessTab === 'traces') requestHarnessTraces();
   }
 }
 
@@ -870,13 +1094,14 @@ function classifyPromptHarnessRoute(text, { hasImages = false, promptIsStreaming
 
   const directPatterns = [
     /^\/harness\b/i,
+    /^\/(?:research|deep-research|forge)\b/i,
     /\b(?:use|run|launch|start)\b.*\b(?:harness|bes|meta|sidecar)\b/i,
     /\b(?:harness|bes|meta)\b.*\b(?:this|project|task|prompt|repo|repository)\b/i,
   ];
-  const isSlashHarness = /^\/harness\b/i.test(normalized);
+  const isSlashHarness = /^\/(?:harness|research|deep-research|forge)\b/i.test(normalized);
   const direct = directPatterns.some(pattern => pattern.test(normalized));
   const task = isSlashHarness
-    ? normalized.replace(/^\/harness\b[\s:;-]*/i, '').trim() || normalized
+    ? normalized.replace(/^\/(?:harness|research|deep-research|forge)\b[\s:;-]*/i, '').trim() || normalized
     : normalized || '[Image prompt]';
 
   return {
@@ -1406,6 +1631,10 @@ function esc(text) {
   return d.innerHTML;
 }
 
+function escAttr(text) {
+  return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function scroll() {
   requestAnimationFrame(() => {
     const chatContainer = document.getElementById('chat-container');
@@ -1547,7 +1776,7 @@ function sendMessage(mode = 'prompt') {
       promptIsStreaming: wasStreaming,
     })
     : null;
-  const harnessOnlyCommand = harnessRoute?.mode === 'direct' && /^\/harness\b/i.test(text);
+  const harnessOnlyCommand = harnessRoute?.mode === 'direct' && /^\/(?:harness|research|deep-research|forge)\b/i.test(text);
 
   if (mode === 'prompt' && !wasStreaming) {
     createUserMsg(text, uploadedImages.length ? [...uploadedImages] : null);
@@ -1876,6 +2105,7 @@ $('#btn-stats').addEventListener('click', () => { send({ type: 'get_session_stat
 $('#btn-harness').addEventListener('click', toggleHarnessPanel);
 $('#btn-deep-research')?.addEventListener('click', () => openHarnessTab('deep-research'));
 $('#btn-capabilities')?.addEventListener('click', () => openHarnessTab('capabilities'));
+$('#btn-traces')?.addEventListener('click', () => openHarnessTab('traces'));
 $('#btn-harness-start').addEventListener('click', startHarness);
 $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
@@ -1883,6 +2113,10 @@ if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick
 $('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
 $('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
 $('#btn-harness-capability-reset')?.addEventListener('click', resetHarnessCapabilityForm);
+$('#btn-harness-traces-refresh')?.addEventListener('click', requestHarnessTraces);
+$('#btn-harness-replay-prepare')?.addEventListener('click', () => prepareHarnessTraceReplay());
+$('#btn-harness-replay-next')?.addEventListener('click', () => prepareHarnessTraceReplay({ next: true }));
+$('#btn-harness-replay-reset')?.addEventListener('click', resetHarnessTraceReplay);
 harnessCapabilityForm?.addEventListener('submit', saveHarnessCapability);
 $('#harness-task-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {

@@ -1,0 +1,64 @@
+{
+  "id": "helios-research-harness",
+  "name": "Helios Research Harness",
+  "version": "0.1.0",
+  "description": "Workspace-scoped Pi package for Helios Forge research, BES, memory, graph, VLM, and meta-harness workflows.",
+  "skills": [
+    {
+      "id": "deep-research",
+      "name": "Deep Research",
+      "path": "skills/deep-research/SKILL.md"
+    },
+    {
+      "id": "visual-debugging",
+      "name": "Visual Debugging",
+      "path": "skills/visual-debugging/SKILL.md"
+    },
+    {
+      "id": "meta-harness",
+      "name": "Meta Harness",
+      "path": "skills/meta-harness/SKILL.md"
+    }
+  ],
+  "templates": [
+    {
+      "id": "research-brief",
+      "name": "Research Brief",
+      "path": "templates/research-brief.md"
+    },
+    {
+      "id": "eval-promotion",
+      "name": "Eval Promotion",
+      "path": "templates/eval-promotion.md"
+    },
+    {
+      "id": "visual-fix-report",
+      "name": "Visual Fix Report",
+      "path": "templates/visual-fix-report.md"
+    }
+  ],
+  "slashCommands": [
+    {
+      "id": "research",
+      "name": "Research",
+      "path": "slash-commands/research.json"
+    },
+    {
+      "id": "deep-research",
+      "name": "Deep Research",
+      "path": "slash-commands/deep-research.json"
+    },
+    {
+      "id": "forge",
+      "name": "Forge",
+      "path": "slash-commands/forge.json"
+    }
+  ],
+  "piExtensions": [
+    {
+      "id": "kwargs",
+      "name": "Model Args and Thinking Preservation",
+      "path": "extensions/kwargs.ts"
+    }
+  ]
+}

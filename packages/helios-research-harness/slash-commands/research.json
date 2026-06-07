@@ -1,0 +1,11 @@
+{
+  "command": "research",
+  "mode": "direct",
+  "harnessMode": "full",
+  "description": "Run a source-grounded Helios research task.",
+  "budget": {
+    "maxToolCalls": 30,
+    "maxWallMinutes": 25
+  },
+  "capabilities": ["deep-research", "rag", "graph-memory", "citation-audit"]
+}

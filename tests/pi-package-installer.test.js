@@ -3,9 +3,12 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:f
 import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import { installPiPackage } from '../src/harness-sidecar/capabilities/piPackageInstaller.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 async function withTempRoot(prefix, fn) {
   const root = await mkdtemp(path.join(tmpdir(), prefix));
@@ -101,9 +104,52 @@ test('installs a local helios package into workspace .harness and returns capabi
     assert.equal(await exists(path.join(installRoot, 'ignored.txt')), false);
 
     assert.deepEqual(
-      result.capabilities.map((capability) => capability.path),
-      [installedSkill, installedTemplate, installedSlashCommand, installedExtension],
+      result.capabilities.map((capability) => [capability.path, capability.pathOrCommandOrUrl, capability.enabled]),
+      [installedSkill, installedTemplate, installedSlashCommand, installedExtension].map((installedPath) => [installedPath, installedPath, true]),
     );
+  });
+});
+
+test('installs the bundled Helios research harness package', async () => {
+  await withTempRoot('helios-package-installer-', async (root) => {
+    const workspaceRoot = path.join(root, 'workspace');
+    const packageRoot = path.join(repoRoot, 'packages', 'helios-research-harness');
+
+    const result = await installPiPackage({
+      workspaceRoot,
+      packageRoot,
+      now: () => '2026-06-07T12:30:00.000Z',
+    });
+
+    assert.equal(result.packageRecord.packageId, 'helios-research-harness');
+    assert.equal(result.packageRecord.name, 'Helios Research Harness');
+    assert.equal(result.capabilities.length, 10);
+    assert.deepEqual(
+      result.capabilities.map((capability) => capability.type).sort(),
+      [
+        'pi_extension',
+        'skill',
+        'skill',
+        'skill',
+        'slash_command',
+        'slash_command',
+        'slash_command',
+        'template',
+        'template',
+        'template',
+      ],
+    );
+
+    const researchCommand = result.capabilities.find((capability) => capability.id === 'helios-research-harness:slash_command:research');
+    const kwargsExtension = result.capabilities.find((capability) => capability.id === 'helios-research-harness:pi_extension:kwargs');
+    assert.ok(researchCommand);
+    assert.ok(kwargsExtension);
+    assert.equal(researchCommand.enabled, true);
+    assert.equal(kwargsExtension.enabled, true);
+    assert.deepEqual(JSON.parse(await readFile(researchCommand.path, 'utf8')).command, 'research');
+    assert.match(await readFile(kwargsExtension.path, 'utf8'), /preserve_thinking/);
+    assert.equal(kwargsExtension.folder, path.dirname(kwargsExtension.path));
+    assert.equal(kwargsExtension.path.startsWith(path.join(workspaceRoot, '.harness', 'packages')), true);
   });
 });
 

@@ -189,6 +189,15 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     assert.equal(runtimeEvent.mode, 'full');
     assert.equal(runtimeEvent.enabledSubsystems.includes('meta'), true);
     assert.equal(runtimeEvent.enabledSubsystems.includes('bes'), true);
+    assert.equal(runtimeEvent.modelDrivenSwarm, false);
+
+    const scheduledEvent = events.find((event) => event.type === 'swarm.attempts_scheduled');
+    assert.equal(scheduledEvent.planning.strategy, 'tooltree');
+    assert.equal(scheduledEvent.planning.attempts.length, 4);
+    assert.equal(scheduledEvent.planning.attempts.every((attempt) => attempt.planning), true);
+
+    const completedEvent = events.find((event) => event.type === 'swarm.orchestration_completed');
+    assert.equal(completedEvent.planning.strategy, 'tooltree');
 
     const memoryContent = await readFile(
       path.join(workspaceRoot, '.harness', 'memory', 'candidates.jsonl'),

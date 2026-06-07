@@ -411,6 +411,27 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'harness_capabilities_mounted', data: result }));
         break;
       }
+      case 'harness_traces_get': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.listTraces({ limit: msg.limit || 25 });
+        ws.send(JSON.stringify({ type: 'harness_traces', data: result }));
+        break;
+      }
+      case 'harness_trace_get': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.getTrace(msg.taskId || msg.traceId);
+        ws.send(JSON.stringify({ type: 'harness_trace', data: result }));
+        break;
+      }
+      case 'harness_trace_replay_prepare': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.prepareTraceReplay(msg.taskId || msg.traceId, {
+          cursor: msg.cursor || 0,
+          limit: msg.limit || 100,
+        });
+        ws.send(JSON.stringify({ type: 'harness_trace_replay', data: result }));
+        break;
+      }
       case 'harness_task_start': {
         await ensureHarnessRunning(harness, pi, feedback);
         const task = await harness.client.startTask({

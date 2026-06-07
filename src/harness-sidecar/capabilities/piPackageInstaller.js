@@ -268,8 +268,11 @@ function createCapabilityRecords({ manifest, files }) {
       packageName: manifest.name,
       packageVersion: manifest.version,
       name: file.name,
+      enabled: file.manifestEntry?.enabled !== false,
       path: file.installedPath,
+      pathOrCommandOrUrl: file.installedPath,
       sourcePath: file.sourcePath,
+      approvalMode: file.manifestEntry?.approvalMode || 'inherit',
       manifestEntry: file.manifestEntry,
     };
 

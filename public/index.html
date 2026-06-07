@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250617">
+  <link rel="stylesheet" href="/app.css?v=20250618">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -120,6 +120,9 @@
           <button id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5 5l14 14"/><path d="M19 5L5 19"/></svg>
           </button>
+          <button id="btn-traces" class="topbar-icon-btn" title="Traces" aria-label="Open Traces and Replay">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/><path d="M17 15l3 3-3 3"/><path d="M14 18h6"/></svg>
+          </button>
           <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
           </button>
@@ -156,6 +159,7 @@
             <button class="harness-tab active" type="button" data-harness-tab="run">Run</button>
             <button class="harness-tab" type="button" data-harness-tab="deep-research">Deep Research</button>
             <button class="harness-tab" type="button" data-harness-tab="capabilities">Capabilities</button>
+            <button class="harness-tab" type="button" data-harness-tab="traces">Traces</button>
           </div>
           <div id="harness-tab-run" class="harness-tab-panel active">
             <div class="harness-task-row">
@@ -196,6 +200,14 @@
                   <div class="harness-capability-section-title">Profiles <span id="capability-count-profile">0</span></div>
                   <div id="capability-list-profile" class="harness-capability-list"></div>
                 </section>
+                <section class="harness-capability-section" data-capability-section="template">
+                  <div class="harness-capability-section-title">Templates <span id="capability-count-template">0</span></div>
+                  <div id="capability-list-template" class="harness-capability-list"></div>
+                </section>
+                <section class="harness-capability-section" data-capability-section="slash_command">
+                  <div class="harness-capability-section-title">Slash Commands <span id="capability-count-slash_command">0</span></div>
+                  <div id="capability-list-slash_command" class="harness-capability-list"></div>
+                </section>
               </div>
               <form id="harness-capability-form" class="harness-capability-form">
                 <input id="capability-id" type="hidden" />
@@ -206,6 +218,8 @@
                       <option value="mcp">MCP</option>
                       <option value="pi_extension">Pi Extension</option>
                       <option value="profile">Profile</option>
+                      <option value="template">Template</option>
+                      <option value="slash_command">Slash Command</option>
                     </select>
                   </label>
                   <label>Name<input id="capability-name" type="text" placeholder="capability name" /></label>
@@ -228,6 +242,28 @@
                   <button id="btn-harness-capability-save" class="harness-run-btn" type="submit">Save</button>
                 </div>
               </form>
+            </div>
+          </div>
+          <div id="harness-tab-traces" class="harness-tab-panel">
+            <div class="harness-trace-toolbar">
+              <span id="harness-trace-status">No traces loaded</span>
+              <button id="btn-harness-traces-refresh" class="harness-btn" type="button">Refresh</button>
+            </div>
+            <div class="harness-trace-layout">
+              <div id="harness-trace-list" class="harness-trace-list"></div>
+              <div class="harness-trace-detail">
+                <div class="harness-trace-counters">
+                  <span id="harness-trace-event-count">0 events</span>
+                  <span id="harness-trace-cost-count">cost n/a</span>
+                  <span id="harness-trace-context-count">ctx n/a</span>
+                </div>
+                <div class="harness-replay-controls">
+                  <button id="btn-harness-replay-prepare" class="harness-btn" type="button">Prepare</button>
+                  <button id="btn-harness-replay-next" class="harness-btn" type="button">Next</button>
+                  <button id="btn-harness-replay-reset" class="harness-btn" type="button">Reset</button>
+                </div>
+                <div id="harness-trace-events" class="harness-trace-events"></div>
+              </div>
             </div>
           </div>
           <div class="harness-metrics">
@@ -353,6 +389,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250617"></script>
+  <script src="/app.js?v=20250618"></script>
 </body>
 </html>

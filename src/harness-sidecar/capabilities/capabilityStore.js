@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const SUPPORTED_TYPES = ['skill', 'mcp', 'pi_extension', 'profile'];
+const SUPPORTED_TYPES = ['skill', 'mcp', 'pi_extension', 'profile', 'template', 'slash_command'];
 const LOCAL_PATH_FIELDS = ['path', 'folder', 'file'];
 const REDACTED = '[redacted]';
 
@@ -25,6 +25,8 @@ function createEmptyRegistry() {
       mcp: 0,
       pi_extension: 0,
       profile: 0,
+      template: 0,
+      slash_command: 0,
       enabled: 0,
     },
   };

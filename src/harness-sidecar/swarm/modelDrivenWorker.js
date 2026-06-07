@@ -60,14 +60,16 @@ function normalizeScore(score) {
   return Number.isFinite(normalized) ? normalized : 0;
 }
 
-function modelMetadata(response, profileName) {
+function modelMetadata(response, profileName, requestId) {
   const profile = response?.profile || {};
-  return {
+  const metadata = {
     callId: response?.callId || null,
     profileName: profile.name || profileName || null,
     model: profile.model || null,
     usage: response?.usage || null,
   };
+  if (requestId) metadata.requestId = response?.requestId || requestId;
+  return metadata;
 }
 
 export function normalizeModelWorkerOutput({
@@ -75,6 +77,7 @@ export function normalizeModelWorkerOutput({
   attempt = {},
   role = 'implementer',
   profileName,
+  requestId,
 } = {}) {
   if (response && typeof response === 'object' && !Array.isArray(response)) {
     assertNoToolCalls(response);
@@ -102,7 +105,7 @@ export function normalizeModelWorkerOutput({
     artifacts: asArray(output.artifacts),
     risks: asArray(output.risks),
     status: 'completed',
-    model: modelMetadata(response, profileName),
+    model: modelMetadata(response, profileName, requestId),
   };
 }
 
@@ -141,6 +144,9 @@ async function callInjectedModel({ modelGateway, provider, callInput }) {
   if (typeof provider === 'function') {
     return provider(callInput);
   }
+  if (typeof provider?.call === 'function') {
+    return provider.call(callInput);
+  }
 
   throw new Error('Model-driven worker requires an injected modelGateway or provider');
 }
@@ -154,6 +160,7 @@ export async function runModelDrivenAttempt({
   profileName = 'critic_low_temp',
   modelGateway,
   provider,
+  requestId,
 } = {}) {
   const prompt = buildRolePrompt({
     role,
@@ -164,6 +171,7 @@ export async function runModelDrivenAttempt({
     outputContract: { requiredFields: MODEL_WORKER_REQUIRED_FIELDS },
   });
   const callInput = {
+    requestId,
     taskId: task.taskId,
     purpose: 'swarm_model_worker',
     profileName,
@@ -179,7 +187,7 @@ export async function runModelDrivenAttempt({
   };
 
   const response = await callInjectedModel({ modelGateway, provider, callInput });
-  return normalizeModelWorkerOutput({ response, attempt, role, profileName });
+  return normalizeModelWorkerOutput({ response, attempt, role, profileName, requestId });
 }
 
 export const runModelDrivenWorker = runModelDrivenAttempt;

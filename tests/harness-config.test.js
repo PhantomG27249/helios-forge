@@ -23,6 +23,7 @@ test('config loader returns safe defaults when no config file exists', async () 
     assert.equal(config.defaults.modelProfile, 'qwen36_vlm_fast');
     assert.equal(config.permissions.mode, 'safe_edit');
     assert.equal(config.features.swarm, false);
+    assert.equal(config.features.modelDrivenSwarm, false);
   });
 });
 
@@ -47,6 +48,7 @@ test('config loader reads harness yaml overrides', async () => {
         '    - github.search_issues',
         'features:',
         '  swarm: true',
+        '  modelDrivenSwarm: true',
         '  deepResearch: true',
         '',
       ].join('\n'),
@@ -61,6 +63,7 @@ test('config loader reads harness yaml overrides', async () => {
     assert.equal(config.budgets.maxToolCalls, 42);
     assert.deepEqual(config.permissions.allowedTools, ['shell.run', 'github.search_issues']);
     assert.equal(config.features.swarm, true);
+    assert.equal(config.features.modelDrivenSwarm, true);
     assert.equal(config.features.deepResearch, true);
   });
 });

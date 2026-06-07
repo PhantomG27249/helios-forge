@@ -1664,7 +1664,7 @@ body {
 
 .harness-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   margin-bottom: 10px;
   padding: 3px;
@@ -1797,6 +1797,157 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.harness-trace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.harness-trace-toolbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-trace-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(280px, 1.2fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.harness-trace-list,
+.harness-trace-events {
+  min-width: 0;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.harness-trace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.harness-trace-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+.harness-trace-item:hover,
+.harness-trace-item.active {
+  border-color: var(--border-hover);
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.harness-trace-item-name,
+.harness-trace-item-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-trace-item-name {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.harness-trace-item-meta,
+.harness-trace-event-meta {
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.harness-trace-detail {
+  min-width: 0;
+}
+
+.harness-trace-counters,
+.harness-replay-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.harness-trace-counters span {
+  padding: 3px 7px;
+  border: 1px solid var(--tool-border);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.harness-trace-events {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.harness-trace-event {
+  min-width: 0;
+  padding: 7px 8px;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+}
+
+.harness-trace-event-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.harness-trace-event-index {
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+.harness-trace-event-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.harness-trace-event-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 3px;
 }
 
 .harness-capability-layout {
@@ -2175,7 +2326,8 @@ body {
 }
 
 @media (max-width: 980px) {
-  .harness-capability-layout {
+  .harness-capability-layout,
+  .harness-trace-layout {
     grid-template-columns: 1fr;
   }
 }
@@ -2189,7 +2341,8 @@ body {
   }
 
   .harness-task-row,
-  .harness-capability-toolbar {
+  .harness-capability-toolbar,
+  .harness-trace-toolbar {
     align-items: stretch;
     flex-direction: column;
   }
