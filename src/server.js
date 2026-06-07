@@ -365,6 +365,7 @@ async function handleCommand(ws, msg, pi, harness) {
           task: msg.task || msg.message || '',
           mode: msg.mode || 'mvp',
           budget: msg.budget || { maxToolCalls: 20, maxWallMinutes: 15 },
+          source: msg.source || 'manual',
         });
         ws.send(JSON.stringify({ type: 'harness_task_started', data: task }));
         break;

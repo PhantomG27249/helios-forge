@@ -186,6 +186,39 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
   });
 });
 
+test('task endpoint preserves prompt launch source metadata', async () => {
+  await withSidecar(async ({ sidecar }) => {
+    const events = [];
+    const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+    const response = await fetch(`${sidecar.url}/v1/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId: 'local',
+        task: 'inspect prompt launch source',
+        mode: 'full',
+        source: 'prompt_background',
+        budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 202);
+    const startedEvent = await waitForEvent(
+      events,
+      (event) => event.taskId === body.taskId && event.type === 'task.started',
+    );
+    const taskResponse = await fetch(`${sidecar.url}/v1/tasks/${body.taskId}`);
+    const taskDetail = await taskResponse.json();
+
+    assert.equal(startedEvent.source, 'prompt_background');
+    assert.equal(taskDetail.task.source, 'prompt_background');
+
+    unsubscribe();
+  });
+});
+
 test('approval endpoint resolves a pending approval and emits an event', async () => {
   await withSidecar(async ({ sidecar }) => {
     const events = [];

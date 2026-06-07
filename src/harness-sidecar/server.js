@@ -398,6 +398,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       task: body.task || '',
       mode: body.mode || 'full',
       budget: body.budget || {},
+      source: body.source || 'manual',
       status: 'approval_required',
       createdAt: new Date().toISOString(),
     };
@@ -448,6 +449,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId,
       summary: task.task,
       status: 'running',
+      source: task.source,
     });
     await emitEvent({
       type: 'scope_contract.created',

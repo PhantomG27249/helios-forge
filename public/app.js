@@ -22,6 +22,10 @@ let uploadedImages = [];
 let savedThinkingBlocks = [];
 let workspacePath = ''; // Persist across text_start
 let currentSessionId = null;
+let autoHarnessEnabled = true;
+let lastBackgroundHarnessAt = 0;
+const HARNESS_BACKGROUND_COOLDOWN_MS = 1500;
+const DEFAULT_HARNESS_BUDGET = { maxToolCalls: 20, maxWallMinutes: 15 };
 let harnessState = {
   status: 'unknown',
   activeTasks: new Map(),
@@ -483,6 +487,58 @@ function stopHarness() {
   send({ type: 'harness_stop' });
 }
 
+function classifyPromptHarnessRoute(text, { hasImages = false, promptIsStreaming = false } = {}) {
+  const normalized = String(text || '').trim();
+  if (!autoHarnessEnabled) return { shouldRun: false, mode: 'background', task: normalized, reason: 'disabled' };
+  if (promptIsStreaming) return { shouldRun: false, mode: 'background', task: normalized, reason: 'streaming_prompt' };
+  if (!normalized && !hasImages) return { shouldRun: false, mode: 'background', task: '', reason: 'empty_prompt' };
+
+  const directPatterns = [
+    /^\/harness\b/i,
+    /\b(?:use|run|launch|start)\b.*\b(?:harness|bes|meta|sidecar)\b/i,
+    /\b(?:harness|bes|meta)\b.*\b(?:this|project|task|prompt|repo|repository)\b/i,
+  ];
+  const isSlashHarness = /^\/harness\b/i.test(normalized);
+  const direct = directPatterns.some(pattern => pattern.test(normalized));
+  const task = isSlashHarness
+    ? normalized.replace(/^\/harness\b[\s:;-]*/i, '').trim() || normalized
+    : normalized || '[Image prompt]';
+
+  return {
+    shouldRun: true,
+    mode: direct ? 'direct' : 'background',
+    task,
+    reason: direct ? 'explicit_harness_intent' : 'automatic_background',
+  };
+}
+
+function launchHarnessFromPrompt(text, options = {}) {
+  const route = classifyPromptHarnessRoute(text, options);
+  if (!route.shouldRun) return route;
+
+  const now = Date.now();
+  if (route.mode === 'background' && now - lastBackgroundHarnessAt < HARNESS_BACKGROUND_COOLDOWN_MS) {
+    return { ...route, shouldRun: false, reason: 'background_cooldown' };
+  }
+  if (route.mode === 'background') lastBackgroundHarnessAt = now;
+
+  send({
+    type: 'harness_task_start',
+    task: route.task,
+    mode: 'full',
+    budget: { ...DEFAULT_HARNESS_BUDGET },
+    source: route.mode === 'direct' ? 'prompt_direct' : 'prompt_background',
+  });
+
+  debug(`Harness ${route.mode} launch: ${route.reason}`);
+  if (route.mode === 'direct') {
+    harnessPanel.classList.remove('hidden');
+    toast('Harness launched', 'success');
+  }
+
+  return route;
+}
+
 function runHarnessTask() {
   const task = harnessTaskInput?.value?.trim();
   if (!task) return;
@@ -490,7 +546,8 @@ function runHarnessTask() {
     type: 'harness_task_start',
     task,
     mode: 'full',
-    budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+    budget: { ...DEFAULT_HARNESS_BUDGET },
+    source: 'manual_panel',
   });
   harnessTaskInput.value = '';
 }
@@ -1043,16 +1100,41 @@ function updateInput() {
 function sendMessage(mode = 'prompt') {
   const text = inputEl.value.trim();
   if (!text && !uploadedImages.length) return;
+  const wasStreaming = isStreaming;
+  const harnessRoute = mode === 'prompt'
+    ? classifyPromptHarnessRoute(text || '[Image]', {
+      hasImages: uploadedImages.length > 0,
+      promptIsStreaming: wasStreaming,
+    })
+    : null;
+  const harnessOnlyCommand = harnessRoute?.mode === 'direct' && /^\/harness\b/i.test(text);
 
-  if (mode === 'prompt' && !isStreaming) {
+  if (mode === 'prompt' && !wasStreaming) {
     createUserMsg(text, uploadedImages.length ? [...uploadedImages] : null);
+  }
+
+  if (harnessOnlyCommand) {
+    launchHarnessFromPrompt(text, {
+      hasImages: uploadedImages.length > 0,
+      promptIsStreaming: wasStreaming,
+    });
+    inputEl.value = '';
+    clearImagePreview();
+    autoResize();
+    return;
   }
 
   const msg = { type: 'prompt', message: text || '[Image]' };
   if (uploadedImages.length) msg.images = [...uploadedImages];
-  if (isStreaming) msg.streamingBehavior = mode === 'steer' ? 'steer' : 'followUp';
+  if (wasStreaming) msg.streamingBehavior = mode === 'steer' ? 'steer' : 'followUp';
 
   send(msg);
+  if (mode === 'prompt') {
+    launchHarnessFromPrompt(text || '[Image]', {
+      hasImages: uploadedImages.length > 0,
+      promptIsStreaming: wasStreaming,
+    });
+  }
   
   inputEl.value = '';
   clearImagePreview();
