@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { ensureModelImageInput } from '../src/pi/modelConfig.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = path.join(repoRoot, 'src', 'pi', 'extensions', 'kwargs.ts');
@@ -15,7 +16,8 @@ await copyFile(source, target);
 const modelsPath = path.join(home, '.pi', 'agent', 'models.json');
 try {
   const raw = await readFile(modelsPath, 'utf8');
-  await writeFile(modelsPath, raw.replace(/^\uFEFF/, ''), { encoding: 'utf8' });
+  const normalized = ensureModelImageInput(raw);
+  await writeFile(modelsPath, normalized.rawJson, { encoding: 'utf8' });
 } catch {
   // The extension can be installed before models.json exists.
 }
