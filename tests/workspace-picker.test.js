@@ -6,14 +6,16 @@ import {
   selectWorkspaceFolder,
 } from '../src/workspace/workspacePicker.js';
 
-test('windows workspace picker command uses STA PowerShell and preserves initial directory', () => {
+test('windows workspace picker command uses the Explorer-style folder dialog and preserves initial directory', () => {
   const command = buildWindowsFolderPickerCommand({ initialDirectory: "C:\\Users\\jackj\\Github\\chat-app" });
 
   assert.equal(command.file, 'powershell.exe');
   assert.ok(command.args.includes('-STA'));
   assert.ok(command.args.includes('-NoProfile'));
   assert.ok(command.args.includes('-ExecutionPolicy'));
-  assert.match(command.args.at(-1), /FolderBrowserDialog/);
+  assert.match(command.args.at(-1), /IFileOpenDialog/);
+  assert.match(command.args.at(-1), /FOS_PICKFOLDERS/);
+  assert.doesNotMatch(command.args.at(-1), /FolderBrowserDialog/);
   assert.match(command.args.at(-1), /C:\\Users\\jackj\\Github\\chat-app/);
 });
 
@@ -40,4 +42,3 @@ test('workspace picker runs the platform command and returns the selected path',
   assert.ok(calls[0].args.includes('-STA'));
   assert.deepEqual(result, { selected: true, path: 'C:\\Users\\jackj\\Github\\chat-app' });
 });
-
