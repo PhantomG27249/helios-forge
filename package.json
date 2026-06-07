@@ -7,7 +7,8 @@
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "electron": "electron src/electron/main.js",
-    "test": "node --test"
+    "test": "node --test",
+    "install:pi-kwargs": "node scripts/install-pi-kwargs-extension.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
