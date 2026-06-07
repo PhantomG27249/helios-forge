@@ -19,9 +19,11 @@ export async function orchestrateSwarm({
   budget = {},
   outputContract = { requiredFields: ['patch', 'verifierEvidence'] },
   commandAdapter,
+  runMode,
   riskPolicy = {},
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
+  const mode = runMode || (commandAdapter ? 'real' : 'dry-run');
   const scheduledAttempts = scheduleAttempts({ taskId, taskType, maxAttempts });
   const attempts = [];
 
@@ -56,6 +58,11 @@ export async function orchestrateSwarm({
 
   return {
     taskId,
+    runMode: {
+      mode,
+      dryRun: mode === 'dry-run',
+      real: mode === 'real',
+    },
     attempts,
     reviews,
     recombination,
