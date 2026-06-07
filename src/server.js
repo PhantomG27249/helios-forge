@@ -11,6 +11,7 @@ import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
 import { HarnessManager } from './harness/harnessManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
+import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -146,6 +147,65 @@ function serveStatic(req, res, url) {
   } else {
     res.writeHead(404); res.end('Not Found');
   }
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+function isLocalRequest(req) {
+  const remoteAddress = req.socket?.remoteAddress || '';
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress);
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString('utf8');
+      if (body.length > 64 * 1024) {
+        reject(new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('Invalid JSON body'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+async function handleWorkspaceSelect(req, res) {
+  if (!isLocalRequest(req)) {
+    sendJson(res, 403, { selected: false, error: 'Workspace picker is only available from localhost' });
+    return;
+  }
+
+  try {
+    const body = await readJsonBody(req);
+    const result = await selectWorkspaceFolder({ initialDirectory: body.initialDirectory || '' });
+    sendJson(res, 200, result);
+  } catch (error) {
+    sendJson(res, 500, { selected: false, error: error.message });
+  }
+}
+
+async function handleHttpRequest(req, res) {
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  if (req.method === 'POST' && pathname === '/api/workspace/select') {
+    await handleWorkspaceSelect(req, res);
+    return;
+  }
+  serveStatic(req, res, req.url);
 }
 
 function createHarnessRuntime(workspaceRoot) {
@@ -484,7 +544,11 @@ async function main() {
   const pi = new PiRpcManager();
   const harness = createHarnessRuntime(pi.cwd);
 
-  const server = createServer((req, res) => serveStatic(req, res, req.url));
+  const server = createServer((req, res) => {
+    handleHttpRequest(req, res).catch((error) => {
+      sendJson(res, 500, { error: error.message });
+    });
+  });
   const wss = new WebSocketServer({ server });
 
   wss.on('connection', (ws) => {

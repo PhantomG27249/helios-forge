@@ -5,7 +5,7 @@
  * Runs the Node.js server internally and opens a BrowserWindow.
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -103,4 +103,18 @@ app.on('activate', () => {
 // Handle IPC from preload
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+ipcMain.handle('select-workspace', async (_event, initialDirectory) => {
+  const options = {
+    title: 'Select Helios Forge workspace',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  if (initialDirectory) options.defaultPath = initialDirectory;
+
+  const result = await dialog.showOpenDialog(mainWindow, options);
+  if (result.canceled || !result.filePaths?.[0]) {
+    return { selected: false };
+  }
+  return { selected: true, path: result.filePaths[0] };
 });

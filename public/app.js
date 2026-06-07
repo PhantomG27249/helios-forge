@@ -63,6 +63,9 @@ const connectionDialog = document.getElementById('connection-dialog');
 const serverUrlInput = document.getElementById('server-url');
 const connectBtn = document.getElementById('btn-connect');
 const appEl = document.getElementById('app');
+const workspacePathInput = document.getElementById('workspace-path');
+const workspaceBrowseConnectBtn = document.getElementById('btn-workspace-browse-connect');
+const workspaceBrowseBtn = document.getElementById('btn-workspace-browse');
 
 if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
   serverUrlInput.value = `ws://${location.host}`;
@@ -78,7 +81,7 @@ window.setServerUrl = function(host) {
 
 function startConnection() {
   serverUrl = serverUrlInput.value.trim();
-  workspacePath = document.getElementById('workspace-path')?.value?.trim() || '';
+  workspacePath = workspacePathInput?.value?.trim() || '';
   if (!serverUrl) return;
   if (location.protocol === 'https:') serverUrl = serverUrl.replace('ws://', 'wss://');
   debug(`Connecting to: ${serverUrl}`);
@@ -119,26 +122,86 @@ const harnessTaskCount = $('#harness-task-count');
 const harnessApprovalCount = $('#harness-approval-count');
 const harnessEvents = $('#harness-events');
 const harnessTaskInput = $('#harness-task-input');
+const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
 // Workspace Input Handler
 // ═══════════════════════════════════════════════════════════
-const workspaceInput = document.getElementById('workspace-input');
+function syncWorkspaceInputs(path) {
+  if (workspacePathInput) workspacePathInput.value = path || '';
+  if (workspaceInput) workspaceInput.value = path || '';
+}
+
+function applyWorkspaceSelection(path, { notify = true } = {}) {
+  const nextWorkspace = String(path || '').trim();
+  if (!nextWorkspace) return;
+  const changed = nextWorkspace !== workspacePath;
+  workspacePath = nextWorkspace;
+  syncWorkspaceInputs(workspacePath);
+  debug('Workspace changed to: ' + workspacePath);
+  if (ws?.readyState === WebSocket.OPEN) {
+    send({ type: 'set_workspace', path: workspacePath });
+    send({ type: 'get_session_files' });
+  }
+  if (notify && changed) toast('Workspace selected', 'success');
+}
+
+function setWorkspaceBrowseBusy(isBusy) {
+  if (workspaceBrowseConnectBtn) workspaceBrowseConnectBtn.disabled = isBusy;
+  if (workspaceBrowseBtn) workspaceBrowseBtn.disabled = isBusy;
+}
+
+async function chooseWorkspace(event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+
+  const initialDirectory = workspacePath
+    || workspaceInput?.value?.trim()
+    || workspacePathInput?.value?.trim()
+    || '';
+
+  setWorkspaceBrowseBusy(true);
+  try {
+    let result;
+    if (window.electronAPI?.selectWorkspace) {
+      result = await window.electronAPI.selectWorkspace(initialDirectory);
+    } else {
+      const response = await fetch('/api/workspace/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ initialDirectory }),
+      });
+      result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Workspace picker failed');
+    }
+
+    if (result?.selected && result.path) {
+      applyWorkspaceSelection(result.path);
+    } else if (result?.unsupported) {
+      toast(result.reason || 'Workspace picker is not available here', 'error');
+    } else {
+      debug('Workspace selection cancelled');
+    }
+  } catch (error) {
+    debug('Workspace picker error: ' + error.message);
+    toast(error.message || 'Workspace picker failed', 'error');
+  } finally {
+    setWorkspaceBrowseBusy(false);
+  }
+}
+
 if (workspaceInput) {
   workspaceInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const newWorkspace = workspaceInput.value.trim();
-      if (newWorkspace && newWorkspace !== workspacePath) {
-        workspacePath = newWorkspace;
-        debug('Workspace changed to: ' + workspacePath);
-        send({ type: 'set_workspace', path: workspacePath });
-        // Refresh sessions for new workspace
-        send({ type: 'get_session_files' });
-      }
+      if (newWorkspace) applyWorkspaceSelection(newWorkspace, { notify: false });
     }
   });
 }
+if (workspacePathInput) workspacePathInput.addEventListener('keydown', e => { if (e.key === 'Enter') startConnection(); });
+if (workspaceBrowseConnectBtn) workspaceBrowseConnectBtn.addEventListener('click', chooseWorkspace);
+if (workspaceBrowseBtn) workspaceBrowseBtn.addEventListener('click', chooseWorkspace);
 
 // ═══════════════════════════════════════════════════════════
 // WebSocket
@@ -259,13 +322,10 @@ function handleMessage(msg) {
       updateHeader();
       // Update workspace input to match session's directory
       if (msg.state?.cwd) {
-        const workspaceInput = document.getElementById('workspace-input');
-        if (workspaceInput) {
-          workspaceInput.value = msg.state.cwd;
-          if (workspaceInput.value !== workspacePath) {
-            workspacePath = workspaceInput.value;
-            debug('Workspace updated to: ' + workspacePath);
-          }
+        syncWorkspaceInputs(msg.state.cwd);
+        if (msg.state.cwd !== workspacePath) {
+          workspacePath = msg.state.cwd;
+          debug('Workspace updated to: ' + workspacePath);
         }
       }
     }
