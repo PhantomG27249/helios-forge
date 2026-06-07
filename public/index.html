@@ -146,9 +146,83 @@
               <button id="btn-harness-stop" class="harness-btn">Stop</button>
             </div>
           </div>
-          <div class="harness-task-row">
-            <input id="harness-task-input" class="harness-task-input" type="text" placeholder="Run a harness task..." />
-            <button id="btn-harness-run" class="harness-run-btn">Run</button>
+          <div class="harness-tabs" role="tablist" aria-label="Harness tools">
+            <button class="harness-tab active" type="button" data-harness-tab="run">Run</button>
+            <button class="harness-tab" type="button" data-harness-tab="deep-research">Deep Research</button>
+            <button class="harness-tab" type="button" data-harness-tab="capabilities">Capabilities</button>
+          </div>
+          <div id="harness-tab-run" class="harness-tab-panel active">
+            <div class="harness-task-row">
+              <input id="harness-task-input" class="harness-task-input" type="text" placeholder="Run a harness task..." />
+              <button id="btn-harness-run" class="harness-run-btn">Run</button>
+            </div>
+          </div>
+          <div id="harness-tab-deep-research" class="harness-tab-panel">
+            <div class="harness-task-row">
+              <input id="harness-deep-task-input" class="harness-task-input" type="text" placeholder="Deep research task..." />
+              <button id="btn-harness-deep-run" class="harness-run-btn">Run</button>
+            </div>
+            <div class="harness-budget-row">
+              <label>Tool calls<input id="harness-deep-tool-calls" type="number" min="1" max="500" value="80" /></label>
+              <label>Minutes<input id="harness-deep-minutes" type="number" min="1" max="240" value="45" /></label>
+            </div>
+          </div>
+          <div id="harness-tab-capabilities" class="harness-tab-panel">
+            <div class="harness-capability-toolbar">
+              <span id="harness-capability-status">No capabilities loaded</span>
+              <button id="btn-harness-capabilities-refresh" class="harness-btn" type="button">Refresh</button>
+            </div>
+            <div class="harness-capability-layout">
+              <div class="harness-capability-sections">
+                <section class="harness-capability-section" data-capability-section="skill">
+                  <div class="harness-capability-section-title">Skills <span id="capability-count-skill">0</span></div>
+                  <div id="capability-list-skill" class="harness-capability-list"></div>
+                </section>
+                <section class="harness-capability-section" data-capability-section="mcp">
+                  <div class="harness-capability-section-title">MCPs <span id="capability-count-mcp">0</span></div>
+                  <div id="capability-list-mcp" class="harness-capability-list"></div>
+                </section>
+                <section class="harness-capability-section" data-capability-section="pi_extension">
+                  <div class="harness-capability-section-title">Pi Extensions <span id="capability-count-pi_extension">0</span></div>
+                  <div id="capability-list-pi_extension" class="harness-capability-list"></div>
+                </section>
+                <section class="harness-capability-section" data-capability-section="profile">
+                  <div class="harness-capability-section-title">Profiles <span id="capability-count-profile">0</span></div>
+                  <div id="capability-list-profile" class="harness-capability-list"></div>
+                </section>
+              </div>
+              <form id="harness-capability-form" class="harness-capability-form">
+                <input id="capability-id" type="hidden" />
+                <div class="harness-form-grid">
+                  <label>Type
+                    <select id="capability-type">
+                      <option value="skill">Skill</option>
+                      <option value="mcp">MCP</option>
+                      <option value="pi_extension">Pi Extension</option>
+                      <option value="profile">Profile</option>
+                    </select>
+                  </label>
+                  <label>Name<input id="capability-name" type="text" placeholder="capability name" /></label>
+                  <label class="harness-checkbox-row"><input id="capability-enabled" type="checkbox" checked /> Enabled</label>
+                  <label>Approval mode
+                    <select id="capability-approval">
+                      <option value="inherit">Inherit</option>
+                      <option value="never">Never</option>
+                      <option value="on_request">On request</option>
+                      <option value="always">Always</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Path / command / URL<input id="capability-location" type="text" placeholder="workspace path, command, or URL" /></label>
+                <label>Args<input id="capability-args" type="text" placeholder="space or comma separated args" /></label>
+                <label>Env var names<input id="capability-env" type="text" placeholder="API_KEY, TOKEN_NAME" /></label>
+                <label>Notes<textarea id="capability-notes" rows="3" placeholder="Operational notes"></textarea></label>
+                <div class="harness-form-actions">
+                  <button id="btn-harness-capability-reset" class="harness-btn" type="button">New</button>
+                  <button id="btn-harness-capability-save" class="harness-run-btn" type="submit">Save</button>
+                </div>
+              </form>
+            </div>
           </div>
           <div class="harness-metrics">
             <span id="harness-state-pill" class="harness-pill">unknown</span>

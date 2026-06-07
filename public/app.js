@@ -34,6 +34,16 @@ let harnessState = {
   latestEvents: [],
   currentApproval: null,
 };
+const CAPABILITY_TYPES = [
+  { id: 'skill', label: 'Skills' },
+  { id: 'mcp', label: 'MCPs' },
+  { id: 'pi_extension', label: 'Pi Extensions' },
+  { id: 'profile', label: 'Profiles' },
+];
+let activeHarnessTab = 'run';
+let harnessCapabilitiesLoaded = false;
+let harnessCapabilities = [];
+let harnessCapabilitiesRequestTimer = null;
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -126,6 +136,11 @@ const harnessTaskCount = $('#harness-task-count');
 const harnessApprovalCount = $('#harness-approval-count');
 const harnessEvents = $('#harness-events');
 const harnessTaskInput = $('#harness-task-input');
+const harnessDeepTaskInput = $('#harness-deep-task-input');
+const harnessDeepToolCalls = $('#harness-deep-tool-calls');
+const harnessDeepMinutes = $('#harness-deep-minutes');
+const harnessCapabilityStatus = $('#harness-capability-status');
+const harnessCapabilityForm = $('#harness-capability-form');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -146,6 +161,7 @@ function applyWorkspaceSelection(path, { notify = true } = {}) {
   if (ws?.readyState === WebSocket.OPEN) {
     send({ type: 'set_workspace', path: workspacePath });
     send({ type: 'get_session_files' });
+    if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
   }
   if (notify && changed) toast('Workspace selected', 'success');
 }
@@ -381,6 +397,18 @@ function handleMessage(msg) {
     renderHarnessArtifact(msg.data);
     return;
   }
+  if (msg.type === 'harness_capabilities') {
+    handleHarnessCapabilities(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_capability_saved') {
+    handleHarnessCapabilitySaved(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_capability_deleted') {
+    handleHarnessCapabilityDeleted(msg.data || msg);
+    return;
+  }
 
   // Agent events
   switch (msg.type) {
@@ -472,10 +500,260 @@ function renderHarnessPanel() {
   `).join('') || '<div class="harness-empty">No harness events yet</div>';
 }
 
+function switchHarnessTab(tabId) {
+  activeHarnessTab = tabId || 'run';
+  document.querySelectorAll('.harness-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.harnessTab === activeHarnessTab);
+  });
+  document.querySelectorAll('.harness-tab-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === `harness-tab-${activeHarnessTab}`);
+  });
+  if (activeHarnessTab === 'capabilities' && !harnessCapabilitiesLoaded) {
+    requestHarnessCapabilities();
+  }
+}
+
+function requestHarnessCapabilities() {
+  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Refreshing capabilities...';
+  if (harnessCapabilitiesRequestTimer) clearTimeout(harnessCapabilitiesRequestTimer);
+  harnessCapabilitiesRequestTimer = setTimeout(() => {
+    if (harnessCapabilityStatus?.textContent === 'Refreshing capabilities...') {
+      harnessCapabilityStatus.textContent = harnessCapabilitiesLoaded
+        ? `${harnessCapabilities.length} scoped capabilit${harnessCapabilities.length === 1 ? 'y' : 'ies'}`
+        : 'No capabilities returned yet';
+    }
+  }, 2500);
+  send({ type: 'harness_capabilities_get', workspaceRoot: workspacePath || undefined });
+}
+
+function capabilityBucketFromPayload(payload, keys) {
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (Array.isArray(value)) return value;
+  }
+  return [];
+}
+
+function extractCapabilityRecords(payload) {
+  const direct = payload?.records || payload?.capabilities || payload?.registry?.records || payload?.registry?.capabilities || payload;
+  if (Array.isArray(direct)) return direct;
+  if (!direct || typeof direct !== 'object') return [];
+
+  const grouped = [
+    ...capabilityBucketFromPayload(direct, ['skill', 'skills']),
+    ...capabilityBucketFromPayload(direct, ['mcp', 'mcps', 'mcpServers']),
+    ...capabilityBucketFromPayload(direct, ['pi_extension', 'piExtensions', 'pi_extensions']),
+    ...capabilityBucketFromPayload(direct, ['profile', 'profiles']),
+  ];
+  if (grouped.length) return grouped;
+
+  return Object.values(direct).filter(value => value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function normalizeCapabilityType(type) {
+  const value = String(type || 'skill').trim().toLowerCase();
+  if (value === 'skills') return 'skill';
+  if (value === 'mcps' || value === 'mcp_server') return 'mcp';
+  if (value === 'pi-extension' || value === 'pi extension' || value === 'pi_extensions') return 'pi_extension';
+  if (value === 'profiles') return 'profile';
+  return CAPABILITY_TYPES.some(item => item.id === value) ? value : 'skill';
+}
+
+function listToText(value) {
+  if (Array.isArray(value)) return value.join(', ');
+  if (value && typeof value === 'object') return Object.keys(value).join(', ');
+  return String(value || '');
+}
+
+function normalizeCapabilityRecord(record, index = 0) {
+  const type = normalizeCapabilityType(record?.type || record?.kind);
+  const name = String(record?.name || record?.title || `${type}-${index + 1}`);
+  const location = record?.pathOrCommandOrUrl || record?.target || record?.path || record?.command || record?.url || '';
+  const id = String(record?.id || record?.capabilityId || record?.capability_id || `${type}:${name}`);
+  return {
+    ...record,
+    id,
+    type,
+    name,
+    enabled: record?.enabled !== false,
+    pathOrCommandOrUrl: String(location || ''),
+    argsText: listToText(record?.args),
+    envText: listToText(record?.envVarNames || record?.env_var_names || record?.env),
+    approvalMode: String(record?.approvalMode || record?.approval_mode || record?.approval || 'inherit'),
+    notes: String(record?.notes || record?.description || ''),
+  };
+}
+
+function handleHarnessCapabilities(payload) {
+  if (harnessCapabilitiesRequestTimer) clearTimeout(harnessCapabilitiesRequestTimer);
+  harnessCapabilitiesLoaded = true;
+  harnessCapabilities = extractCapabilityRecords(payload).map(normalizeCapabilityRecord);
+  renderHarnessCapabilities();
+}
+
+function handleHarnessCapabilitySaved(payload) {
+  if (harnessCapabilitiesRequestTimer) clearTimeout(harnessCapabilitiesRequestTimer);
+  const fullRecords = extractCapabilityRecords(payload);
+  if (fullRecords.length > 1) {
+    harnessCapabilities = fullRecords.map(normalizeCapabilityRecord);
+  } else {
+    const saved = normalizeCapabilityRecord(payload?.record || payload?.capability || payload);
+    const existingIndex = harnessCapabilities.findIndex(record => record.id === saved.id);
+    if (existingIndex >= 0) harnessCapabilities.splice(existingIndex, 1, saved);
+    else if (saved.name) harnessCapabilities.unshift(saved);
+  }
+  harnessCapabilitiesLoaded = true;
+  renderHarnessCapabilities();
+  resetHarnessCapabilityForm();
+  toast('Capability saved', 'success');
+}
+
+function handleHarnessCapabilityDeleted(payload) {
+  if (harnessCapabilitiesRequestTimer) clearTimeout(harnessCapabilitiesRequestTimer);
+  const deletedId = String(payload?.capabilityId || payload?.id || payload?.capability_id || '');
+  if (deletedId) {
+    harnessCapabilities = harnessCapabilities.filter(record => record.id !== deletedId);
+  } else {
+    requestHarnessCapabilities();
+  }
+  renderHarnessCapabilities();
+  toast('Capability deleted', 'success');
+}
+
+function renderHarnessCapabilities() {
+  const grouped = new Map(CAPABILITY_TYPES.map(item => [item.id, []]));
+  harnessCapabilities.forEach(record => {
+    const type = normalizeCapabilityType(record.type);
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type).push(record);
+  });
+
+  CAPABILITY_TYPES.forEach(({ id }) => {
+    const records = grouped.get(id) || [];
+    const countEl = document.getElementById(`capability-count-${id}`);
+    const listEl = document.getElementById(`capability-list-${id}`);
+    if (countEl) countEl.textContent = String(records.length);
+    if (!listEl) return;
+    listEl.innerHTML = records.map(record => `
+      <div class="harness-capability-item ${record.enabled ? '' : 'disabled'}" data-capability-id="${esc(record.id)}">
+        <div class="harness-capability-item-main">
+          <span class="harness-capability-name">${esc(record.name)}</span>
+          <span class="harness-capability-meta">${esc(record.pathOrCommandOrUrl || record.approvalMode || 'local')}</span>
+        </div>
+        <div class="harness-capability-item-actions">
+          <button class="harness-artifact-link" type="button" data-capability-action="edit" data-capability-id="${esc(record.id)}">Edit</button>
+          <button class="harness-artifact-link" type="button" data-capability-action="delete" data-capability-id="${esc(record.id)}">Delete</button>
+        </div>
+      </div>
+    `).join('') || '<div class="harness-empty compact">No records</div>';
+  });
+
+  if (harnessCapabilityStatus) {
+    const total = harnessCapabilities.length;
+    harnessCapabilityStatus.textContent = harnessCapabilitiesLoaded
+      ? `${total} scoped capabilit${total === 1 ? 'y' : 'ies'}`
+      : 'No capabilities loaded';
+  }
+}
+
+function parseCapabilityList(value) {
+  return String(value || '')
+    .split(/[\s,]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function buildCapabilityRecordFromForm() {
+  const type = normalizeCapabilityType($('#capability-type')?.value);
+  const location = $('#capability-location')?.value?.trim() || '';
+  const record = {
+    type,
+    name: $('#capability-name')?.value?.trim() || '',
+    enabled: $('#capability-enabled')?.checked !== false,
+    pathOrCommandOrUrl: location,
+    args: parseCapabilityList($('#capability-args')?.value),
+    envVarNames: parseCapabilityList($('#capability-env')?.value),
+    approvalMode: $('#capability-approval')?.value || 'inherit',
+    notes: $('#capability-notes')?.value?.trim() || '',
+  };
+  const id = $('#capability-id')?.value?.trim();
+  if (id) record.id = id;
+  if (/^https?:\/\//i.test(location)) record.url = location;
+  else if (type === 'mcp') record.command = location;
+  else record.path = location;
+  return record;
+}
+
+function saveHarnessCapability(event) {
+  event?.preventDefault();
+  const record = buildCapabilityRecordFromForm();
+  if (!record.name) {
+    toast('Capability name required', 'error');
+    return;
+  }
+  send({
+    type: 'harness_capability_save',
+    workspaceRoot: workspacePath || undefined,
+    record,
+  });
+  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Saving capability...';
+}
+
+function editHarnessCapability(capabilityId) {
+  const record = harnessCapabilities.find(item => item.id === capabilityId);
+  if (!record) return;
+  $('#capability-id').value = record.id;
+  $('#capability-type').value = normalizeCapabilityType(record.type);
+  $('#capability-name').value = record.name || '';
+  $('#capability-enabled').checked = record.enabled !== false;
+  $('#capability-location').value = record.pathOrCommandOrUrl || '';
+  $('#capability-args').value = record.argsText || listToText(record.args);
+  $('#capability-env').value = record.envText || listToText(record.envVarNames || record.env);
+  $('#capability-approval').value = record.approvalMode || 'inherit';
+  $('#capability-notes').value = record.notes || '';
+}
+
+function deleteHarnessCapability(capabilityId) {
+  if (!capabilityId) return;
+  const record = harnessCapabilities.find(item => item.id === capabilityId);
+  const ok = confirm(`Delete ${record?.name || 'this capability'}?`);
+  if (!ok) return;
+  send({
+    type: 'harness_capability_delete',
+    workspaceRoot: workspacePath || undefined,
+    capabilityId,
+  });
+  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Deleting capability...';
+}
+
+function resetHarnessCapabilityForm() {
+  if (!harnessCapabilityForm) return;
+  harnessCapabilityForm.reset();
+  $('#capability-id').value = '';
+  $('#capability-type').value = 'skill';
+  $('#capability-enabled').checked = true;
+  $('#capability-approval').value = 'inherit';
+}
+
+function handleHarnessPanelClick(event) {
+  const tab = event.target.closest('[data-harness-tab]');
+  if (tab) {
+    switchHarnessTab(tab.dataset.harnessTab);
+    return;
+  }
+
+  const actionButton = event.target.closest('[data-capability-action]');
+  if (!actionButton) return;
+  const capabilityId = actionButton.dataset.capabilityId;
+  if (actionButton.dataset.capabilityAction === 'edit') editHarnessCapability(capabilityId);
+  if (actionButton.dataset.capabilityAction === 'delete') deleteHarnessCapability(capabilityId);
+}
+
 function toggleHarnessPanel() {
   harnessPanel.classList.toggle('hidden');
   if (!harnessPanel.classList.contains('hidden')) {
     send({ type: 'harness_status' });
+    if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
   }
 }
 
@@ -551,6 +829,25 @@ function runHarnessTask() {
   });
   harnessTaskInput.value = '';
 }
+
+function runDeepResearchTask() {
+  const task = harnessDeepTaskInput?.value?.trim();
+  if (!task) return;
+  const maxToolCalls = Number.parseInt(harnessDeepToolCalls?.value || '80', 10);
+  const maxWallMinutes = Number.parseInt(harnessDeepMinutes?.value || '45', 10);
+  send({
+    type: 'harness_task_start',
+    task,
+    mode: 'deep_research',
+    budget: {
+      maxToolCalls: Number.isFinite(maxToolCalls) ? maxToolCalls : 80,
+      maxWallMinutes: Number.isFinite(maxWallMinutes) ? maxWallMinutes : 45,
+    },
+    source: 'deep_research_ui',
+  });
+  harnessDeepTaskInput.value = '';
+}
+
 
 function renderHarnessApproval(event) {
   const action = event.proposedAction || {};
@@ -1437,10 +1734,21 @@ $('#btn-harness').addEventListener('click', toggleHarnessPanel);
 $('#btn-harness-start').addEventListener('click', startHarness);
 $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
+if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick);
+$('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
+$('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
+$('#btn-harness-capability-reset')?.addEventListener('click', resetHarnessCapabilityForm);
+harnessCapabilityForm?.addEventListener('submit', saveHarnessCapability);
 $('#harness-task-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
     runHarnessTask();
+  }
+});
+$('#harness-deep-task-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    runDeepResearchTask();
   }
 });
 $('#model-search').addEventListener('input', (e) => renderModelList(e.target.value));
