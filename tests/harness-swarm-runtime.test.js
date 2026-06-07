@@ -140,6 +140,7 @@ test('recombiner builds a proposal from reviewer-approved partial outputs', () =
 
 test('swarm orchestrator schedules multiple attempts and selects champion from verifier evidence', async () => {
   const calledAttempts = [];
+  const attemptEvents = [];
   const result = await orchestrateSwarm({
     task: { taskId: 'task_orchestrate', goal: 'Add primitives.' },
     taskType: 'coding_bugfix',
@@ -150,6 +151,9 @@ test('swarm orchestrator schedules multiple attempts and selects champion from v
     },
     budget: { tokens: 900, maxOutputChars: 500 },
     outputContract: { requiredFields: ['patch', 'verifierEvidence'] },
+    onAttemptEvent: async (event) => {
+      attemptEvents.push(event);
+    },
     commandAdapter: async ({ attempt }) => {
       calledAttempts.push(attempt.attemptId);
       if (attempt.attemptId === 'attempt_1') {
@@ -163,6 +167,22 @@ test('swarm orchestrator schedules multiple attempts and selects champion from v
   });
 
   assert.deepEqual(calledAttempts, ['attempt_1', 'attempt_2', 'attempt_3']);
+  assert.deepEqual(attemptEvents.map((event) => event.type), [
+    'swarm.subagent_started',
+    'swarm.subagent_completed',
+    'swarm.subagent_started',
+    'swarm.subagent_completed',
+    'swarm.subagent_started',
+    'swarm.subagent_completed',
+  ]);
+  assert.deepEqual(
+    attemptEvents
+      .filter((event) => event.type === 'swarm.subagent_started')
+      .map((event) => event.attemptId),
+    ['attempt_1', 'attempt_2', 'attempt_3'],
+  );
+  assert.equal(attemptEvents[1].score, 95);
+  assert.equal(attemptEvents[3].verifierPassed, true);
   assert.equal(result.attempts.length, 3);
   assert.equal(result.reviews.filter((review) => review.approved).length, 2);
   assert.equal(result.champion.attemptId, 'attempt_2');

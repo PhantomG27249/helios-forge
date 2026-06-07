@@ -754,6 +754,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         allowedFiles: contextPack.items.map((item) => item.path),
       },
       budget: { maxOutputChars: 1200 },
+      onAttemptEvent: emitEvent,
       commandAdapter: async ({ attempt }) => ({
         summary: `Dry-run attempt ${attempt.attemptId} evaluated by full runtime.`,
         patch: `attempt:${attempt.attemptId}`,

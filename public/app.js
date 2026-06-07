@@ -29,6 +29,7 @@ const DEFAULT_HARNESS_BUDGET = { maxToolCalls: 20, maxWallMinutes: 15 };
 let harnessState = {
   status: 'unknown',
   activeTasks: new Map(),
+  subagents: new Map(),
   pendingApprovals: new Map(),
   artifacts: new Map(),
   latestEvents: [],
@@ -134,6 +135,8 @@ const harnessSubtitle = $('#harness-subtitle');
 const harnessStatePill = $('#harness-state-pill');
 const harnessTaskCount = $('#harness-task-count');
 const harnessApprovalCount = $('#harness-approval-count');
+const harnessSubagentCount = $('#harness-subagent-count');
+const harnessSubagents = $('#harness-subagents');
 const harnessEvents = $('#harness-events');
 const harnessTaskInput = $('#harness-task-input');
 const harnessDeepTaskInput = $('#harness-deep-task-input');
@@ -462,6 +465,8 @@ function handleHarnessEvent(event) {
     harnessState.artifacts.set(artifact.artifactId, artifact);
   }
 
+  updateHarnessSubagent(event);
+
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
     harnessState.currentApproval = event;
@@ -476,6 +481,78 @@ function handleHarnessEvent(event) {
   renderHarnessPanel();
 }
 
+function updateHarnessSubagent(event) {
+  if (event.type === 'swarm.attempts_scheduled') {
+    for (const attempt of event.attempts || []) {
+      const existing = harnessState.subagents.get(attempt.attemptId) || {};
+      harnessState.subagents.set(attempt.attemptId, {
+        ...existing,
+        taskId: event.taskId || existing.taskId,
+        attemptId: attempt.attemptId,
+        role: attempt.role || existing.role || 'implementer',
+        strategy: attempt.strategy || existing.strategy,
+        status: attempt.status || existing.status || 'scheduled',
+        summary: attempt.output?.summary || existing.summary,
+        score: attempt.score ?? existing.score,
+        verifierPassed: attempt.verifierPassed ?? existing.verifierPassed,
+        patchStats: attempt.patchStats || existing.patchStats,
+        updatedAt: attempt.completedAt || attempt.startedAt || existing.updatedAt || new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!['swarm.subagent_started', 'swarm.subagent_completed'].includes(event.type) || !event.attemptId) {
+    return;
+  }
+
+  const existing = harnessState.subagents.get(event.attemptId) || {};
+  harnessState.subagents.set(event.attemptId, {
+    ...existing,
+    taskId: event.taskId || existing.taskId,
+    attemptId: event.attemptId,
+    role: event.role || existing.role || 'subagent',
+    strategy: event.strategy || existing.strategy,
+    status: event.status || (event.type === 'swarm.subagent_started' ? 'running' : existing.status || 'unknown'),
+    summary: event.summary || existing.summary,
+    score: event.score ?? existing.score,
+    verifierPassed: event.verifierPassed ?? existing.verifierPassed,
+    patchStats: event.patchStats || existing.patchStats,
+    updatedAt: event.completedAt || event.startedAt || new Date().toISOString(),
+  });
+}
+
+function renderHarnessSubagents() {
+  if (!harnessSubagents) return;
+  const agents = Array.from(harnessState.subagents.values())
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .slice(0, 6);
+
+  const activeCount = agents.filter(agent => ['running', 'scheduled'].includes(agent.status)).length;
+  if (harnessSubagentCount) {
+    harnessSubagentCount.textContent = `${activeCount} active`;
+  }
+
+  harnessSubagents.innerHTML = agents.map(agent => {
+    const scoreText = Number.isFinite(agent.score) ? `score ${agent.score}` : '';
+    const changedLines = agent.patchStats?.changedLines;
+    const patchText = Number.isFinite(changedLines) ? `${changedLines} line${changedLines === 1 ? '' : 's'}` : '';
+    const verifyText = agent.verifierPassed === true ? 'verified' : agent.verifierPassed === false ? 'unverified' : '';
+    const meta = [scoreText, verifyText, patchText].filter(Boolean).join(' · ');
+    return `
+      <div class="harness-subagent-card">
+        <div class="harness-subagent-top">
+          <span class="harness-subagent-name">${esc(agent.role || 'subagent')} · ${esc(agent.attemptId || '')}</span>
+          <span class="harness-subagent-status ${esc(agent.status || 'unknown')}">${esc(agent.status || 'unknown')}</span>
+        </div>
+        <div class="harness-subagent-strategy">${esc(agent.strategy || 'strategy pending')}</div>
+        <div class="harness-subagent-summary">${esc(agent.summary || 'Waiting for activity')}</div>
+        ${meta ? `<div class="harness-subagent-meta">${esc(meta)}</div>` : ''}
+      </div>
+    `;
+  }).join('') || '<div class="harness-empty compact">No subagents running</div>';
+}
+
 function renderHarnessPanel() {
   if (!harnessPanel) return;
   harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
@@ -483,6 +560,7 @@ function renderHarnessPanel() {
   harnessStatePill.className = `harness-pill ${harnessState.status}`;
   harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
+  renderHarnessSubagents();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
       <div class="harness-event-main">

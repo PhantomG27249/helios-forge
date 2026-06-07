@@ -21,6 +21,7 @@ export async function orchestrateSwarm({
   commandAdapter,
   runMode,
   riskPolicy = {},
+  onAttemptEvent,
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
   const mode = runMode || (commandAdapter ? 'real' : 'dry-run');
@@ -28,6 +29,16 @@ export async function orchestrateSwarm({
   const attempts = [];
 
   for (const scheduledAttempt of scheduledAttempts) {
+    await onAttemptEvent?.({
+      type: 'swarm.subagent_started',
+      taskId,
+      attemptId: scheduledAttempt.attemptId,
+      role: 'implementer',
+      strategy: scheduledAttempt.strategy,
+      status: 'running',
+      summary: `${scheduledAttempt.attemptId} running ${scheduledAttempt.strategy}`,
+    });
+
     const runnerResult = await runSubagentAttempt({
       task: { ...task, taskId },
       attempt: scheduledAttempt,
@@ -46,6 +57,22 @@ export async function orchestrateSwarm({
       verifierEvidence,
       patchStats: runnerResult.patchStats,
       score: runnerResult.score || 0,
+    });
+
+    const attemptRecord = attempts[attempts.length - 1];
+    await onAttemptEvent?.({
+      type: 'swarm.subagent_completed',
+      taskId,
+      attemptId: attemptRecord.attemptId,
+      role: attemptRecord.role,
+      strategy: attemptRecord.strategy,
+      status: attemptRecord.status,
+      summary: attemptRecord.output?.summary || `${attemptRecord.attemptId} ${attemptRecord.status}`,
+      score: attemptRecord.score,
+      verifierPassed: attemptRecord.verifierPassed,
+      patchStats: attemptRecord.patchStats,
+      startedAt: attemptRecord.startedAt,
+      completedAt: attemptRecord.completedAt,
     });
   }
 

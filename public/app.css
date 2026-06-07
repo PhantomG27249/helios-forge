@@ -1980,6 +1980,17 @@ body {
   font-size: 12px;
 }
 
+.harness-activity-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 10px 0 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
 .harness-pill {
   padding: 2px 8px;
   border-radius: 999px;
@@ -2006,6 +2017,92 @@ body {
   gap: 4px;
   max-height: 140px;
   overflow-y: auto;
+}
+
+.harness-subagents {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 188px;
+  overflow-y: auto;
+}
+
+.harness-subagent-card {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+  background: var(--tool-bg);
+}
+
+.harness-subagent-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.harness-subagent-name,
+.harness-subagent-strategy,
+.harness-subagent-summary,
+.harness-subagent-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-subagent-name {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.harness-subagent-status {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--tool-border);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.harness-subagent-status.running {
+  color: var(--accent);
+  border-color: rgba(199, 167, 113, 0.35);
+}
+
+.harness-subagent-status.completed {
+  color: var(--success);
+  border-color: rgba(109, 184, 124, 0.35);
+}
+
+.harness-subagent-status.failed {
+  color: var(--danger);
+  border-color: rgba(210, 105, 105, 0.35);
+}
+
+.harness-subagent-strategy {
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.harness-subagent-summary {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.harness-subagent-meta {
+  margin-top: 5px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .harness-subagents {
+    grid-template-columns: 1fr;
+  }
 }
 
 .harness-event,

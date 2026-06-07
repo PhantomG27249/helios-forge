@@ -11,9 +11,19 @@ test('harness controls expose deep research and capabilities as first-class tool
   assert.match(html, />Capabilities</);
 });
 
+test('harness panel exposes live subagent activity', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-subagents"/);
+  assert.match(appJs, /swarm\.subagent_started/);
+  assert.match(appJs, /swarm\.subagent_completed/);
+  assert.match(appJs, /renderHarnessSubagents/);
+});
+
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250614/);
-  assert.match(html, /app\.js\?v=20250614/);
+  assert.match(html, /app\.css\?v=20250615/);
+  assert.match(html, /app\.js\?v=20250615/);
 });

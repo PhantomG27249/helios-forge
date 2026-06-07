@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250614">
+  <link rel="stylesheet" href="/app.css?v=20250615">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -237,6 +237,14 @@
             <span id="harness-task-count">0 tasks</span>
             <span id="harness-approval-count">0 approvals</span>
           </div>
+          <div class="harness-activity-heading">
+            <span>Subagents</span>
+            <span id="harness-subagent-count">0 active</span>
+          </div>
+          <div id="harness-subagents" class="harness-subagents"></div>
+          <div class="harness-activity-heading">
+            <span>Events</span>
+          </div>
           <div id="harness-events" class="harness-events"></div>
         </section>
         <div id="messages" class="messages"></div>
@@ -347,6 +355,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250614"></script>
+  <script src="/app.js?v=20250615"></script>
 </body>
 </html>
