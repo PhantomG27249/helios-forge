@@ -7,6 +7,7 @@
 // State
 // ═══════════════════════════════════════════════════════════
 let ws = null;
+let reconnectTimer = null;
 let isConnected = false;
 let isStreaming = false;
 let currentModel = null;
@@ -82,11 +83,7 @@ const workspacePathInput = document.getElementById('workspace-path');
 const workspaceBrowseConnectBtn = document.getElementById('btn-workspace-browse-connect');
 const workspaceBrowseBtn = document.getElementById('btn-workspace-browse');
 
-if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-  serverUrlInput.value = `ws://${location.host}`;
-} else {
-  serverUrlInput.value = `ws://localhost:3777`;
-}
+serverUrlInput.value = `ws://${location.host}`;
 
 window.setServerUrl = function(host) {
   const port = host.includes(':') ? '' : ':3777';
@@ -230,19 +227,29 @@ if (workspaceBrowseBtn) workspaceBrowseBtn.addEventListener('click', chooseWorks
 // WebSocket
 // ═══════════════════════════════════════════════════════════
 function connect() {
+  if (ws && [WebSocket.OPEN, WebSocket.CONNECTING].includes(ws.readyState)) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   resetConnectTimeout();
   debug(`WS: Connecting to ${serverUrl}...`);
-  ws = new WebSocket(serverUrl);
+  const socket = new WebSocket(serverUrl);
+  ws = socket;
 
-  ws.onopen = () => debug('WS: Open ✓');
-  ws.onclose = (e) => {
+  socket.onopen = () => debug('WS: Open ✓');
+  socket.onclose = (e) => {
+    const closingSocket = socket;
     debug(`WS: Closed (code=${e.code})`);
+    if (ws === closingSocket) ws = null;
     isConnected = false; isStreaming = false;
     setStatus('disconnected', 'Disconnected');
-    setTimeout(connect, 2000);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(connect, 2000);
   };
-  ws.onerror = () => debug('WS: Error ✗');
-  ws.onmessage = (e) => {
+  socket.onerror = () => debug('WS: Error ✗');
+  socket.onmessage = (e) => {
+    if (socket !== ws) return;
     try {
       const msg = JSON.parse(e.data);
       debug(`WS: ${msg.type}${msg.event ? '/' + msg.event : ''}`);
@@ -252,7 +259,13 @@ function connect() {
 }
 
 function send(msg) {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  if (ws?.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch (error) {
+      debug(`WS: Send failed (${error.message})`);
+    }
+  }
 }
 
 function setStatus(state, text) {

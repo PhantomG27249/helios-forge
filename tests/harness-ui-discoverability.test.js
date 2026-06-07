@@ -23,6 +23,6 @@ test('harness panel exposes live subagent activity', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250616/);
-  assert.match(html, /app\.js\?v=20250616/);
+  assert.match(html, /app\.css\?v=20250617/);
+  assert.match(html, /app\.js\?v=20250617/);
 });
