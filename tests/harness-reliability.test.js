@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { BudgetLedger } from '../src/harness-sidecar/budget/accounting.js';
 import { BudgetManager } from '../src/harness-sidecar/budget/budgetManager.js';
+import { evaluateBudgetGates } from '../src/harness-sidecar/budget/gates.js';
 import { createRecoveryEvent } from '../src/harness-sidecar/reliability/errorRecovery.js';
 import { LoopDetector } from '../src/harness-sidecar/reliability/loopDetector.js';
 
@@ -24,6 +26,37 @@ test('budget manager emits budget updates and threshold gates', () => {
   assert.equal(events.some((event) => event.type === 'budget.gate' && event.percent === 75), true);
   assert.equal(events.some((event) => event.type === 'budget.gate' && event.percent === 90 && event.action === 'approval_required'), true);
   assert.equal(events.some((event) => event.type === 'budget.gate' && event.percent === 100 && event.action === 'hard_stop'), true);
+});
+
+test('budget ledger records model tool and artifact usage by scope', () => {
+  const ledger = new BudgetLedger({ taskId: 'task_budget' });
+  ledger.record({ scope: 'planner', kind: 'model', inputTokens: 100, outputTokens: 40 });
+  ledger.record({ scope: 'planner', kind: 'tool', toolCalls: 2 });
+  ledger.record({ scope: 'visual', kind: 'artifact', artifacts: 1, tokensEstimated: 1200 });
+
+  const summary = ledger.summary();
+  assert.equal(summary.used.inputTokens, 100);
+  assert.equal(summary.used.outputTokens, 40);
+  assert.equal(summary.used.toolCalls, 2);
+  assert.equal(summary.used.artifacts, 1);
+  assert.equal(summary.byScope.planner.toolCalls, 2);
+  assert.equal(summary.byScope.visual.tokensEstimated, 1200);
+});
+
+test('budget gates classify warn approval and hard stop thresholds', () => {
+  const result = evaluateBudgetGates({
+    used: { toolCalls: 18, inputTokens: 9000 },
+    limits: { maxToolCalls: 20, maxInputTokens: 10000 },
+  });
+
+  assert.equal(result.decisions.some((decision) => decision.action === 'approval_required'), true);
+  assert.equal(result.decisions.some((decision) => decision.action === 'hard_stop'), false);
+
+  const hardStop = evaluateBudgetGates({
+    used: { toolCalls: 21 },
+    limits: { maxToolCalls: 20 },
+  });
+  assert.equal(hardStop.decisions.some((decision) => decision.action === 'hard_stop'), true);
 });
 
 test('recovery event includes category, recoverability, and task provenance', () => {
