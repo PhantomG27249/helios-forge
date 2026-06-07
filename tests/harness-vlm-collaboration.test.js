@@ -8,8 +8,13 @@ import { createArtifactStore } from '../src/harness-sidecar/artifacts/artifactSt
 import { createVisualDiffArtifact } from '../src/harness-sidecar/vlm/visualDiff.js';
 import { createVisualContextItem } from '../src/harness-sidecar/vlm/visualContextPolicy.js';
 import { AuditLog } from '../src/harness-sidecar/collaboration/auditLog.js';
+import { AnnotationStore } from '../src/harness-sidecar/collaboration/annotations.js';
+import { resolveVersionConflict } from '../src/harness-sidecar/collaboration/conflictResolver.js';
 import { LockService } from '../src/harness-sidecar/collaboration/locks.js';
+import { getRolePolicy } from '../src/harness-sidecar/collaboration/roles.js';
+import { TaskClaimStore } from '../src/harness-sidecar/collaboration/taskClaims.js';
 import { VersionedState } from '../src/harness-sidecar/collaboration/versionedState.js';
+import { WorkspaceLeaseService } from '../src/harness-sidecar/collaboration/workspaceLeases.js';
 
 test('artifact store writes and reads text artifact manifests', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-artifacts-'));
@@ -80,4 +85,63 @@ test('audit log records actor target operation and reason', () => {
   assert.equal(entries.length, 1);
   assert.equal(entries[0].actor, 'human:jack');
   assert.match(entries[0].auditId, /^audit_/);
+});
+
+test('workspace lease service grants exclusive leases per workspace', () => {
+  const leases = new WorkspaceLeaseService();
+  const first = leases.acquire({ workspaceRoot: 'C:/repo', ownerId: 'agent_a', purpose: 'attempt' });
+  const second = leases.acquire({ workspaceRoot: 'C:/repo', ownerId: 'agent_b', purpose: 'attempt' });
+
+  assert.equal(first.acquired, true);
+  assert.equal(second.acquired, false);
+  assert.equal(leases.release(first.leaseId, 'agent_a').released, true);
+});
+
+test('task claims assign roles and reject conflicting active claims', () => {
+  const claims = new TaskClaimStore();
+  const first = claims.claim({ taskId: 'task_1', actorId: 'agent_a', role: 'implementer' });
+  const second = claims.claim({ taskId: 'task_1', actorId: 'agent_b', role: 'implementer' });
+
+  assert.equal(first.claimed, true);
+  assert.equal(second.claimed, false);
+  assert.equal(claims.release(first.claimId, 'agent_a').released, true);
+});
+
+test('role policies describe allowed collaboration actions', () => {
+  const reviewer = getRolePolicy('reviewer');
+
+  assert.equal(reviewer.canApprove, true);
+  assert.equal(reviewer.allowedActions.includes('comment'), true);
+});
+
+test('annotations attach review comments to task targets', () => {
+  const annotations = new AnnotationStore();
+  const entry = annotations.add({
+    taskId: 'task_1',
+    target: 'patch:one',
+    author: 'reviewer',
+    body: 'Needs another verifier.',
+  });
+
+  assert.match(entry.annotationId, /^ann_/);
+  assert.equal(annotations.forTask('task_1').length, 1);
+});
+
+test('conflict resolver reports stale version conflicts and mergeable patches', () => {
+  const stale = resolveVersionConflict({
+    currentVersion: 3,
+    attemptedVersion: 2,
+    currentValue: { status: 'running' },
+    attemptedPatch: { status: 'approved' },
+  });
+  const mergeable = resolveVersionConflict({
+    currentVersion: 3,
+    attemptedVersion: 3,
+    currentValue: { status: 'running' },
+    attemptedPatch: { owner: 'agent_a' },
+  });
+
+  assert.equal(stale.resolution, 'manual_review');
+  assert.equal(mergeable.resolution, 'merge');
+  assert.equal(mergeable.value.owner, 'agent_a');
 });
