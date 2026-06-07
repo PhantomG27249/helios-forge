@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
 import { HarnessManager } from './harness/harnessManager.js';
+import { resolvePiCommand } from './pi/resolvePiCommand.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -29,7 +30,8 @@ class PiRpcManager {
   async start() {
     return new Promise((resolve) => {
       console.log('[PiRPC] Starting...');
-      this.process = spawn('pi', ['--mode', 'rpc'], {
+      const piCommand = resolvePiCommand();
+      this.process = spawn(piCommand.command, [...piCommand.args, '--mode', 'rpc'], {
         cwd: this.cwd,
         env: { ...process.env, FORCE_COLOR: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
