@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { compactContextItems } from '../src/harness-sidecar/context/compaction.js';
 import { DecisionLedger } from '../src/harness-sidecar/context/decisionLedger.js';
 import { getContextProfile } from '../src/harness-sidecar/context/contextProfiles.js';
+import { ModelGateway } from '../src/harness-sidecar/model/modelGateway.js';
 import { getModelProfile } from '../src/harness-sidecar/model/modelProfiles.js';
 import { repairJsonObject } from '../src/harness-sidecar/model/structuredOutputRepair.js';
 import { parseToolCall } from '../src/harness-sidecar/model/toolCallParser.js';
@@ -25,6 +26,32 @@ test('structured output repair parses fenced or trailing-comma JSON objects', ()
 
   assert.equal(repaired.tool, 'shell');
   assert.equal(repaired.args.command, 'npm test');
+});
+
+test('model gateway records profile, token accounting, and structured repair events', async () => {
+  const events = [];
+  const gateway = new ModelGateway({
+    emitEvent: (event) => events.push(event),
+    provider: async () => ({
+      text: '```json\n{ "decision": "approve", "confidence": 0.8, }\n```',
+      usage: { inputTokens: 12, outputTokens: 8 },
+    }),
+  });
+
+  const result = await gateway.call({
+    taskId: 'task_model',
+    purpose: 'critic_vote',
+    profileName: 'critic_low_temp',
+    messages: [{ role: 'user', content: 'Return a JSON decision.' }],
+    structuredOutput: true,
+  });
+
+  assert.match(result.callId, /^model_/);
+  assert.equal(result.profile.name, 'critic_low_temp');
+  assert.equal(result.usage.totalTokens, 20);
+  assert.equal(result.structured.decision, 'approve');
+  assert.equal(events.some((event) => event.type === 'model_call.started'), true);
+  assert.equal(events.some((event) => event.type === 'model_call.completed' && event.totalTokens === 20), true);
 });
 
 test('tool call parser validates required fields', () => {
