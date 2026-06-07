@@ -65,6 +65,7 @@ import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
 
 const VERSION = '0.1.0';
+const CAPABILITY_STORE_MODULE = './capabilities/capabilityStore.js';
 
 function parseArgs(argv) {
   const args = { port: 49321, workspaceRoot: process.cwd() };
@@ -104,8 +105,53 @@ function sendNotFound(res) {
   sendJson(res, 404, { error: 'Not found' });
 }
 
+function countEnabledCapabilities(capabilities = []) {
+  return capabilities.reduce((counts, capability) => {
+    if (!capability?.enabled) return counts;
+    counts[capability.type] = (counts[capability.type] || 0) + 1;
+    return counts;
+  }, {
+    skill: 0,
+    mcp: 0,
+    pi_extension: 0,
+    profile: 0,
+  });
+}
+
+function normalizeEnabledCounts(manifest = {}) {
+  if (manifest.enabledCounts) return manifest.enabledCounts;
+  if (manifest.counts) {
+    return {
+      skill: manifest.counts.skill || 0,
+      mcp: manifest.counts.mcp || 0,
+      pi_extension: manifest.counts.pi_extension || 0,
+      profile: manifest.counts.profile || 0,
+    };
+  }
+  return countEnabledCapabilities(manifest.capabilities);
+}
+
+function normalizeMountResult(mountResult, profileId) {
+  const manifest = mountResult.manifest || mountResult;
+  const manifestPath = mountResult.manifestPath || manifest.manifestPath || null;
+  const enabledCounts = normalizeEnabledCounts(manifest);
+  return {
+    manifest: {
+      ...manifest,
+      profileId: manifest.profileId || profileId || 'default',
+      enabledCounts,
+    },
+    manifestPath,
+    enabledCounts,
+  };
+}
+
 function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function loadCapabilityStore() {
+  return import(CAPABILITY_STORE_MODULE);
 }
 
 export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 49321 } = {}) {
@@ -167,6 +213,29 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       });
     }
     return result;
+  }
+
+  async function mountCapabilitiesForTask({ taskId, workspaceRoot, profileId }) {
+    const { buildRuntimeMountManifest } = await loadCapabilityStore();
+    const mountResult = await buildRuntimeMountManifest({ workspaceRoot, profileId });
+    const normalizedMount = normalizeMountResult(mountResult, profileId);
+    const capabilities = Array.isArray(normalizedMount.manifest.capabilities)
+      ? normalizedMount.manifest.capabilities
+      : [];
+
+    await emitEvent({
+      type: 'capabilities.runtime_mounted',
+      taskId,
+      workspaceRoot,
+      profileId: normalizedMount.manifest.profileId,
+      enabledCounts: normalizedMount.enabledCounts,
+      capabilityCount: capabilities.length,
+      manifestPath: normalizedMount.manifestPath,
+    });
+    return {
+      ...normalizedMount,
+      profileId: normalizedMount.manifest.profileId,
+    };
   }
 
   async function runFullRuntimeSubsystems({
@@ -825,6 +894,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       workspaceId: body.workspaceId || 'local',
       task: body.task || '',
       mode: body.mode || 'full',
+      profileId: body.profileId || body.capabilityProfileId || 'default',
       budget: body.budget || {},
       source: body.source || 'manual',
       status: 'approval_required',
@@ -836,6 +906,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         taskId,
         status: 'created',
         mode: task.mode,
+        profileId: task.profileId,
       },
     }));
     pendingApprovals.set(actionId, { actionId, taskId, status: 'pending' });
@@ -872,12 +943,28 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     });
     await updateTaskState(taskId, { status: 'running' }, 'sidecar-orchestrator');
 
+    const capabilityMount = await mountCapabilitiesForTask({
+      taskId,
+      workspaceRoot: resolvedWorkspaceRoot,
+      profileId: task.profileId,
+    });
+    await updateTaskState(
+      taskId,
+      {
+        capabilityProfileId: capabilityMount.profileId,
+        capabilityManifestPath: capabilityMount.manifestPath,
+        capabilityEnabledCounts: capabilityMount.enabledCounts,
+      },
+      'capability-runtime',
+    );
+
     await emitEvent({
       type: 'task.started',
       taskId,
       summary: task.task,
       status: 'running',
       source: task.source,
+      profileId: task.profileId,
     });
     await emitEvent({
       type: 'scope_contract.created',
@@ -1061,6 +1148,59 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     return approval;
   }
 
+  function resolveWorkspaceFromInput(workspaceRoot) {
+    return path.resolve(workspaceRoot || resolvedWorkspaceRoot);
+  }
+
+  async function listCapabilitiesForWorkspace(workspaceRoot) {
+    const { loadCapabilityRegistry } = await loadCapabilityStore();
+    return loadCapabilityRegistry({ workspaceRoot: resolveWorkspaceFromInput(workspaceRoot) });
+  }
+
+  async function saveCapabilityForWorkspace({ workspaceRoot, record }) {
+    const targetWorkspaceRoot = resolveWorkspaceFromInput(workspaceRoot);
+    const { loadCapabilityRegistry, saveCapabilityRecord } = await loadCapabilityStore();
+    const recordToSave = {
+      ...(record || {}),
+      id: record?.id || record?.capabilityId || makeId('cap'),
+    };
+    const savedRecord = await saveCapabilityRecord({
+      workspaceRoot: targetWorkspaceRoot,
+      record: recordToSave,
+    });
+    const registry = await loadCapabilityRegistry({ workspaceRoot: targetWorkspaceRoot });
+    return {
+      record: savedRecord.record || savedRecord,
+      registry,
+    };
+  }
+
+  async function deleteCapabilityForWorkspace({ workspaceRoot, capabilityId }) {
+    const targetWorkspaceRoot = resolveWorkspaceFromInput(workspaceRoot);
+    const { deleteCapabilityRecord, loadCapabilityRegistry } = await loadCapabilityStore();
+    const before = await loadCapabilityRegistry({ workspaceRoot: targetWorkspaceRoot });
+    const result = await deleteCapabilityRecord({
+      workspaceRoot: targetWorkspaceRoot,
+      capabilityId,
+    });
+    const registry = result.registry || result;
+    return {
+      deleted: result.deleted ?? before.capabilities.some((capability) => capability.id === capabilityId),
+      capabilityId,
+      registry,
+    };
+  }
+
+  async function mountCapabilitiesForWorkspace({ workspaceRoot, profileId }) {
+    const targetWorkspaceRoot = resolveWorkspaceFromInput(workspaceRoot);
+    const { buildRuntimeMountManifest } = await loadCapabilityStore();
+    const mountResult = await buildRuntimeMountManifest({
+      workspaceRoot: targetWorkspaceRoot,
+      profileId: profileId || 'default',
+    });
+    return normalizeMountResult(mountResult, profileId);
+  }
+
   async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -1086,6 +1226,42 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         subscribers.add(subscriber);
         res.write(': connected\n\n');
         req.on('close', () => subscribers.delete(subscriber));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/capabilities') {
+        const registry = await listCapabilitiesForWorkspace(url.searchParams.get('workspaceRoot'));
+        sendJson(res, 200, registry);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/capabilities') {
+        const body = await readJsonBody(req);
+        const result = await saveCapabilityForWorkspace({
+          workspaceRoot: body.workspaceRoot,
+          record: body.record,
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      const capabilityMatch = url.pathname.match(/^\/v1\/capabilities\/([^/]+)$/);
+      if (req.method === 'DELETE' && capabilityMatch) {
+        const result = await deleteCapabilityForWorkspace({
+          workspaceRoot: url.searchParams.get('workspaceRoot'),
+          capabilityId: decodeURIComponent(capabilityMatch[1]),
+        });
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/capabilities/mount') {
+        const body = await readJsonBody(req);
+        const result = await mountCapabilitiesForWorkspace({
+          workspaceRoot: body.workspaceRoot,
+          profileId: body.profileId,
+        });
+        sendJson(res, 200, result);
         return;
       }
 

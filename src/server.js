@@ -366,6 +366,41 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
         break;
       }
+      case 'harness_capabilities_get': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const registry = await harness.client.listCapabilities({
+          workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
+        });
+        ws.send(JSON.stringify({ type: 'harness_capabilities', data: registry }));
+        break;
+      }
+      case 'harness_capability_save': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.saveCapability({
+          workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
+          record: msg.record || msg.capability || {},
+        });
+        ws.send(JSON.stringify({ type: 'harness_capability_saved', data: result }));
+        break;
+      }
+      case 'harness_capability_delete': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.deleteCapability({
+          workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
+          capabilityId: msg.capabilityId || msg.id,
+        });
+        ws.send(JSON.stringify({ type: 'harness_capability_deleted', data: result }));
+        break;
+      }
+      case 'harness_capabilities_mount': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.mountCapabilities({
+          workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
+          profileId: msg.profileId || msg.capabilityProfileId || 'default',
+        });
+        ws.send(JSON.stringify({ type: 'harness_capabilities_mounted', data: result }));
+        break;
+      }
       case 'harness_task_start': {
         await ensureHarnessRunning(harness, pi, feedback);
         const task = await harness.client.startTask({
@@ -374,6 +409,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           mode: msg.mode || 'mvp',
           budget: msg.budget || { maxToolCalls: 20, maxWallMinutes: 15 },
           source: msg.source || 'manual',
+          profileId: msg.profileId || msg.capabilityProfileId || 'default',
         });
         ws.send(JSON.stringify({ type: 'harness_task_started', data: task }));
         break;

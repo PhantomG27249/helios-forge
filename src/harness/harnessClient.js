@@ -17,6 +17,24 @@ export class HarnessClient {
     return this.postJson('/v1/tasks', taskRequest);
   }
 
+  async listCapabilities({ workspaceRoot } = {}) {
+    const query = workspaceRoot ? `?workspaceRoot=${encodeURIComponent(workspaceRoot)}` : '';
+    return this.getJson(`/v1/capabilities${query}`);
+  }
+
+  async saveCapability({ workspaceRoot, record }) {
+    return this.postJson('/v1/capabilities', { workspaceRoot, record });
+  }
+
+  async deleteCapability({ workspaceRoot, capabilityId }) {
+    const query = workspaceRoot ? `?workspaceRoot=${encodeURIComponent(workspaceRoot)}` : '';
+    return this.deleteJson(`/v1/capabilities/${encodeURIComponent(capabilityId)}${query}`);
+  }
+
+  async mountCapabilities({ workspaceRoot, profileId } = {}) {
+    return this.postJson('/v1/capabilities/mount', { workspaceRoot, profileId });
+  }
+
   async resolveApproval(actionId, choice) {
     return this.postJson(`/v1/approvals/${encodeURIComponent(actionId)}`, { choice });
   }
@@ -41,6 +59,16 @@ export class HarnessClient {
 
   async getJson(path) {
     const response = await fetch(`${this.baseUrl}${path}`);
+    if (!response.ok) {
+      throw new Error(`Harness request failed: ${response.status}`);
+    }
+    return response.json();
+  }
+
+  async deleteJson(path) {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method: 'DELETE',
+    });
     if (!response.ok) {
       throw new Error(`Harness request failed: ${response.status}`);
     }
