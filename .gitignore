@@ -5,11 +5,8 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Harness runtime state
-.harness/traces/
-.harness/worktrees/
-.harness/artifacts/
-.harness/storage/
+# Harness runtime state and local setup output
+.harness/
 
 # Logs and local runtime files
 *.log

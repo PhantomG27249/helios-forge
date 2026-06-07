@@ -1,131 +1,99 @@
-# Helios Forge
+﻿# Helios Forge
 
-An AlphaHelion research-agent workbench built on top of the [pi](https://github.com/earendil-works/pi) coding agent.
+Helios Forge is AlphaHelion's workspace-scoped research-agent harness for Pi Agent. It keeps Pi's main install intact while adding local research skills, slash commands, runtime capability mounting, memory/RAG/graph sidecar features, visual debugging support, swarm/BES primitives, trace replay, and meta-harness workflows.
 
-## Features
+## Quick Install
 
-- **Research harness sidecar** - task events, approvals, traces, verifiers, RAG, memory, graph, BES, swarm, research, and experiment scaffolds
-- **Full pi integration** via RPC mode — all tools, settings, and capabilities are preserved
-- **Real-time streaming** — see responses as they're generated
-- **Tool call visualization** — expandable panels showing tool name, arguments, and results
-- **Thinking blocks** — collapsible reasoning sections
-- **Markdown rendering** with syntax highlighting for code blocks
-- **Model & thinking controls** — switch models and adjust thinking level from the UI
-- **Session management** — view stats, start new sessions
-- **Steering & follow-up** — send mid-stream messages while pi is working
-- **Extension UI support** — handles extension dialogs (select, confirm, input, editor)
-- **Electron-ready** — clean architecture for easy desktop app conversion
+From this repo:
 
-## Quick Start
-
-```bash
-# Install dependencies
-cd helios-forge
-npm install
-
-# Start the server
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 npm run dev
-# or directly:
-node src/server.js
 ```
 
-Then open **http://localhost:3777** in your browser.
+Then open [http://127.0.0.1:3777/](http://127.0.0.1:3777/).
 
-## Configuration
+To install and launch in one command:
 
-The app reads pi's existing configuration from:
-- `~/.pi/agent/settings.json` — default model, provider, thinking level
-- `~/.pi/agent/auth.json` — API credentials
-- `~/.pi/agent/models.json` — custom models
-
-You can override settings via environment variables:
-```bash
-PORT=8080 node src/server.js  # Change port
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Start
 ```
 
-## Architecture
+## What The Installer Does
 
-```
-┌─────────────────────┐     WebSocket      ┌──────────────────┐
-│   Browser UI         │◄──────────────────►│   Node.js Server   │
-│  (HTML/CSS/JS)       │                     │   (src/server.js)  │
-│                      │                     │                    │
-│  • Chat display      │   JSON-RPC over     │  • WebSocket server  │
-│  • Markdown render   │   stdin/stdout      │  • Static file serving │
-│  • Tool call UI      │                     │  • Pi RPC bridge       │
-│  • Thinking blocks   │                     │  • Extension UI relay  │
-└─────────────────────┘                     └─────────┬──────────┘
-                                                     │
-                                              ┌──────▼───────┐
-                                              │  pi --mode rpc │
-                                              │  (pi agent)    │
-                                              └────────────────┘
-```
+`install.ps1` performs the local setup needed for a working Helios Forge run:
 
-## Converting to Electron
+- verifies Node.js and npm are available
+- installs npm dependencies unless `-SkipNpmInstall` is used
+- creates a workspace-local `.harness/config.yaml` if one does not exist
+- installs the bundled `packages/helios-research-harness` package into `.harness/packages`
+- registers bundled skills, templates, slash commands, and the kwargs Pi extension in `.harness/capabilities.json`
+- writes `.harness/runtime/capabilities.mount.json` so the harness can mount enabled capabilities for real tasks
+- runs the release smoke check
 
-The app is designed for easy Electron integration:
+The installer does not write to your global Pi install by default. To also install the kwargs extension into `C:\Users\<you>\.pi\agent\extensions`, run:
 
-1. Create `electron/main.js`:
-```javascript
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
-
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: { nodeIntegration: false },
-  });
-  win.loadURL('http://localhost:3777');
-}
-
-app.whenReady().then(createWindow);
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallPiKwargs
 ```
 
-2. Add Electron dependency:
-```bash
-npm install --save-dev electron
+That optional extension preserves model-specific request args such as `temperature`, `top_p`, `top_k`, `min_p`, penalties, and thinking-template kwargs from Pi's `models.json`.
+
+## Manual Setup
+
+```powershell
+npm install
+npm run setup
+npm run release:smoke
+npm run dev
 ```
 
-3. Start with `npm run electron`
+Useful variants:
 
-Alternatively, use `electron-builder` for packaging:
-```json
-{
-  "build": {
-    "appId": "ai.alphahelion.heliosforge",
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
-  }
-}
+```powershell
+npm run setup -- --workspace C:\path\to\another\workspace
+npm run setup -- --force-config
+npm run install:pi-kwargs
 ```
 
-## Pi RPC Protocol
+## Runtime Surface
 
-The server communicates with pi using the official RPC protocol:
-- JSON-Lines over stdin/stdout
-- Full command set: `prompt`, `steer`, `follow_up`, `abort`, `get_state`, etc.
-- Event streaming for real-time updates
-- Extension UI dialog support
+The bundled Helios package adds:
 
-See [pi RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md) for details.
+- slash commands: `/research`, `/deep-research`, `/forge`
+- skills: deep research, visual debugging, meta harness
+- templates: research brief, eval promotion, visual fix report
+- Pi extension: model args and thinking preservation
 
-## Project Structure
+The app also exposes toolbar access for deep research, capability management, traces, memory/RAG/graph work, visual artifacts, and subagent/swarm visibility.
 
+## Pi Model Setup
+
+Helios Forge reads Pi Agent's normal model configuration:
+
+- `C:\Users\<you>\.pi\agent\settings.json`
+- `C:\Users\<you>\.pi\agent\models.json`
+- `C:\Users\<you>\.pi\agent\auth.json`
+
+For the your private OpenAI-compatible endpoint, configure Pi with the OpenAI-compatible base URL and model id you want to run, for example:
+
+- base URL: `<private-openai-compatible-base-url>`
+- model: `example/ebft-model`
+
+Keep credentials and provider details in Pi's normal config. Helios Forge only mounts workspace-local harness capabilities unless you explicitly install the optional global Pi kwargs extension.
+
+## Development
+
+```powershell
+npm test
+npm run release:smoke
 ```
-helios-forge/
-├── package.json          # Dependencies and scripts
-├── public/
-│   ├── index.html        # Main HTML template
-│   ├── app.css           # Styles
-│   └── app.js            # Frontend logic
-├── src/
-│   └── server.js         # WebSocket + Pi RPC server
-└── README.md
-```
 
-## License
+Generated harness runtime files live under `.harness/` and are ignored by git.
 
-MIT
+## Troubleshooting
+
+- If the browser shows a WebSocket reconnect loop, restart the dev server with `npm run dev`.
+- If bundled skills or slash commands do not appear, run `npm run setup` again.
+- If Pi does not receive model kwargs, confirm `C:\Users\<you>\.pi\agent\models.json` has matching `args`, then run `npm run install:pi-kwargs` if you want the global extension installed.
+- If a workspace already has a `.harness/config.yaml`, setup preserves it unless `--force-config` is passed.

@@ -9,6 +9,8 @@
     "start": "node src/server.js",
     "electron": "electron src/electron/main.js",
     "test": "node --test",
+    "setup": "node scripts/setup-helios-forge.js",
+    "install:helios": "node scripts/setup-helios-forge.js",
     "release:smoke": "node scripts/release-smoke.js",
     "install:pi-kwargs": "node scripts/install-pi-kwargs-extension.js"
   },
