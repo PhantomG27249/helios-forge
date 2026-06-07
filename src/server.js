@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
 import { HarnessManager } from './harness/harnessManager.js';
+import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
 import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
 
@@ -313,8 +314,12 @@ async function handleCommand(ws, msg, pi, harness) {
           break;
         }
         console.log('[Server] Changing workspace to:', newCwd);
-        // Just update the cwd - pi will use it for file operations
-        pi.cwd = newCwd;
+        await pi.changeWorkspace(newCwd);
+        closeHarnessClient(harness);
+        if (harness.manager.getStatus().state !== 'stopped') {
+          await harness.manager.stop();
+        }
+        harness.manager = new HarnessManager({ workspaceRoot: pi.cwd });
         ws.send(JSON.stringify({ type: 'workspace_changed', success: true, path: newCwd }));
         break;
       }
@@ -541,7 +546,7 @@ async function handleCommand(ws, msg, pi, harness) {
 
 async function main() {
   const port = parseInt(process.env.PORT || '3777', 10);
-  const pi = new PiRpcManager();
+  const pi = new ManagedPiRpcManager();
   const harness = createHarnessRuntime(pi.cwd);
 
   const server = createServer((req, res) => {
