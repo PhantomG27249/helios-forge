@@ -503,12 +503,16 @@ async function main() {
     ws.on('error', () => { pi.removeClient(ws); });
   });
 
-  await pi.start();
   server.listen(port, '0.0.0.0', () => {
     const interfaces = ['localhost', '0.0.0.0'];
     console.log(`[Server] Listening on http://0.0.0.0:${port}`);
     console.log(`[Server] Open http://localhost:${port} locally`);
     console.log(`[Server] Or http://<your-ip>:${port} from another machine`);
+    pi.broadcast({ type: 'system', event: 'pi_connecting' });
+    pi.start().catch((error) => {
+      console.error('[PiRPC] Failed to start:', error.message);
+      pi.broadcast({ type: 'system', event: 'pi_error', error: error.message });
+    });
   });
 }
 
