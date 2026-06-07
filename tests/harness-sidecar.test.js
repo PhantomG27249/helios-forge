@@ -148,8 +148,13 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     const requiredTypes = [
       'bes.strategies_seeded',
       'bes.subgoals_scored',
+      'bes.genomes_created',
+      'bes.recombination_proposed',
       'graph.code_graph_created',
+      'graph.context_composed',
       'memory.candidate_written',
+      'memory.reflection_evaluated',
+      'memory.corpus_scored',
       'meta.trace_inspected',
       'meta.optimizer_proposed',
       'research.report_created',
@@ -159,6 +164,7 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'experiment.decision_written',
       'swarm.attempts_scheduled',
       'swarm.champion_selected',
+      'swarm.orchestration_completed',
       'vlm.visual_context_created',
       'collaboration.workspace_lease_acquired',
     ];

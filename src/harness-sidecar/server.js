@@ -13,16 +13,27 @@ import { compileFinalAuditReport } from './core/finalAudit.js';
 import { TraceWriter } from './core/traceWriter.js';
 import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
+import { archiveChampion, createChampionArchive, selectBestChampion } from './bes/championArchive.js';
+import { createAttemptGenome } from './bes/attemptGenome.js';
+import { createDiversityTracker } from './bes/diversityTracker.js';
+import { proposeMutations } from './bes/mutationPolicy.js';
+import { recombineAttempts } from './bes/recombinationEngine.js';
 import { writeExperimentDecision } from './experiments/decisionWriter.js';
 import { ExperimentQueue } from './experiments/experimentQueue.js';
 import { compileExperimentReport } from './experiments/experimentReports.js';
 import { classifyNoise } from './experiments/noiseGate.js';
 import { RunTracker } from './experiments/runTracker.js';
+import { buildClaimEvidenceGraph } from './graph/claimEvidenceGraph.js';
 import { createCodeGraphFromIndex } from './graph/codeGraph.js';
+import { buildExperimentGraph } from './graph/experimentGraph.js';
+import { buildVisualGraph } from './graph/visualGraph.js';
+import { decideReflectionGate } from './memory/reflectionGate.js';
 import { writeMemoryCandidate } from './memory/memoryWriter.js';
+import { scoreMemoryCorpus } from './memory/memoryEvals.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
 import { inspectTrace } from './meta/traceInspector.js';
+import { composeGraphRagContext } from './rag/graphRagComposer.js';
 import { auditCitations } from './research/citationAuditor.js';
 import { createDeepResearchReport } from './research/deepResearchManager.js';
 import { compileResearchReport } from './research/reportCompiler.js';
@@ -32,6 +43,7 @@ import { retrieveWorkspaceContext } from './rag/retriever.js';
 import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { chooseChampion } from './swarm/championSelector.js';
+import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { runVerifiers } from './tools/verifierRunner.js';
 import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
@@ -187,6 +199,47 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       score: subgoalScore,
     });
     await updateTaskState(task.taskId, { subgoalScore }, 'bes-runtime');
+    const missingSubgoalIds = subgoals
+      .filter((subgoal) => !completedSubgoalIds.includes(subgoal.id))
+      .map((subgoal) => subgoal.id);
+    const genomes = strategies.map((strategy, index) => createAttemptGenome({
+      id: `genome_${task.taskId}_${index + 1}`,
+      strategy,
+      subgoals,
+      solvedSubgoalIds: completedSubgoalIds.slice(0, Math.max(1, completedSubgoalIds.length - index)),
+      mutations: proposeMutations({
+        missingSubgoalIds,
+        failureModes: ['context_missing', 'verifier_failed', 'patch_too_large'],
+        budget: Math.max(1, task.budget.maxToolCalls || 2),
+      }).slice(0, index + 1),
+      evidence: completedSubgoalIds.map((subgoalId) => ({
+        subgoalId,
+        artifactId: patchArtifact.artifactId,
+      })),
+    }));
+    const diversity = createDiversityTracker().score(genomes);
+    await emitEvent({
+      type: 'bes.genomes_created',
+      taskId: task.taskId,
+      genomeCount: genomes.length,
+      diversity,
+    });
+    const recombinedGenome = recombineAttempts({
+      id: `genome_${task.taskId}_recombined`,
+      parents: genomes.slice(0, 2),
+      evidenceByAttemptId: Object.fromEntries(genomes.slice(0, 2).map((genome) => [
+        genome.id,
+        {
+          solvedSubgoalIds: genome.solvedSubgoalIds,
+          evidence: genome.evidence,
+        },
+      ])),
+    });
+    await emitEvent({
+      type: 'bes.recombination_proposed',
+      taskId: task.taskId,
+      genome: recombinedGenome,
+    });
 
     const codeGraph = createCodeGraphFromIndex(workspaceIndex, { taskId: task.taskId });
     const graphSummary = {
@@ -230,6 +283,32 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       memoryId: memoryCandidate.memoryId,
       reviewStatus: memoryCandidate.reviewStatus,
       evidence: memoryCandidate.evidence,
+    });
+    const memoryGate = decideReflectionGate({
+      ...memoryCandidate,
+      validatorBacked: true,
+      reviewStatus: 'reviewed',
+    });
+    await emitEvent({
+      type: 'memory.reflection_evaluated',
+      taskId: task.taskId,
+      memoryId: memoryCandidate.memoryId,
+      gate: memoryGate,
+    });
+    const memoryCorpusScore = scoreMemoryCorpus({
+      records: [{
+        ...memoryCandidate,
+        type: 'runtime_summary',
+        validatorBacked: true,
+        reviewStatus: 'reviewed',
+      }],
+    });
+    await emitEvent({
+      type: 'memory.corpus_scored',
+      taskId: task.taskId,
+      averageScore: memoryCorpusScore.averageScore,
+      promotableCount: memoryCorpusScore.promotableCount,
+      quarantinedCount: memoryCorpusScore.quarantinedCount,
     });
 
     const traceSummary = await inspectTrace({ traceDir: traceWriter.getTaskTraceDir(task.taskId) });
@@ -384,18 +463,96 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       decision: experimentDecision,
       artifacts: [experimentArtifact],
     });
-
-    const attempts = scheduleAttempts({
+    buildClaimEvidenceGraph({
+      graph: codeGraph,
       taskId: task.taskId,
+      claims: [{
+        id: `runtime-${task.taskId}`,
+        text: `Runtime harness improved completion confidence for ${task.task}`,
+        evidence: [{
+          type: 'run',
+          id: finishedRun.runId,
+          summary: finishedRun.command,
+          value: finishedRun.metrics.quality,
+        }],
+      }],
+    });
+    buildExperimentGraph({
+      graph: codeGraph,
+      taskId: task.taskId,
+      hypothesis: { id: experiment.experimentId, text: experiment.hypothesis },
+      config: { id: `budget-${task.taskId}`, label: 'Runtime task budget', params: task.budget },
+      runs: [{
+        runId: finishedRun.runId,
+        status: finishedRun.status,
+        metrics: Object.entries(finishedRun.metrics).map(([name, value]) => ({ name, value })),
+      }],
+      decision: {
+        id: experimentDecision.decisionId,
+        outcome: experimentDecision.conclusion,
+        reason: experimentDecision.reasons.join(', '),
+      },
+    });
+    const visualDiff = createVisualDiffArtifact({
+      taskId: task.taskId,
+      beforePath: patchArtifact.path,
+      afterPath: graphArtifact.path,
+      diffPath: metaArtifact.path,
+      summary: 'Runtime placeholder visual diff links key harness artifacts.',
+    });
+    buildVisualGraph({
+      graph: codeGraph,
+      taskId: task.taskId,
+      artifact: { id: visualDiff.artifactId, path: visualDiff.diffPath, label: visualDiff.summary },
+      sourceFiles: workspaceIndex.items.slice(0, 2).map((file) => file.path),
+      observations: [{ id: `obs-${task.taskId}`, text: visualDiff.summary }],
+    });
+    const graphRagContext = composeGraphRagContext({
+      graph: codeGraph,
+      queries: [{
+        type: 'supporting_runs_for_claim',
+        claimId: `runtime-${task.taskId}`,
+      }],
+      maxItems: 4,
+    });
+    await emitEvent({
+      type: 'graph.context_composed',
+      taskId: task.taskId,
+      source: graphRagContext.source,
+      itemCount: graphRagContext.items.length,
+      items: graphRagContext.items,
+    });
+
+    const swarmRun = await orchestrateSwarm({
+      task,
       taskType: 'coding_bugfix',
       maxAttempts: strategies.length,
-    }).map((attempt, index) => ({
-      ...attempt,
-      verifierPassed: index === 0,
-      score: subgoalScore.percent - (index * 3),
-      patchStats: { changedLines: index + 1 },
-    }));
-    const champion = chooseChampion(attempts);
+      context: {
+        contextPackId: contextPack.contextPackId,
+        allowedFiles: contextPack.items.map((item) => item.path),
+      },
+      budget: { maxOutputChars: 1200 },
+      commandAdapter: async ({ attempt }) => ({
+        summary: `Dry-run attempt ${attempt.attemptId} evaluated by full runtime.`,
+        patch: `attempt:${attempt.attemptId}`,
+        verifierEvidence: [{ artifactId: patchArtifact.artifactId, status: 'passed' }],
+        score: subgoalScore.percent - Math.max(0, attempt.index || 0),
+        patchStats: { changedLines: Math.max(1, (attempt.index || 0) + 1) },
+      }),
+    });
+    const attempts = swarmRun.attempts;
+    const champion = swarmRun.champion || chooseChampion(attempts);
+    const championArchive = createChampionArchive();
+    if (champion) {
+      archiveChampion(championArchive, {
+        attemptId: champion.attemptId,
+        score: champion.score,
+        safety: 'safe',
+        cost: champion.patchStats?.changedLines || 0,
+        metadata: { taskId: task.taskId },
+      });
+    }
+    const archivedChampion = selectBestChampion(championArchive);
     await emitEvent({
       type: 'swarm.attempts_scheduled',
       taskId: task.taskId,
@@ -406,13 +563,12 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId: task.taskId,
       champion,
     });
-
-    const visualDiff = createVisualDiffArtifact({
+    await emitEvent({
+      type: 'swarm.orchestration_completed',
       taskId: task.taskId,
-      beforePath: patchArtifact.path,
-      afterPath: graphArtifact.path,
-      diffPath: metaArtifact.path,
-      summary: 'Runtime placeholder visual diff links key harness artifacts.',
+      reviewCount: swarmRun.reviews.length,
+      recombination: swarmRun.recombination,
+      archivedChampion,
     });
     const visualContextItem = createVisualContextItem(visualDiff);
     await emitEvent({
