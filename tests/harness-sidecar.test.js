@@ -88,7 +88,16 @@ test('task endpoint emits deterministic MVP events and writes a trace', async ()
     assert.equal(events.some((event) => event.type === 'subgoals.planned'), true);
     assert.equal(events.some((event) => event.type === 'budget.updated'), true);
     assert.equal(events.some((event) => event.type === 'verifier.output' && /MVP verifier passed/.test(event.stdout)), true);
-    assert.equal(events.some((event) => event.type === 'patch.proposed'), true);
+    const patchEvent = events.find((event) => event.type === 'patch.proposed');
+    assert.equal(Boolean(patchEvent), true);
+    assert.equal(patchEvent.artifacts.length, 1);
+    assert.equal(patchEvent.artifacts[0].type, 'patch_manifest');
+
+    const artifactResponse = await fetch(`${sidecar.url}/v1/artifacts/${patchEvent.artifacts[0].artifactId}`);
+    const artifactBody = await artifactResponse.json();
+    assert.equal(artifactResponse.status, 200);
+    assert.equal(artifactBody.artifact.artifactId, patchEvent.artifacts[0].artifactId);
+    assert.equal(artifactBody.content.includes('Demonstrate patch proposal flow'), true);
 
     const tracePath = path.join(workspaceRoot, '.harness', 'traces', body.taskId, 'events.jsonl');
     const traceContent = await readFile(tracePath, 'utf8');

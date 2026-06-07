@@ -21,6 +21,10 @@ export class HarnessClient {
     return this.postJson(`/v1/approvals/${encodeURIComponent(actionId)}`, { choice });
   }
 
+  async getArtifact(artifactId) {
+    return this.getJson(`/v1/artifacts/${encodeURIComponent(artifactId)}`);
+  }
+
   onEvent(handler) {
     this.eventHandlers.add(handler);
     return () => this.eventHandlers.delete(handler);

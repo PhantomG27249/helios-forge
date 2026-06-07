@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 function makeArtifactId() {
@@ -20,6 +20,14 @@ export function createArtifactStore({ workspaceRoot }) {
         title,
         contentType: 'text/plain',
         path: artifactPath,
+      };
+    },
+
+    async readTextArtifact(artifact) {
+      const content = await readFile(artifact.path, 'utf8');
+      return {
+        artifact,
+        content,
       };
     },
   };

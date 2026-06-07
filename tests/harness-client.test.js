@@ -31,7 +31,7 @@ test('harness client reads sidecar health', async () => {
   });
 });
 
-test('harness client starts tasks and resolves approvals', async () => {
+test('harness client starts tasks, reads artifacts, and resolves approvals', async () => {
   await withSidecarClient(async ({ client }) => {
     const task = await client.startTask({
       workspaceId: 'local',
@@ -43,6 +43,12 @@ test('harness client starts tasks and resolves approvals', async () => {
     assert.match(task.taskId, /^task_/);
 
     await new Promise((resolve) => setTimeout(resolve, 50));
+    const patchEvent = client.lastEvents.find((event) => event.type === 'patch.proposed');
+    assert.equal(Boolean(patchEvent), true);
+    const artifact = await client.getArtifact(patchEvent.artifacts[0].artifactId);
+    assert.equal(artifact.artifact.artifactId, patchEvent.artifacts[0].artifactId);
+    assert.equal(artifact.content.includes('run the client test'), true);
+
     const approvalEvent = client.lastEvents.find((event) => event.type === 'approval.required');
     assert.equal(Boolean(approvalEvent), true);
 

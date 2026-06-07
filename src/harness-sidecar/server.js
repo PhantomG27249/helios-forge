@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { planSubgoals } from './bes/subgoalPlanner.js';
 import { BudgetManager } from './budget/budgetManager.js';
 import { TraceWriter } from './core/traceWriter.js';
+import { createArtifactStore } from './artifacts/artifactStore.js';
 import { buildContextPack } from './rag/contextPackBuilder.js';
 import { retrieveWorkspaceContext } from './rag/retriever.js';
 import { indexWorkspace } from './rag/workspaceIndexer.js';
@@ -57,6 +58,8 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
   const subscribers = new Set();
   const traceWriter = new TraceWriter({ workspaceRoot: resolvedWorkspaceRoot });
+  const artifactStore = createArtifactStore({ workspaceRoot: resolvedWorkspaceRoot });
+  const artifacts = new Map();
   const pendingApprovals = new Map();
   const tasks = new Map();
   let server = null;
@@ -154,6 +157,25 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       emitEvent,
     });
     budgetManager.recordUsage({ toolCalls: 1, verifierCalls: 1 });
+    const patchArtifact = await artifactStore.writeTextArtifact({
+      taskId,
+      type: 'patch_manifest',
+      title: 'Scripted MVP patch proposal',
+      filename: `${patchId}.json`,
+      content: JSON.stringify(
+        {
+          patchId,
+          task: task.task,
+          intent: 'Demonstrate patch proposal flow without applying workspace edits.',
+          files: [],
+          validationPlan: ['mvp-scripted-verifier'],
+        },
+        null,
+        2,
+      ),
+    });
+    artifacts.set(patchArtifact.artifactId, patchArtifact);
+
     await emitEvent({
       type: 'patch.proposed',
       taskId,
@@ -161,6 +183,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       intent: 'Demonstrate patch proposal flow without applying workspace edits.',
       files: [],
       validationPlan: ['mvp-scripted-verifier'],
+      artifacts: [patchArtifact],
     });
     await emitEvent({
       type: 'approval.required',
@@ -237,6 +260,18 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         const body = await readJsonBody(req);
         const task = await createTask(body);
         sendJson(res, 202, { taskId: task.taskId, status: task.status });
+        return;
+      }
+
+      const artifactMatch = url.pathname.match(/^\/v1\/artifacts\/([^/]+)$/);
+      if (req.method === 'GET' && artifactMatch) {
+        const artifact = artifacts.get(artifactMatch[1]);
+        if (!artifact) {
+          sendJson(res, 404, { error: 'Artifact not found' });
+          return;
+        }
+        const artifactBody = await artifactStore.readTextArtifact(artifact);
+        sendJson(res, 200, artifactBody);
         return;
       }
 
