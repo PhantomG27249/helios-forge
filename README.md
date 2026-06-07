@@ -75,10 +75,7 @@ Helios Forge reads Pi Agent's normal model configuration:
 - `C:\Users\<you>\.pi\agent\models.json`
 - `C:\Users\<you>\.pi\agent\auth.json`
 
-For the your private OpenAI-compatible endpoint, configure Pi with the OpenAI-compatible base URL and model id you want to run, for example:
-
-- base URL: `<private-openai-compatible-base-url>`
-- model: `example/ebft-model`
+Configure Pi with the private OpenAI-compatible base URL and model id you want to run. Keep endpoint details out of this repository.
 
 Keep credentials and provider details in Pi's normal config. Helios Forge only mounts workspace-local harness capabilities unless you explicitly install the optional global Pi kwargs extension.
 
