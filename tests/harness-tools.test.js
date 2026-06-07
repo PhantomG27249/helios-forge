@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { evaluateFinalValidation } from '../src/harness-sidecar/tools/finalValidator.js';
+import { createPatchProposal, validatePatchProposal } from '../src/harness-sidecar/tools/patchManager.js';
 import { runShellCommand } from '../src/harness-sidecar/tools/shellBroker.js';
 import { runVerifiers } from '../src/harness-sidecar/tools/verifierRunner.js';
 
@@ -61,4 +63,43 @@ test('verifier runner emits start, output, and finish events', async () => {
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
+});
+
+test('patch manager creates approval-ready patch proposals and rejects unsafe paths', () => {
+  const proposal = createPatchProposal({
+    taskId: 'task_patch',
+    intent: 'Fix failing test',
+    files: [{ path: 'src/app.js', status: 'modified', diff: 'diff --git a/src/app.js b/src/app.js\n' }],
+    validationPlan: ['npm test'],
+    createdBy: 'agent_a',
+  });
+
+  assert.match(proposal.patchId, /^patch_/);
+  assert.equal(validatePatchProposal(proposal).valid, true);
+
+  const unsafe = createPatchProposal({
+    taskId: 'task_patch',
+    intent: 'Unsafe edit',
+    files: [{ path: 'C:/Users/jackj/secret.txt', status: 'modified', diff: '' }],
+    validationPlan: [],
+  });
+  assert.equal(validatePatchProposal(unsafe).valid, false);
+});
+
+test('final validator requires passing verifiers artifacts and approval', () => {
+  const passed = evaluateFinalValidation({
+    verifierResults: [{ name: 'unit', passed: true }],
+    requiredArtifacts: [{ type: 'patch_manifest' }],
+    approvals: [{ choice: 'approve' }],
+  });
+  const failed = evaluateFinalValidation({
+    verifierResults: [{ name: 'unit', passed: false }],
+    requiredArtifacts: [],
+    approvals: [],
+  });
+
+  assert.equal(passed.passed, true);
+  assert.equal(failed.passed, false);
+  assert.equal(failed.reasons.includes('verifier_failed'), true);
+  assert.equal(failed.reasons.includes('missing_approval'), true);
 });
