@@ -20,11 +20,12 @@ const registry = {
       tags: ['default', 'smoke'],
     },
     {
-      name: 'vlm-focused',
-      command: 'npm test -- tests/harness-vlm-native.test.js',
+      name: 'visual-ui',
+      command: null,
+      tool: 'visual.verifier.run',
       kind: 'visual',
-      appliesTo: ['src/harness-sidecar/vlm/**/*.js'],
-      tags: ['vlm'],
+      appliesTo: ['public/**/*.js', 'public/**/*.html', 'src/harness-sidecar/vlm/**/*.js'],
+      tags: ['visual', 'vlm', 'ui'],
     },
     {
       name: 'sidecar-focused',
@@ -36,15 +37,26 @@ const registry = {
   ],
 };
 
-test('verifier selector chooses unit verifier for ordinary js changes', () => {
+test('verifier selector chooses visual verifier for public js changes with unit companion', () => {
   const selected = selectVerifiersForTask({
     task: { taskId: 'task_unit', task: 'edit app js' },
     changedFiles: ['public/app.js'],
     registry,
   });
 
-  assert.equal(selected[0].name, 'unit');
-  assert.equal(selected[0].reason, 'default_js_change');
+  assert.deepEqual(selected.map((verifier) => verifier.name), ['visual-ui', 'unit']);
+  assert.equal(selected[0].reason, 'visual_surface_change');
+});
+
+test('verifier selector chooses visual verifier for public html changes', () => {
+  const selected = selectVerifiersForTask({
+    task: { taskId: 'task_html', task: 'edit index html' },
+    changedFiles: ['public/index.html'],
+    registry,
+  });
+
+  assert.deepEqual(selected.map((verifier) => verifier.name), ['visual-ui']);
+  assert.equal(selected[0].reason, 'visual_surface_change');
 });
 
 test('verifier selector chooses focused sidecar and smoke verifiers for runtime changes', () => {
@@ -58,15 +70,16 @@ test('verifier selector chooses focused sidecar and smoke verifiers for runtime 
   assert.equal(selected[0].reason, 'sidecar_runtime_change');
 });
 
-test('verifier selector chooses vlm focused verifier for visual worker changes', () => {
+test('verifier selector chooses visual verifier for visual worker changes with code companions', () => {
   const selected = selectVerifiersForTask({
     task: { taskId: 'task_vlm', task: 'capture browser screenshot' },
-    changedFiles: ['src/harness-sidecar/vlm/browserPreviewCapture.js'],
+    changedFiles: ['src/harness-sidecar/vlm/visualVerifier.js'],
     registry,
   });
 
-  assert.equal(selected[0].name, 'vlm-focused');
+  assert.equal(selected[0].name, 'visual-ui');
   assert.equal(selected[0].reason, 'vlm_change');
+  assert.equal(selected.some((verifier) => verifier.name === 'unit'), true);
 });
 
 test('verifier selector falls back to smoke/default for unknown changes and recent failures', () => {
@@ -80,4 +93,5 @@ test('verifier selector falls back to smoke/default for unknown changes and rece
 
   assert.deepEqual(selected.map((verifier) => verifier.name), ['unit', 'release-smoke']);
   assert.equal(selected[0].reason, 'recent_failure');
+  assert.equal(selected.some((verifier) => verifier.name === 'visual-ui'), false);
 });

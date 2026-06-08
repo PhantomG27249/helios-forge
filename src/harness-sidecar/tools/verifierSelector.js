@@ -42,11 +42,16 @@ function verifierMatches(verifier, changedFiles) {
 function classifyChange(changedFiles) {
   const files = changedFiles.map(normalizePath);
   if (files.some((file) => file.startsWith('src/harness-sidecar/vlm/'))) return 'vlm_change';
+  if (files.some((file) => file.startsWith('public/'))) return 'visual_surface_change';
   if (files.some((file) => file.startsWith('src/harness-sidecar/') || file === 'src/server.js')) {
     return 'sidecar_runtime_change';
   }
   if (files.some((file) => file.endsWith('.js'))) return 'default_js_change';
   return 'unknown_change';
+}
+
+function hasCodeChange(changedFiles) {
+  return changedFiles.some((file) => normalizePath(file).endsWith('.js'));
 }
 
 function withReason(verifier, reason) {
@@ -85,6 +90,12 @@ export function selectVerifiersForTask({
 
   if (changeClass === 'vlm_change') {
     pushUnique(selected, findByKindOrTag(registry, ['visual', 'vlm']), 'vlm_change');
+  }
+  if (changeClass === 'visual_surface_change') {
+    pushUnique(selected, findByKindOrTag(registry, ['visual', 'ui', 'vlm']), 'visual_surface_change');
+    if (hasCodeChange(normalizedChangedFiles)) {
+      pushUnique(selected, findByKindOrTag(registry, ['unit']), 'visual_surface_change');
+    }
   }
   if (changeClass === 'sidecar_runtime_change') {
     pushUnique(selected, findByKindOrTag(registry, ['integration', 'sidecar']), 'sidecar_runtime_change');

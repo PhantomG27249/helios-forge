@@ -79,7 +79,7 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
     });
     const tools = registry.list().map((tool) => tool.name).sort();
 
-    assert.deepEqual(tools, ['mcp.call', 'shell.run', 'verifier.run']);
+    assert.deepEqual(tools, ['mcp.call', 'shell.run', 'verifier.run', 'visual.verifier.run']);
 
     const shell = await registry.execute('shell.run', {
       command: `${nodeCommand} -e "console.log('shell-ok')"`,
@@ -102,6 +102,58 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
     });
     assert.equal(mcp.status, 'completed');
     assert.deepEqual(mcpCalls, [{ serverId: 'demo', tool: 'demo.echo', args: { text: 'hello' } }]);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('default tool registry executes visual verifier through injected dependencies', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-default-visual-verifier-'));
+  const visualCalls = [];
+
+  try {
+    const registry = createDefaultToolRegistry({
+      workspaceRoot,
+      visualCaptureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await writeFile(outputPath, Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+            'base64',
+          ));
+          return { imagePath: outputPath, width: 1, height: 1 };
+        },
+      },
+      visualVerifier: async (input) => {
+        visualCalls.push(input);
+        const { runVisualVerifier } = await import('../src/harness-sidecar/vlm/visualVerifier.js');
+        return runVisualVerifier({
+          ...input,
+          vlmJudge: async () => ({
+            score: 0.91,
+            confidence: 0.88,
+            findings: [],
+            passed: true,
+            model: { model: 'local-test-vlm' },
+          }),
+        });
+      },
+    });
+
+    const result = await registry.execute('visual.verifier.run', {
+      taskId: 'task_visual_tool',
+      goal: 'Verify the preview renders.',
+      targetUrl: 'http://127.0.0.1:3000/',
+      expected: ['preview rendered'],
+      strictness: 'strict',
+    });
+
+    assert.equal(result.name, 'visual.verifier');
+    assert.equal(result.passed, true);
+    assert.equal(result.score, 0.91);
+    assert.equal(visualCalls.length, 1);
+    assert.equal(visualCalls[0].workspaceRoot, workspaceRoot);
+    assert.equal(typeof visualCalls[0].captureAdapter.screenshot, 'function');
+    assert.equal(visualCalls[0].strictness, 'strict');
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

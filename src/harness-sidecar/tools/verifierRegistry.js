@@ -88,6 +88,11 @@ function normalizeArray(value, fallback = []) {
   return fallback;
 }
 
+function normalizeObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return { ...value };
+}
+
 function normalizeCwd({ workspaceRoot, verifier }) {
   if (!verifier.cwd || verifier.cwd === '.') return null;
   if (path.isAbsolute(verifier.cwd)) {
@@ -110,13 +115,21 @@ function normalizeVerifier({ workspaceRoot, verifier, index }) {
   if (!verifier.name || !/^[A-Za-z0-9_.:-]+$/.test(verifier.name)) {
     throw new Error(`Verifier record at index ${index} has invalid name`);
   }
-  if (!verifier.command || typeof verifier.command !== 'string') {
-    throw new Error(`Verifier "${verifier.name}" command is required`);
+  const hasCommand = typeof verifier.command === 'string' && verifier.command.trim() !== '';
+  const hasTool = typeof verifier.tool === 'string' && verifier.tool.trim() !== '';
+  if (hasCommand === hasTool) {
+    throw new Error(`Verifier "${verifier.name}" must define exactly one of command or tool`);
+  }
+  if (hasTool && !/^[A-Za-z0-9_.:-]+$/.test(verifier.tool)) {
+    throw new Error(`Verifier "${verifier.name}" has invalid tool name`);
   }
 
   return {
     name: verifier.name,
-    command: verifier.command,
+    command: hasCommand ? verifier.command : null,
+    tool: hasTool ? verifier.tool : null,
+    toolInput: normalizeObject(verifier.toolInput),
+    rubric: normalizeObject(verifier.rubric),
     kind: verifier.kind || 'custom',
     risk: verifier.risk || 'medium',
     timeoutMs: Number.isFinite(verifier.timeoutMs) ? verifier.timeoutMs : DEFAULT_TIMEOUT_MS,

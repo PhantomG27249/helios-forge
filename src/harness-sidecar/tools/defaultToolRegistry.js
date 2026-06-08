@@ -3,6 +3,7 @@ import { runShellCommand } from './shellBroker.js';
 import { loadVerifierRegistry } from './verifierRegistry.js';
 import { runVerifiers } from './verifierRunner.js';
 import { selectVerifiersForTask } from './verifierSelector.js';
+import { runVisualVerifier } from '../vlm/visualVerifier.js';
 
 function mcpRuntimeRequired() {
   throw new Error('mcpRuntime is required for mcp.call');
@@ -13,6 +14,10 @@ export function createDefaultToolRegistry({
   emitEvent = () => {},
   mcpRuntime,
   maxOutputBytes = 64 * 1024,
+  visualVerifier = runVisualVerifier,
+  visualCaptureAdapter,
+  visualWorkerRuntimes,
+  modelGateway,
 } = {}) {
   if (!workspaceRoot) {
     throw new Error('workspaceRoot is required');
@@ -49,6 +54,7 @@ export function createDefaultToolRegistry({
       type: 'object',
       properties: {
         taskId: { type: 'string' },
+        task: { type: 'object' },
         verifiers: { type: 'array' },
         changedFiles: { type: 'array' },
         recentFailures: { type: 'array' },
@@ -94,18 +100,62 @@ export function createDefaultToolRegistry({
         selection: selectedVerifiers.map((verifier) => ({
           name: verifier.name,
           command: verifier.command,
+          tool: verifier.tool,
           kind: verifier.kind,
           reason: verifier.reason,
         })),
         results: await runVerifiers({
-        workspaceRoot,
-        taskId,
-        verifiers: selectedVerifiers,
-        emitEvent,
-        maxOutputBytes,
+          workspaceRoot,
+          taskId,
+          task,
+          verifiers: selectedVerifiers,
+          emitEvent,
+          maxOutputBytes,
+          toolRegistry: registry,
         }),
       };
     },
+  });
+
+  registry.register({
+    name: 'visual.verifier.run',
+    description: 'Capture visual artifacts and judge them with a VLM verifier.',
+    risk: 'medium',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string' },
+        goal: { type: 'string' },
+        targetUrl: { type: 'string' },
+        beforePath: { type: 'string' },
+        afterPath: { type: 'string' },
+        expected: { type: 'array' },
+        strictness: { type: 'string' },
+      },
+      required: ['taskId', 'goal'],
+    },
+    execute: async ({
+      taskId,
+      goal,
+      targetUrl,
+      beforePath,
+      afterPath,
+      expected,
+      strictness,
+    } = {}) => visualVerifier({
+      taskId,
+      workspaceRoot,
+      goal,
+      targetUrl,
+      beforePath,
+      afterPath,
+      expected,
+      strictness,
+      captureAdapter: visualCaptureAdapter,
+      workerRuntimes: visualWorkerRuntimes,
+      modelGateway,
+      emitEvent,
+    }),
   });
 
   registry.register({
