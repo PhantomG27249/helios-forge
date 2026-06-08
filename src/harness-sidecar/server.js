@@ -11,6 +11,7 @@ import { VersionedState } from './collaboration/versionedState.js';
 import { WorkspaceLeaseService } from './collaboration/workspaceLeases.js';
 import { loadHarnessConfig } from './config/configLoader.js';
 import { compileFinalAuditReport } from './core/finalAudit.js';
+import { createApprovalResumeStore, executeApprovedApplyAction } from './core/approvalResume.js';
 import { resumeTaskFromTrace } from './core/taskResume.js';
 import { listTraces, readTrace, replayTrace } from './core/traceReader.js';
 import { TraceWriter } from './core/traceWriter.js';
@@ -66,10 +67,14 @@ import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
+import { createGitApplyAdapter } from './tools/gitApplyAdapter.js';
+import { startMcpRuntimesFromCapabilities } from './tools/mcpCapabilityRuntime.js';
+import { runToolLoop } from './tools/toolLoopController.js';
 import { runVerifiers } from './tools/verifierRunner.js';
 import { interpretDiagram } from './vlm/diagramInterpreter.js';
 import { createFigureCropArtifact } from './vlm/figureCropper.js';
 import { createPdfPageArtifacts } from './vlm/pdfRenderer.js';
+import { captureProductionVisualArtifacts } from './vlm/productionArtifactCapture.js';
 import { analyzePlot } from './vlm/plotAnalyzer.js';
 import { writeRuntimePreviewImage } from './vlm/runtimePreviewImage.js';
 import { createScreenshotArtifact } from './vlm/screenshotTool.js';
@@ -186,6 +191,10 @@ export function createHarnessSidecar({
   swarmWorktreeManager,
   swarmCommandAdapter,
   swarmVerifierAdapter,
+  mcpRuntime,
+  mcpTransportFactory,
+  visualCaptureAdapter,
+  applyAdapter,
 } = {}) {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
   const subscribers = new Set();
@@ -196,8 +205,10 @@ export function createHarnessSidecar({
   const lockService = new LockService();
   const workspaceLeaseService = new WorkspaceLeaseService();
   const pendingApprovals = new Map();
+  const approvalResumeStore = createApprovalResumeStore({ emitEvent });
   const tasks = new Map();
   const taskStates = new Map();
+  let mountedMcpRuntime = mcpRuntime || null;
   let server = null;
   let actualPort = port;
 
@@ -264,6 +275,26 @@ export function createHarnessSidecar({
       capabilityCount: capabilities.length,
       manifestPath: normalizedMount.manifestPath,
     });
+
+    if (capabilities.some((capability) => capability.type === 'mcp')) {
+      const mcpSummary = await startMcpRuntimesFromCapabilities({
+        records: capabilities,
+        workspaceRoot,
+        runtime: mountedMcpRuntime,
+        transportFactory: mcpTransportFactory,
+        emitEvent: (event) => emitEvent({ taskId, ...event }),
+      });
+      mountedMcpRuntime = mcpSummary.runtime || mountedMcpRuntime;
+      await emitEvent({
+        type: 'mcp.capability_runtime.summary',
+        taskId,
+        startedCount: mcpSummary.started.length,
+        skippedCount: mcpSummary.skipped.length,
+        started: mcpSummary.started,
+        skipped: mcpSummary.skipped,
+      });
+    }
+
     return {
       ...normalizedMount,
       profileId: normalizedMount.manifest.profileId,
@@ -362,10 +393,12 @@ export function createHarnessSidecar({
       'audit',
     ];
     const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
+    let defaultToolRegistry = null;
     if (runtimeSwarmModel) {
-      const defaultToolRegistry = createDefaultToolRegistry({
+      defaultToolRegistry = createDefaultToolRegistry({
         workspaceRoot: resolvedWorkspaceRoot,
         emitEvent,
+        mcpRuntime: mountedMcpRuntime,
       });
       const toolNames = defaultToolRegistry.list().map((tool) => tool.name).sort();
       await emitEvent({
@@ -375,6 +408,91 @@ export function createHarnessSidecar({
         toolNames,
         toolLoopReady: true,
       });
+    }
+    const autonomousToolLoopEnabled = runtimeSwarmModel
+      && (
+        harnessConfig?.features?.autonomousToolLoop === true
+        || process.env.HELIOS_AUTONOMOUS_TOOL_LOOP === '1'
+      );
+    if (autonomousToolLoopEnabled) {
+      const toolLoopResult = await runToolLoop({
+        taskId: task.taskId,
+        purpose: 'full_task_tool_loop',
+        profileName: runtimeSwarmModel.profileName,
+        modelGateway: runtimeSwarmModel.gateway,
+        toolRegistry: defaultToolRegistry,
+        maxIterations: Math.max(1, Math.min(8, task.budget.maxToolCalls || 4)),
+        messages: [{
+          role: 'user',
+          content: [
+            `Task: ${task.task}`,
+            `Context pack: ${contextPack.contextPackId}`,
+            'Use available tools only when they materially improve the result. Return a concise final status.',
+          ].join('\n'),
+        }],
+      });
+      await emitEvent({
+        type: `tool_loop.${toolLoopResult.status}`,
+        taskId: task.taskId,
+        status: toolLoopResult.status,
+        iterations: toolLoopResult.iterations,
+        toolResultCount: toolLoopResult.toolResults.length,
+        finalText: toolLoopResult.finalText,
+        toolResults: toolLoopResult.toolResults.map((result) => ({
+          id: result.id,
+          name: result.name,
+          status: result.status,
+          reason: result.reason,
+          error: result.error,
+        })),
+      });
+      await updateTaskState(
+        task.taskId,
+        {
+          toolLoopStatus: toolLoopResult.status,
+          toolLoopIterations: toolLoopResult.iterations,
+        },
+        'tool-loop-runtime',
+      );
+
+      if (toolLoopResult.status === 'approval_required') {
+        const actionId = makeId('act');
+        const action = {
+          actionId,
+          taskId: task.taskId,
+          kind: 'tool_loop_resume',
+          payload: { toolResults: toolLoopResult.toolResults },
+          resume: async () => {
+            await emitEvent({
+              type: 'tool_loop.resume_requested',
+              taskId: task.taskId,
+              actionId,
+            });
+            return { status: 'queued', toolResultCount: toolLoopResult.toolResults.length };
+          },
+        };
+        approvalResumeStore.register(action);
+        pendingApprovals.set(actionId, {
+          actionId,
+          taskId: task.taskId,
+          kind: action.kind,
+          status: 'pending',
+          payload: action.payload,
+        });
+        await emitEvent({
+          type: 'approval.required',
+          taskId: task.taskId,
+          actionId,
+          risk: 'high',
+          reason: 'Tool loop produced a pending tool call that requires approval before resume.',
+          choices: ['approve', 'reject', 'defer'],
+          proposedAction: {
+            kind: action.kind,
+            tool: 'tool_loop',
+            description: 'Resume the model tool loop after approving the pending tool call.',
+          },
+        });
+      }
     }
     await emitEvent({
       type: 'harness_runtime.enabled',
@@ -962,6 +1080,39 @@ export function createHarnessSidecar({
       viewport: { width: 1280, height: 720 },
       source: { type: 'runtime_visual_diff', artifactId: visualDiff.artifactId },
     });
+    const previewUrl = process.env.HELIOS_WEB_PREVIEW_URL
+      || harnessConfig?.preview?.url
+      || harnessConfig?.webPreview?.url
+      || null;
+    let productionVisualCapture = null;
+    if (visualCaptureAdapter && (previewUrl || harnessConfig?.features?.visualArtifacts === true)) {
+      try {
+        productionVisualCapture = await captureProductionVisualArtifacts({
+          taskId: task.taskId,
+          workspaceRoot: resolvedWorkspaceRoot,
+          targetUrl: previewUrl,
+          beforePath: patchArtifact.path,
+          afterPath: graphArtifact.path,
+          outputDir: path.join('.harness', 'visual', task.taskId),
+          captureAdapter: visualCaptureAdapter,
+          emitEvent,
+        });
+        await emitEvent({
+          type: 'vlm.production_artifacts_created',
+          taskId: task.taskId,
+          screenshotArtifactId: productionVisualCapture.artifacts.screenshot?.artifactId,
+          pdfPageCount: productionVisualCapture.artifacts.pdfPages.length,
+          visualDiffArtifactId: productionVisualCapture.artifacts.visualDiff?.artifactId,
+          skipped: productionVisualCapture.skipped,
+        });
+      } catch (error) {
+        await emitEvent({
+          type: 'vlm.production_artifacts_failed',
+          taskId: task.taskId,
+          reason: error.message,
+        });
+      }
+    }
     const pdfArtifacts = createPdfPageArtifacts({
       taskId: task.taskId,
       pdfPath: researchArtifact.path,
@@ -1138,21 +1289,25 @@ export function createHarnessSidecar({
       planning: swarmRun.planning,
       archivedChampion,
     });
-    const championApplyPlan = champion
+    const championApplyPayload = champion
+      ? {
+        ...champion,
+        output: {
+          ...champion.output,
+          patch: [
+            'diff --git a/.harness/CHAMPION.md b/.harness/CHAMPION.md',
+            '--- a/.harness/CHAMPION.md',
+            '+++ b/.harness/CHAMPION.md',
+            `+Champion attempt: ${champion.attemptId}`,
+          ].join('\n'),
+          verifierEvidence: champion.verifierEvidence,
+        },
+      }
+      : null;
+    const championApplyPlan = championApplyPayload
       ? proposeChampionApply({
         workspaceRoot: resolvedWorkspaceRoot,
-        champion: {
-          ...champion,
-          output: {
-            patch: [
-              'diff --git a/.harness/CHAMPION.md b/.harness/CHAMPION.md',
-              '--- a/.harness/CHAMPION.md',
-              '+++ b/.harness/CHAMPION.md',
-              `+Champion attempt: ${champion.attemptId}`,
-            ].join('\n'),
-            verifierEvidence: champion.verifierEvidence,
-          },
-        },
+        champion: championApplyPayload,
       })
       : null;
     await emitEvent({
@@ -1160,6 +1315,50 @@ export function createHarnessSidecar({
       taskId: task.taskId,
       plan: championApplyPlan,
     });
+    const safeApplyEnabled = harnessConfig?.features?.safeApply === true
+      || process.env.HELIOS_SAFE_APPLY === '1';
+    const safeApplyAdapter = applyAdapter || (
+      safeApplyEnabled ? createGitApplyAdapter({ workspaceRoot: resolvedWorkspaceRoot }) : null
+    );
+    if (championApplyPlan?.safe && safeApplyEnabled && typeof safeApplyAdapter === 'function') {
+      const applyActionId = makeId('act');
+      const applyAction = {
+        actionId: applyActionId,
+        taskId: task.taskId,
+        kind: 'champion_apply',
+        payload: { champion: championApplyPayload },
+        status: 'pending',
+      };
+      approvalResumeStore.register({
+        ...applyAction,
+        resume: async ({ actor } = {}) => executeApprovedApplyAction({
+          action: {
+            ...applyAction,
+            approvedBy: actor || 'human',
+          },
+          approved: true,
+          workspaceRoot: resolvedWorkspaceRoot,
+          applyAdapter: safeApplyAdapter,
+          emitEvent,
+        }),
+      });
+      pendingApprovals.set(applyActionId, applyAction);
+      await emitEvent({
+        type: 'approval.required',
+        taskId: task.taskId,
+        actionId: applyActionId,
+        risk: 'high',
+        reason: 'Champion apply is ready but requires explicit approval before changing workspace branches.',
+        choices: ['approve', 'reject', 'defer'],
+        proposedAction: {
+          kind: 'champion_apply',
+          tool: 'safe_apply',
+          description: 'Apply the approved champion patch through the configured safe apply adapter.',
+          attemptId: champion.attemptId,
+          targetPaths: championApplyPlan.targetPaths,
+        },
+      });
+    }
     const visualContextItem = createVisualContextItem(visualDiff);
     await emitEvent({
       type: 'vlm.visual_context_created',
@@ -1291,7 +1490,15 @@ export function createHarnessSidecar({
         profileId: task.profileId,
       },
     }));
-    pendingApprovals.set(actionId, { actionId, taskId, status: 'pending' });
+    const patchApprovalAction = {
+      actionId,
+      taskId,
+      kind: 'patch_approval',
+      payload: { patchId },
+      status: 'pending',
+    };
+    approvalResumeStore.register(patchApprovalAction);
+    pendingApprovals.set(actionId, patchApprovalAction);
     const budgetManager = new BudgetManager({
       taskId,
       limits: {
@@ -1301,6 +1508,10 @@ export function createHarnessSidecar({
       emitEvent,
     });
     const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+    const autonomousToolLoopEnabled = task.mode !== 'mvp' && (
+      harnessConfig?.features?.autonomousToolLoop === true
+      || process.env.HELIOS_AUTONOMOUS_TOOL_LOOP === '1'
+    );
 
     const lockResult = lockService.acquire({
       resource: `task:${taskId}`,
@@ -1385,31 +1596,35 @@ export function createHarnessSidecar({
       excludedDueToBudget: contextPack.excludedDueToBudget,
     });
     budgetManager.recordUsage({ toolCalls: 1 });
-    await runVerifiers({
-      workspaceRoot: resolvedWorkspaceRoot,
-      taskId,
-      verifiers: [
-        {
-          name: 'mvp-scripted-verifier',
-          command: `"${process.execPath}" -e "console.log('MVP verifier passed')"`,
-          timeoutMs: 5000,
-        },
-      ],
-      emitEvent,
-    });
-    budgetManager.recordUsage({ toolCalls: 1, verifierCalls: 1 });
+    if (!autonomousToolLoopEnabled) {
+      await runVerifiers({
+        workspaceRoot: resolvedWorkspaceRoot,
+        taskId,
+        verifiers: [
+          {
+            name: 'mvp-scripted-verifier',
+            command: `"${process.execPath}" -e "console.log('MVP verifier passed')"`,
+            timeoutMs: 5000,
+          },
+        ],
+        emitEvent,
+      });
+      budgetManager.recordUsage({ toolCalls: 1, verifierCalls: 1 });
+    }
     const patchArtifact = await artifactStore.writeTextArtifact({
       taskId,
       type: 'patch_manifest',
-      title: 'Scripted MVP patch proposal',
+      title: autonomousToolLoopEnabled ? 'Autonomous tool loop task proposal' : 'Scripted MVP patch proposal',
       filename: `${patchId}.json`,
       content: JSON.stringify(
         {
           patchId,
           task: task.task,
-          intent: 'Demonstrate patch proposal flow without applying workspace edits.',
+          intent: autonomousToolLoopEnabled
+            ? 'Run the model-driven tool loop before approval-gated apply.'
+            : 'Demonstrate patch proposal flow without applying workspace edits.',
           files: [],
-          validationPlan: ['mvp-scripted-verifier'],
+          validationPlan: autonomousToolLoopEnabled ? ['full_task_tool_loop'] : ['mvp-scripted-verifier'],
         },
         null,
         2,
@@ -1429,9 +1644,11 @@ export function createHarnessSidecar({
       type: 'patch.proposed',
       taskId,
       patchId,
-      intent: 'Demonstrate patch proposal flow without applying workspace edits.',
+      intent: autonomousToolLoopEnabled
+        ? 'Run the model-driven tool loop before approval-gated apply.'
+        : 'Demonstrate patch proposal flow without applying workspace edits.',
       files: [],
-      validationPlan: ['mvp-scripted-verifier'],
+      validationPlan: autonomousToolLoopEnabled ? ['full_task_tool_loop'] : ['mvp-scripted-verifier'],
       artifacts: [patchArtifact],
     });
     if (task.mode !== 'mvp') {
@@ -1467,12 +1684,20 @@ export function createHarnessSidecar({
       return null;
     }
     const choice = body.choice || 'defer';
-    approval.status = 'resolved';
-    approval.choice = choice;
-    approval.resolvedAt = new Date().toISOString();
-    pendingApprovals.set(actionId, approval);
+    const resolvedApproval = await approvalResumeStore.resolve(actionId, choice, {
+      actor: body.actor || 'human',
+      body,
+    });
+    const updatedApproval = {
+      ...approval,
+      ...resolvedApproval,
+      status: resolvedApproval.status === 'not_found' ? 'resolved' : resolvedApproval.status,
+      choice,
+      resolvedAt: resolvedApproval.resolvedAt || new Date().toISOString(),
+    };
+    pendingApprovals.set(actionId, updatedApproval);
 
-    const task = tasks.get(approval.taskId);
+    const task = tasks.get(updatedApproval.taskId);
     if (task) {
       task.status = choice === 'approve' ? 'approved' : 'approval_resolved';
       tasks.set(task.taskId, task);
@@ -1482,23 +1707,17 @@ export function createHarnessSidecar({
       target: `approval:${actionId}`,
       operation: 'approval.resolve',
       reason: `Human selected ${choice}.`,
-      taskId: approval.taskId,
+      taskId: updatedApproval.taskId,
     });
     await updateTaskState(
-      approval.taskId,
+      updatedApproval.taskId,
       {
         status: choice === 'approve' ? 'approved' : 'approval_resolved',
         approvalChoice: choice,
+        approvalResumeRan: resolvedApproval.resumeRan === true,
       },
       body.actor || 'human',
     );
-
-    await emitEvent({
-      type: 'approval.resolved',
-      taskId: approval.taskId,
-      actionId,
-      choice,
-    });
 
     if (task) {
       const state = taskStates.get(task.taskId);
@@ -1512,7 +1731,7 @@ export function createHarnessSidecar({
           task,
           state,
           audit: auditEntries,
-          approval,
+          approval: updatedApproval,
         }),
       });
       artifacts.set(finalAuditArtifact.artifactId, finalAuditArtifact);
@@ -1529,7 +1748,7 @@ export function createHarnessSidecar({
       });
     }
 
-    return approval;
+    return updatedApproval;
   }
 
   function resolveWorkspaceFromInput(workspaceRoot) {

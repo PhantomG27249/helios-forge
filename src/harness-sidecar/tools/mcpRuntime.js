@@ -108,6 +108,11 @@ export class McpRuntimeRegistry {
     return this.status(serverId);
   }
 
+  async startServer(serverId, config = {}) {
+    this.servers.set(serverId, { ...config, id: serverId });
+    return this.start(serverId);
+  }
+
   async stop(serverId) {
     this.ensureServer(serverId);
     const instance = this.instances.get(serverId);

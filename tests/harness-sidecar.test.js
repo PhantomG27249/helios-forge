@@ -365,6 +365,243 @@ test('full runtime invokes VLM observation when configured model supports vision
   );
 });
 
+test('task startup launches enabled MCP capabilities through injected runtime', async () => {
+  await withSidecar(
+    async ({ sidecar }) => {
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'mount real mcp capabilities',
+          mode: 'mvp',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const mcpEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'mcp.capability_runtime.started',
+      );
+
+      assert.equal(mcpEvent.id, 'local-mcp');
+      assert.equal(mcpEvent.transport, 'stdio');
+      assert.equal(JSON.stringify(mcpEvent).includes('secret-value'), false);
+      assert.equal(JSON.stringify(mcpEvent).includes('API_TOKEN'), false);
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: {
+        mcpRuntime: {
+          async startServer() {
+            return { status: 'running' };
+          },
+        },
+      },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'capabilities.json'),
+          JSON.stringify({
+            version: 1,
+            capabilities: [{
+              id: 'local-mcp',
+              type: 'mcp',
+              enabled: true,
+              transport: 'stdio',
+              command: 'node',
+              args: ['server.js'],
+              env: { API_TOKEN: 'secret-value' },
+            }],
+          }),
+        );
+      },
+    },
+  );
+});
+
+test('autonomous full runtime uses tool loop instead of scripted MVP verifier', async () => {
+  const modelCalls = [];
+  const modelProviderFactory = () => async (callInput) => {
+    modelCalls.push(callInput);
+    if (callInput.purpose === 'full_task_tool_loop') {
+      return { text: 'Tool loop completed the task.', usage: { inputTokens: 10, outputTokens: 8 } };
+    }
+    if (callInput.purpose === 'vlm_observation') {
+      return { text: JSON.stringify({ observations: [{ text: 'Preview ok.' }], risks: [], score: 0.8 }) };
+    }
+    return {
+      text: JSON.stringify({
+        summary: 'Model worker dry run.',
+        verifierEvidence: ['dry-run verifier evidence'],
+        score: 0.8,
+      }),
+    };
+  };
+
+  await withSidecar(
+    async ({ sidecar, workspaceRoot }) => {
+      await writeFile(
+        path.join(workspaceRoot, 'sample.js'),
+        'export function sampleHarnessTarget() { return true; }\n',
+      );
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'use the model tool loop for the real task',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const loopEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'tool_loop.completed',
+      );
+      assert.equal(loopEvent.status, 'completed');
+      assert.equal(loopEvent.finalText, 'Tool loop completed the task.');
+      assert.equal(modelCalls.some((call) => call.purpose === 'full_task_tool_loop'), true);
+      assert.equal(events.some((event) => event.type === 'verifier.output' && event.name === 'mvp-scripted-verifier'), false);
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: { modelProviderFactory },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  modelDrivenSwarm: true',
+            '  autonomousToolLoop: true',
+            'models:',
+            '  swarmBaseUrl: http://model.test/v1',
+            '  swarmModelId: local-test-vlm',
+            '',
+          ].join('\n'),
+        );
+      },
+    },
+  );
+});
+
+test('approving champion apply resumes safe apply action once', async () => {
+  const applyCalls = [];
+  const modelProviderFactory = () => async (callInput) => {
+    if (callInput.purpose === 'full_task_tool_loop') {
+      return { text: 'Ready to apply champion.' };
+    }
+    return {
+      text: JSON.stringify({
+        summary: 'Model worker dry run.',
+        verifierEvidence: ['dry-run verifier evidence'],
+        score: 0.8,
+      }),
+    };
+  };
+
+  await withSidecar(
+    async ({ sidecar, workspaceRoot }) => {
+      await writeFile(
+        path.join(workspaceRoot, 'sample.js'),
+        'export function sampleHarnessTarget() { return true; }\n',
+      );
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const taskResponse = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'approve champion apply',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const taskBody = await taskResponse.json();
+      assert.equal(taskResponse.status, 202);
+
+      const approvalEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === taskBody.taskId
+          && event.type === 'approval.required'
+          && event.proposedAction?.kind === 'champion_apply',
+      );
+
+      const response = await fetch(`${sidecar.url}/v1/approvals/${approvalEvent.actionId}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ choice: 'approve', actor: 'tester' }),
+      });
+      const approvalBody = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(approvalBody.status, 'resolved');
+      const resumeEvent = await waitForEvent(
+        events,
+        (event) => event.type === 'approval.resume_completed' && event.actionId === approvalEvent.actionId,
+      );
+
+      assert.equal(applyCalls.length, 1);
+      assert.equal(applyCalls[0].cwd, workspaceRoot);
+      assert.equal(resumeEvent.result.status, 'applied');
+
+      const secondResponse = await fetch(`${sidecar.url}/v1/approvals/${approvalEvent.actionId}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ choice: 'approve', actor: 'tester' }),
+      });
+      assert.equal(secondResponse.status, 200);
+      assert.equal(applyCalls.length, 1);
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: {
+        modelProviderFactory,
+        applyAdapter: async (input) => {
+          applyCalls.push(input);
+          return { applied: true };
+        },
+      },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  modelDrivenSwarm: true',
+            '  autonomousToolLoop: true',
+            '  safeApply: true',
+            'models:',
+            '  swarmBaseUrl: http://model.test/v1',
+            '  swarmModelId: local-test',
+            '',
+          ].join('\n'),
+        );
+      },
+    },
+  );
+});
+
 test('task endpoint preserves prompt launch source metadata', async () => {
   await withSidecar(async ({ sidecar }) => {
     const events = [];
