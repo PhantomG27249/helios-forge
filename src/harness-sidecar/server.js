@@ -36,11 +36,14 @@ import { decideReflectionGate } from './memory/reflectionGate.js';
 import { writeMemoryCandidate } from './memory/memoryWriter.js';
 import { scoreMemoryCorpus } from './memory/memoryEvals.js';
 import { createChangeProposal } from './meta/changeProposal.js';
+import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
 import { evaluatePromotion } from './meta/promotionPolicy.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
+import { buildRhoCoreset } from './rho/coresetBuilder.js';
+import { judgeCandidatePreference } from './rho/preferenceJudge.js';
 import { auditCitations } from './research/citationAuditor.js';
 import { findContradictions } from './research/contradictionFinder.js';
 import { createDeepResearchReport } from './research/deepResearchManager.js';
@@ -492,7 +495,42 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       failureModes: traceSummary.failureModes,
       budgetGateCount: traceSummary.budgetGates.length,
     });
-    const candidateRun = recordCandidateRun({
+
+    const recentTraceSummaries = await listTraces({ workspaceRoot: resolvedWorkspaceRoot });
+    const retrospectiveTraces = [];
+    for (const recentTrace of recentTraceSummaries.slice(0, 8)) {
+      const detail = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId: recentTrace.taskId });
+      retrospectiveTraces.push({
+        taskId: detail.taskId,
+        events: detail.events,
+        failures: detail.summary.failures || [],
+        failureModes: (detail.summary.failures || []).map((failure) => failure.category).filter(Boolean),
+        budgetGates: detail.events.filter((event) => event.type === 'budget.gate'),
+        status: detail.summary.latestState?.status || recentTrace.latestTaskEvent?.status,
+        subgoalCompletion: Number.isFinite(detail.summary.latestState?.subgoalScore?.percent)
+          ? detail.summary.latestState.subgoalScore.percent / 100
+          : undefined,
+      });
+    }
+    const rhoCoreset = buildRhoCoreset({
+      traces: retrospectiveTraces,
+      limit: 4,
+      diversityKey: (trace) => trace.failureModes?.[0] || trace.status || trace.taskId,
+    });
+    await emitEvent({
+      type: 'rho.coreset_selected',
+      taskId: task.taskId,
+      selectedCount: rhoCoreset.selectedCount,
+      totalCandidates: rhoCoreset.totalCandidates,
+      items: rhoCoreset.items.map((item) => ({
+        taskId: item.taskId,
+        score: item.score,
+        reasons: item.reasons,
+        diversityKey: item.diversityKey,
+      })),
+    });
+
+    const baseCandidateRun = recordCandidateRun({
       candidateId: `runtime_${task.taskId}`,
       smokePassed: true,
       metrics: {
@@ -502,17 +540,104 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         safety: 0.9,
       },
     });
-    const metaProposal = new HarnessOptimizer().propose({
+    const metaOptimization = new HarnessOptimizer({
+      mode: 'bes-rho',
+      idPrefix: `runtime_${task.taskId}`,
+      maxCandidates: 4,
+      mutationBudget: Math.max(1, Math.min(4, task.budget.maxToolCalls || 2)),
+    }).propose({
       traceSummary,
       target: 'runtime_policy',
-      candidateRun,
+      candidateRun: baseCandidateRun,
+      coreset: rhoCoreset,
     });
+    await emitEvent({
+      type: 'bes.meta_candidates_generated',
+      taskId: task.taskId,
+      candidateCount: metaOptimization.candidates.length,
+      diversity: metaOptimization.bes.diversity,
+      champion: metaOptimization.bes.champion,
+    });
+
+    const preferenceInput = metaOptimization.candidates.map((candidate, index) => {
+      const mutationCount = candidate.patch?.mutationTypes?.length || 0;
+      return {
+        ...candidate,
+        metrics: {
+          quality: Math.min(1, baseCandidateRun.metrics.quality + (index === 0 ? 0.03 : 0.01)),
+          safety: Math.max(0, baseCandidateRun.metrics.safety - (mutationCount > 2 ? 0.02 : 0)),
+          cost: Number((0.25 + mutationCount * 0.05 + index * 0.01).toFixed(3)),
+          latency: Number((0.2 + index * 0.02).toFixed(3)),
+        },
+        validations: [
+          { passed: candidate.requiresApproval === true },
+          { passed: candidate.patch?.applied === false },
+          { passed: metaOptimization.bes.diversity.collapsed === false },
+        ],
+      };
+    });
+    const rhoPreference = judgeCandidatePreference({
+      candidates: preferenceInput,
+      coreset: rhoCoreset,
+    });
+    await emitEvent({
+      type: 'rho.preference_judged',
+      taskId: task.taskId,
+      winner: rhoPreference.winner,
+      rankings: rhoPreference.rankings,
+      rationale: rhoPreference.rationale,
+    });
+
+    const selectedCandidate = metaOptimization.candidates.find(
+      (candidate) => candidate.candidateId === rhoPreference.winner?.candidateId,
+    ) || metaOptimization.candidates[0];
+    const selectedMetrics = preferenceInput.find(
+      (candidate) => candidate.candidateId === selectedCandidate.candidateId,
+    )?.metrics || baseCandidateRun.metrics;
+    const candidateRun = recordCandidateRun({
+      candidateId: selectedCandidate.candidateId,
+      smokePassed: false,
+      metrics: selectedMetrics,
+    });
+    for (const candidate of metaOptimization.candidates) {
+      await archiveCandidate({
+        workspaceRoot: resolvedWorkspaceRoot,
+        candidate,
+        candidateRun: candidate.candidateId === selectedCandidate.candidateId
+          ? candidateRun
+          : {
+            candidateId: candidate.candidateId,
+            smokePassed: false,
+            metrics: preferenceInput.find((entry) => entry.candidateId === candidate.candidateId)?.metrics || {},
+            evaluatedAt: candidateRun.evaluatedAt,
+          },
+        traceSummary,
+        preference: rhoPreference,
+      });
+    }
+    const metaProposal = selectedCandidate;
     const metaArtifact = await artifactStore.writeTextArtifact({
       taskId: task.taskId,
       type: 'meta_optimizer_proposal',
       title: 'Meta optimizer proposal',
       filename: 'meta-optimizer-proposal.json',
-      content: JSON.stringify(metaProposal, null, 2),
+      content: JSON.stringify({
+        selectedCandidateId: selectedCandidate.candidateId,
+        proposal: metaProposal,
+        candidates: metaOptimization.candidates,
+        coreset: {
+          selectedCount: rhoCoreset.selectedCount,
+          totalCandidates: rhoCoreset.totalCandidates,
+          items: rhoCoreset.items.map((item) => ({
+            taskId: item.taskId,
+            score: item.score,
+            reasons: item.reasons,
+            diversityKey: item.diversityKey,
+          })),
+        },
+        preference: rhoPreference,
+        bes: metaOptimization.bes,
+      }, null, 2),
     });
     artifacts.set(metaArtifact.artifactId, metaArtifact);
     await emitEvent({
@@ -525,7 +650,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
     const metaPromotionDecision = evaluatePromotion({
       candidateRun,
       baselineFrontier: [{ quality: 0.5, cost: 0.5, latency: 0.5, safety: 0.8 }],
-      approvals: [{ candidateId: candidateRun.candidateId, choice: 'approve' }],
+      approvals: [],
       safetyThreshold: 0.85,
     });
     const metaChangeProposal = createChangeProposal({

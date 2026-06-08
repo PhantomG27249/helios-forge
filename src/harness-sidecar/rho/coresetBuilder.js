@@ -1,0 +1,176 @@
+const DEFAULT_LIMIT = 8;
+const LOW_COMPLETION_THRESHOLD = 0.5;
+
+function stableString(value) {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  return String(value);
+}
+
+function getTaskId(trace, index) {
+  return stableString(trace?.taskId ?? trace?.task_id ?? trace?.id ?? `trace_${index}`);
+}
+
+function getEvents(trace) {
+  return Array.isArray(trace?.events) ? trace.events : [];
+}
+
+function hasRecoveryEvidence(trace) {
+  const events = getEvents(trace);
+  return Boolean(
+    trace?.failed === true ||
+      trace?.failure === true ||
+      trace?.status === 'failed' ||
+      trace?.status === 'failure' ||
+      trace?.status === 'error' ||
+      trace?.success === false ||
+      (Array.isArray(trace?.recoveryEvents) && trace.recoveryEvents.length > 0) ||
+      (Array.isArray(trace?.failures) && trace.failures.length > 0) ||
+      events.some((event) => (
+        stableString(event?.type).includes('failure') ||
+        stableString(event?.type).includes('recovery') ||
+        stableString(event?.status) === 'failed'
+      ))
+  );
+}
+
+function hasBudgetGate(trace) {
+  const events = getEvents(trace);
+  return Boolean(
+    trace?.budgetGate === true ||
+      (Array.isArray(trace?.budgetGates) && trace.budgetGates.length > 0) ||
+      events.some((event) => stableString(event?.type) === 'budget.gate')
+  );
+}
+
+function hasLowCompletionOrUnsuccessful(trace) {
+  const completion = Number(trace?.subgoalCompletion ?? trace?.completion ?? trace?.completionRate);
+  return Boolean(
+    trace?.status === 'failed' ||
+      trace?.status === 'unsuccessful' ||
+      trace?.success === false ||
+      (Number.isFinite(completion) && completion < LOW_COMPLETION_THRESHOLD)
+  );
+}
+
+function hasMetaDecisionEvidence(trace) {
+  const events = getEvents(trace);
+  const decision = stableString(trace?.metaDecision ?? trace?.decision ?? trace?.promotionDecision);
+  return Boolean(
+    decision === 'rejected' ||
+      decision === 'promoted' ||
+      trace?.rejected === true ||
+      trace?.promoted === true ||
+      events.some((event) => {
+        const type = stableString(event?.type);
+        const eventDecision = stableString(event?.decision ?? event?.status);
+        return (
+          type.includes('meta') &&
+          (eventDecision === 'rejected' || eventDecision === 'promoted')
+        );
+      })
+  );
+}
+
+function scoreTrace(trace) {
+  const reasons = [];
+  let score = 0;
+
+  if (hasRecoveryEvidence(trace)) {
+    score += 3;
+    reasons.push('failure_or_recovery');
+  }
+  if (hasBudgetGate(trace)) {
+    score += 2;
+    reasons.push('budget_gate');
+  }
+  if (hasLowCompletionOrUnsuccessful(trace)) {
+    score += 2;
+    reasons.push('low_completion_or_unsuccessful');
+  }
+  if (hasMetaDecisionEvidence(trace)) {
+    score += 1;
+    reasons.push('meta_decision_evidence');
+  }
+
+  return { score, reasons };
+}
+
+function resolveDiversityKey(trace, taskId, diversityKey) {
+  if (typeof diversityKey === 'function') {
+    return stableString(diversityKey(trace));
+  }
+  if (typeof diversityKey === 'string' && diversityKey.length > 0) {
+    const value = trace?.[diversityKey];
+    if (Array.isArray(value)) {
+      return stableString(value[0]);
+    }
+    return stableString(value);
+  }
+  const failureModes = trace?.failureModes ?? trace?.failure_modes;
+  if (Array.isArray(failureModes) && failureModes.length > 0) {
+    return stableString(failureModes[0]);
+  }
+  const firstRecovery = Array.isArray(trace?.recoveryEvents) ? trace.recoveryEvents[0] : undefined;
+  return stableString(firstRecovery?.category ?? getEvents(trace)[0]?.category ?? taskId);
+}
+
+function compareRankedItems(a, b) {
+  if (b.score !== a.score) {
+    return b.score - a.score;
+  }
+  if (a.diversityKey !== b.diversityKey) {
+    return a.diversityKey.localeCompare(b.diversityKey);
+  }
+  return a.taskId.localeCompare(b.taskId);
+}
+
+export function buildRhoCoreset({ traces = [], limit = DEFAULT_LIMIT, diversityKey } = {}) {
+  const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
+  const ranked = traces.map((trace, index) => {
+    const taskId = getTaskId(trace, index);
+    const scored = scoreTrace(trace);
+    return {
+      taskId,
+      score: scored.score,
+      reasons: scored.reasons,
+      trace,
+      diversityKey: resolveDiversityKey(trace, taskId, diversityKey),
+    };
+  }).sort(compareRankedItems);
+
+  if (safeLimit === 0) {
+    return { items: [], totalCandidates: ranked.length, selectedCount: 0 };
+  }
+
+  const selected = [];
+  const selectedKeys = new Set();
+
+  for (const item of ranked) {
+    if (selected.length >= safeLimit) {
+      break;
+    }
+    if (!selectedKeys.has(item.diversityKey)) {
+      selected.push(item);
+      selectedKeys.add(item.diversityKey);
+    }
+  }
+
+  for (const item of ranked) {
+    if (selected.length >= safeLimit) {
+      break;
+    }
+    if (!selected.includes(item)) {
+      selected.push(item);
+    }
+  }
+
+  selected.sort(compareRankedItems);
+
+  return {
+    items: selected,
+    totalCandidates: ranked.length,
+    selectedCount: selected.length,
+  };
+}

@@ -9,6 +9,7 @@ import {
   getFrontierPath,
   sanitizeCandidateId,
 } from '../src/harness-sidecar/meta/frontierStore.js';
+import { listArchivedCandidates } from '../src/harness-sidecar/meta/candidateArchive.js';
 import { runPromotionLoop } from '../src/harness-sidecar/meta/promotionLoop.js';
 
 async function withWorkspace(fn) {
@@ -206,5 +207,71 @@ test('promotion loop rejects approvals that do not match the generated candidate
     assert.equal(result.decision.status, 'rejected');
     assert.equal(result.decision.reasons.includes('missing_human_approval'), true);
     assert.equal(result.applied, null);
+  });
+});
+
+test('promotion loop selects preference winner and archives all optimizer candidates', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const traceDir = await writeTrace(workspaceRoot);
+    const store = createFrontierStore({ workspaceRoot });
+    await store.setBaselineFrontier([
+      { candidateId: 'baseline', quality: 0.8, safety: 0.9, cost: 0.5, latency: 0.4 },
+    ]);
+
+    const evaluated = [];
+    const result = await runPromotionLoop({
+      workspaceRoot,
+      traceDir,
+      target: 'runtime_policy',
+      candidateGenerator: async () => candidate({ candidateId: 'legacy_seed' }),
+      optimizer: async () => ({
+        candidates: [
+          candidate({ candidateId: 'cand_low', rationale: 'Lower-scored candidate.' }),
+          candidate({ candidateId: 'cand_high', rationale: 'Preferred candidate.' }),
+        ],
+        preference: {
+          winner: { candidateId: 'cand_high' },
+          rankings: [
+            { candidateId: 'cand_high', preferenceScore: 0.9 },
+            { candidateId: 'cand_low', preferenceScore: 0.2 },
+          ],
+        },
+        bes: { subgoals: [{ id: 'S1' }] },
+        coreset: { selectedCount: 1 },
+      }),
+      runner: {
+        async runSmoke({ candidate: runCandidate }) {
+          return { passed: true, smokeId: `smoke_${runCandidate.candidateId}` };
+        },
+        async runEval({ candidate: runCandidate }) {
+          evaluated.push(runCandidate.candidateId);
+          return { metrics: { quality: 0.91, safety: 0.97, cost: 0.3, latency: 0.2 } };
+        },
+      },
+      approval: { candidateId: 'cand_high', choice: 'approve', approver: 'human' },
+      applyAdapter: async () => ({ applied: true }),
+      archiveCandidates: true,
+    });
+
+    assert.deepEqual(evaluated, ['cand_high']);
+    assert.equal(result.candidate.candidateId, 'cand_high');
+    assert.equal(result.candidates.length, 2);
+    assert.equal(result.preference.winner.candidateId, 'cand_high');
+    assert.equal(result.decision.status, 'promoted');
+    assert.equal(result.auditEvents.some((event) => event.type === 'meta.candidates_archived'), true);
+
+    const archived = await listArchivedCandidates({ workspaceRoot });
+    assert.deepEqual(
+      archived.map((record) => record.candidateId).sort(),
+      ['cand_high', 'cand_low'],
+    );
+    assert.equal(
+      archived.find((record) => record.candidateId === 'cand_high').candidateRun.smokePassed,
+      true,
+    );
+    assert.equal(
+      archived.find((record) => record.candidateId === 'cand_low').candidateRun.smokePassed,
+      false,
+    );
   });
 });

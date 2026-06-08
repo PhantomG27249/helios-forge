@@ -1,4 +1,5 @@
 import { applyChangeProposal, createChangeProposal } from './changeProposal.js';
+import { archiveCandidate } from './candidateArchive.js';
 import { generateCandidateChange } from './candidateGenerator.js';
 import { createFrontierStore, sanitizeCandidateId } from './frontierStore.js';
 import { evaluatePromotion } from './promotionPolicy.js';
@@ -57,6 +58,38 @@ function normalizeCandidate(candidate) {
   };
 }
 
+function candidateIdOf(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return sanitizeCandidateId(value);
+  return sanitizeCandidateId(value.candidateId || value.id);
+}
+
+function normalizeOptimizerResult(optimizerResult, generatedCandidate) {
+  if (optimizerResult?.candidates && Array.isArray(optimizerResult.candidates)) {
+    return {
+      ...optimizerResult,
+      candidates: optimizerResult.candidates.map(normalizeCandidate),
+    };
+  }
+
+  const candidate = normalizeCandidate(optimizerResult || generatedCandidate);
+  return {
+    candidates: [candidate],
+    preference: null,
+    bes: null,
+    coreset: null,
+  };
+}
+
+function selectCandidateFromPreference(candidates, preference) {
+  const preferredId = candidateIdOf(preference?.winner);
+  if (preferredId) {
+    const preferred = candidates.find((candidate) => candidate.candidateId === preferredId);
+    if (preferred) return preferred;
+  }
+  return candidates[0];
+}
+
 async function runSmoke({ runner, candidate, traceSummary }) {
   if (typeof runner?.runSmoke === 'function') {
     return runner.runSmoke({ candidate, traceSummary });
@@ -110,6 +143,7 @@ export async function runPromotionLoop({
   applyAdapter,
   approval = null,
   safetyThreshold = 0.9,
+  archiveCandidates = false,
   store = createFrontierStore({ workspaceRoot }),
 } = {}) {
   const auditEvents = [];
@@ -124,10 +158,12 @@ export async function runPromotionLoop({
     target,
     candidate: generatedCandidate,
   });
-  const candidate = normalizeCandidate(optimizedCandidate || generatedCandidate);
+  const optimizerResult = normalizeOptimizerResult(optimizedCandidate, generatedCandidate);
+  const candidate = selectCandidateFromPreference(optimizerResult.candidates, optimizerResult.preference);
   auditEvents.push(auditEvent('meta.candidate_proposed', {
     candidateId: candidate.candidateId,
     target: candidate.target,
+    candidateCount: optimizerResult.candidates.length,
   }));
 
   const smokeResult = await runSmoke({ runner, candidate, traceSummary: inspectedTraceSummary });
@@ -201,9 +237,35 @@ export async function runPromotionLoop({
     applied,
   });
 
+  if (archiveCandidates) {
+    for (const archivedCandidate of optimizerResult.candidates) {
+      await archiveCandidate({
+        workspaceRoot,
+        candidate: archivedCandidate,
+        candidateRun: archivedCandidate.candidateId === candidate.candidateId
+          ? candidateRun
+          : {
+            candidateId: archivedCandidate.candidateId,
+            smokePassed: false,
+            metrics: {},
+            evaluatedAt: candidateRun.evaluatedAt,
+          },
+        traceSummary: inspectedTraceSummary,
+        preference: optimizerResult.preference || {},
+      });
+    }
+    auditEvents.push(auditEvent('meta.candidates_archived', {
+      candidateCount: optimizerResult.candidates.length,
+    }));
+  }
+
   return {
     traceSummary: inspectedTraceSummary,
     candidate,
+    candidates: optimizerResult.candidates,
+    preference: optimizerResult.preference || null,
+    bes: optimizerResult.bes || null,
+    coreset: optimizerResult.coreset || null,
     candidateRun,
     decision,
     proposal,

@@ -158,6 +158,9 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'memory.promoted',
       'memory.context_retrieved',
       'meta.trace_inspected',
+      'rho.coreset_selected',
+      'bes.meta_candidates_generated',
+      'rho.preference_judged',
       'meta.optimizer_proposed',
       'meta.promotion_evaluated',
       'trace.compacted',
@@ -199,6 +202,21 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     const completedEvent = events.find((event) => event.type === 'swarm.orchestration_completed');
     assert.equal(completedEvent.planning.strategy, 'tooltree');
 
+    const coresetEvent = events.find((event) => event.type === 'rho.coreset_selected');
+    assert.equal(coresetEvent.selectedCount >= 1, true);
+    assert.equal(coresetEvent.items.some((item) => item.taskId === body.taskId), true);
+
+    const besMetaEvent = events.find((event) => event.type === 'bes.meta_candidates_generated');
+    assert.equal(besMetaEvent.candidateCount, 4);
+    assert.equal(Boolean(besMetaEvent.champion), true);
+
+    const preferenceEvent = events.find((event) => event.type === 'rho.preference_judged');
+    assert.equal(Boolean(preferenceEvent.winner.candidateId), true);
+    const promotionEvent = events.find((event) => event.type === 'meta.promotion_evaluated');
+    assert.equal(promotionEvent.decision.status, 'rejected');
+    assert.equal(promotionEvent.decision.reasons.includes('missing_human_approval'), true);
+    assert.equal(promotionEvent.decision.reasons.includes('smoke_failed'), true);
+
     const memoryContent = await readFile(
       path.join(workspaceRoot, '.harness', 'memory', 'candidates.jsonl'),
       'utf8',
@@ -208,8 +226,20 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     const tracePath = path.join(workspaceRoot, '.harness', 'traces', body.taskId, 'events.jsonl');
     const traceContent = await readFile(tracePath, 'utf8');
     assert.match(traceContent, /meta\.optimizer_proposed/);
+    assert.match(traceContent, /rho\.coreset_selected/);
+    assert.match(traceContent, /bes\.meta_candidates_generated/);
+    assert.match(traceContent, /rho\.preference_judged/);
     assert.match(traceContent, /research\.report_created/);
     assert.match(traceContent, /experiment\.decision_written/);
+
+    const metaEvent = events.find((event) => event.type === 'meta.optimizer_proposed');
+    const metaArtifactContent = await readFile(metaEvent.artifacts[0].path, 'utf8');
+    const metaArtifactJson = JSON.parse(metaArtifactContent);
+    assert.equal(metaArtifactJson.selectedCandidateId, preferenceEvent.winner.candidateId);
+    assert.equal(metaArtifactJson.candidates.length, 4);
+    assert.equal(metaArtifactJson.coreset.selectedCount, coresetEvent.selectedCount);
+    assert.equal(metaArtifactJson.preference.winner.candidateId, preferenceEvent.winner.candidateId);
+    assert.equal(metaArtifactJson.proposal.requiresApproval, true);
 
     unsubscribe();
   });
