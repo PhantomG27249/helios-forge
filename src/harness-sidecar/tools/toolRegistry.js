@@ -22,6 +22,17 @@ export class ToolRegistry {
     return tool ? { ...tool, inputSchema: { ...tool.inputSchema } } : null;
   }
 
+  async execute(name, args = {}) {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+    if (typeof tool.execute !== 'function') {
+      throw new Error(`Tool is not executable: ${name}`);
+    }
+    return tool.execute(args);
+  }
+
   list() {
     return [...this.tools.values()].map((tool) => ({
       ...tool,

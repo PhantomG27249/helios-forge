@@ -9,6 +9,11 @@ export function extractChoiceText(payload) {
   return '';
 }
 
+function extractToolCalls(payload) {
+  const calls = payload?.choices?.[0]?.message?.tool_calls;
+  return Array.isArray(calls) ? calls : [];
+}
+
 function normalizeBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
 }
@@ -20,6 +25,18 @@ function normalizeUsage(usage = {}) {
   };
 }
 
+function normalizeTool(tool) {
+  if (tool?.type === 'function' && tool.function?.name) return tool;
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description || '',
+      parameters: tool.inputSchema || { type: 'object' },
+    },
+  };
+}
+
 export function createOpenAICompatibleProvider({
   baseUrl,
   apiKey = 'dummy',
@@ -27,13 +44,16 @@ export function createOpenAICompatibleProvider({
 } = {}) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
 
-  return async function openAICompatibleProvider({ profile, messages }) {
+  return async function openAICompatibleProvider({ profile, messages, tools = [] }) {
     const model = profile.model || profile.name;
     const body = {
       model,
       messages,
       temperature: profile.defaultTemperature,
     };
+    if (tools.length > 0) {
+      body.tools = tools.map(normalizeTool);
+    }
     if (profile.chatTemplateKwargs) {
       body.chat_template_kwargs = profile.chatTemplateKwargs;
     }
@@ -54,6 +74,7 @@ export function createOpenAICompatibleProvider({
     const payload = await response.json();
     return {
       text: extractChoiceText(payload),
+      toolCalls: extractToolCalls(payload),
       raw: payload,
       usage: normalizeUsage(payload.usage),
     };

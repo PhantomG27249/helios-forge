@@ -1,5 +1,6 @@
 import { getModelProfile } from './modelProfiles.js';
 import { repairJsonObject } from './structuredOutputRepair.js';
+import { parseToolCalls } from './toolCallParser.js';
 
 function makeModelCallId() {
   return `model_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -29,7 +30,7 @@ export class ModelGateway {
     this.profileOverrides = profileOverrides;
   }
 
-  async call({ taskId, purpose, profileName, messages, structuredOutput = false, visionInputs = [] }) {
+  async call({ taskId, purpose, profileName, messages, structuredOutput = false, visionInputs = [], tools = [] }) {
     const callId = makeModelCallId();
     const profile = {
       ...getModelProfile(profileName),
@@ -57,9 +58,11 @@ export class ModelGateway {
       messages,
       structuredOutput,
       visionInputs,
+      tools,
     });
     const usage = normalizeUsage({ usage: response.usage, messages, text: response.text });
     const structured = structuredOutput ? repairJsonObject(response.text) : null;
+    const toolCalls = parseToolCalls({ text: response.text, toolCalls: response.toolCalls ?? response.tool_calls });
 
     await this.emitEvent({
       type: 'model_call.completed',
@@ -78,6 +81,7 @@ export class ModelGateway {
       purpose,
       profile,
       text: response.text,
+      toolCalls,
       structured,
       usage,
     };
