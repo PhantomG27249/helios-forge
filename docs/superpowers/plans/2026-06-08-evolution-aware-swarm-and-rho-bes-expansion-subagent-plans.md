@@ -17,6 +17,7 @@ Read these first:
 - `docs/architecture/swarm-evolution-integration-plan.md`
 - `docs/architecture/rho-bes-evolution-expansion-roadmap.md`
 - `docs/architecture/feature-architecture-map.md`
+- MemGraphRAG paper: `https://arxiv.org/pdf/2606.00610`
 - `src/harness-sidecar/bes/bidirectionalSearchLoop.js`
 - `src/harness-sidecar/bes/evolutionPopulationRunner.js`
 - `src/harness-sidecar/rho/coresetBuilder.js`
@@ -54,6 +55,10 @@ Expected new files:
 - `src/harness-sidecar/meta/budgetPolicyEvolution.js`
 - `src/harness-sidecar/meta/visualPolicyEvolution.js`
 - `src/harness-sidecar/meta/memoryPolicyEvolution.js`
+- `src/harness-sidecar/memory/globalMemoryLayers.js`
+- `src/harness-sidecar/memory/memoryGraphConstructor.js`
+- `src/harness-sidecar/memory/memoryConflictAdjudicator.js`
+- `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`
 - `src/harness-sidecar/meta/mcpTrustEvolution.js`
 - `src/harness-sidecar/meta/researchPolicyEvolution.js`
 - `src/harness-sidecar/meta/autoApprovalPolicy.js`
@@ -84,6 +89,8 @@ Expected new tests:
 - `tests/harness-budget-policy-evolution.test.js`
 - `tests/harness-visual-policy-evolution.test.js`
 - `tests/harness-memory-policy-evolution.test.js`
+- `tests/harness-memgraphrag-construction.test.js`
+- `tests/harness-memory-aware-graph-retriever.test.js`
 - `tests/harness-mcp-trust-evolution.test.js`
 - `tests/harness-research-policy-evolution.test.js`
 - `tests/harness-auto-approval-policy.test.js`
@@ -807,6 +814,284 @@ git commit -m "feat(meta): add memory policy evolution"
 
 ---
 
+## Chunk 10A: MemGraphRAG-Inspired Global Memory Graph
+
+**Agent:** Memory Graph Construction Agent
+
+**Goal:** Add a MemGraphRAG-inspired global memory construction layer with schema, fact, and passage memory; pending-to-active fact promotion; evidence-backed conflict adjudication; graph bridging; and memory-aware graph retrieval.
+
+**Background:** MemGraphRAG argues that GraphRAG quality drops when graph construction processes chunks independently without a global memory. The Helios version should use global memory to prevent thematic irrelevance, logical inconsistency, and structural fragmentation in code/research/memory graphs.
+
+**Files:**
+
+- Create: `src/harness-sidecar/memory/globalMemoryLayers.js`
+- Create: `src/harness-sidecar/memory/memoryGraphConstructor.js`
+- Create: `src/harness-sidecar/memory/memoryConflictAdjudicator.js`
+- Create: `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`
+- Modify: `src/harness-sidecar/memory/graphMemoryMaintenance.js`
+- Modify: `src/harness-sidecar/rag/graphRagComposer.js`
+- Modify: `src/harness-sidecar/rag/unifiedContextComposer.js`
+- Modify: `src/harness-sidecar/rho/coresetBuilder.js`
+- Test: `tests/harness-memgraphrag-construction.test.js`
+- Test: `tests/harness-memory-aware-graph-retriever.test.js`
+
+### Task 1: Three-Layer Global Memory
+
+- [ ] **Step 1: Write failing layer tests**
+
+Create `tests/harness-memgraphrag-construction.test.js`.
+
+Required cases:
+
+- schemas are stored separately from facts and passages
+- facts retain provenance passage ids
+- facts start as `pending`
+- schema frequency can promote schemas to `stable`
+- facts governed by stable schemas become `active`
+
+Run:
+
+```powershell
+npm test -- tests/harness-memgraphrag-construction.test.js
+```
+
+Expected: fail because `globalMemoryLayers.js` does not exist.
+
+- [ ] **Step 2: Implement global memory layers**
+
+Create:
+
+```js
+export function createGlobalMemoryLayers({
+  schemas = [],
+  facts = [],
+  passages = [],
+} = {}) {}
+
+export function upsertSchema(layers, schema) {}
+export function upsertFact(layers, fact) {}
+export function upsertPassage(layers, passage) {}
+export function activateStableSchemas({ layers, schemaThreshold = 2 } = {}) {}
+```
+
+Data rules:
+
+- Schema id should be deterministic from head type, relation, and tail type.
+- Fact id should be deterministic from subject, relation, object, and passage id when possible.
+- Passage records must keep `path`, `span`, `source`, or `artifactId` when available.
+- Do not mark facts active until their schema is stable.
+
+- [ ] **Step 3: Verify layer tests**
+
+Run:
+
+```powershell
+npm test -- tests/harness-memgraphrag-construction.test.js
+```
+
+Expected: pass.
+
+### Task 2: Evidence-Backed Conflict Adjudication
+
+- [ ] **Step 1: Add failing conflict tests**
+
+Extend `tests/harness-memgraphrag-construction.test.js`.
+
+Required conflict types:
+
+- `mutually_exclusive`
+- `temporal`
+- `granularity`
+- `stale_or_superseded`
+- `source_confidence`
+
+Required actions:
+
+- `discard`
+- `refine`
+- `temporally_qualify`
+- `keep_both`
+- `needs_review`
+
+- [ ] **Step 2: Implement conflict adjudicator**
+
+Create:
+
+```js
+export function detectGlobalMemoryConflicts({ layers, newFact, similarityThreshold = 0.8 } = {}) {}
+export function adjudicateMemoryConflict({ conflict, evidence = [], policy = {} } = {}) {}
+export function applyConflictDecision({ layers, decision } = {}) {}
+```
+
+Rules:
+
+- Contradictions with the same subject and predicate but different object are mutually exclusive unless temporal fields differ.
+- Facts at different granularity can coexist after predicate refinement.
+- Decisions must include provenance ids used for adjudication.
+- Unsafe or uncertain decisions return `needs_review`, not destructive changes.
+
+- [ ] **Step 3: Verify conflict tests**
+
+Run:
+
+```powershell
+npm test -- tests/harness-memgraphrag-construction.test.js tests/harness-memory-graph.test.js tests/harness-graph-memory-maintenance.test.js
+```
+
+Expected: all pass.
+
+### Task 3: Memory-Guided Graph Construction And Bridging
+
+- [ ] **Step 1: Add failing graph construction tests**
+
+Required cases:
+
+- graph constructor projects schema, fact, and passage layers into graph views
+- active facts are included, pending facts are not
+- type-based bridging connects entities with compatible schema types
+- similarity-based bridging connects related entities above threshold
+- bridge edges include provenance and reason
+
+- [ ] **Step 2: Implement graph constructor**
+
+Create:
+
+```js
+export function constructMemoryGuidedGraph({
+  layers,
+  similarity = () => 0,
+  bridgingThreshold = 0.8,
+} = {}) {}
+```
+
+Return:
+
+```js
+{
+  nodes: [],
+  edges: [],
+  stats: {
+    schemaCount,
+    activeFactCount,
+    pendingFactCount,
+    passageCount,
+    bridgeCount,
+  }
+}
+```
+
+- [ ] **Step 3: Integrate graph memory maintenance**
+
+Update `graphMemoryMaintenance.js` so snapshots can optionally include `globalMemory` and `memoryGuidedGraph` sections without breaking existing schema version 1 consumers.
+
+- [ ] **Step 4: Verify graph construction tests**
+
+Run:
+
+```powershell
+npm test -- tests/harness-memgraphrag-construction.test.js tests/harness-graph-memory-maintenance.test.js
+```
+
+Expected: all pass.
+
+### Task 4: Memory-Aware Hierarchical Retrieval
+
+- [ ] **Step 1: Write failing retrieval tests**
+
+Create `tests/harness-memory-aware-graph-retriever.test.js`.
+
+Required cases:
+
+- query-seeded retrieval starts from matching schema/fact/passage nodes
+- retrieval prefers active facts over pending facts
+- retrieval returns provenance passages with facts
+- lightweight propagation/PPR raises connected supporting evidence
+- irrelevant bridge-only nodes are capped
+
+- [ ] **Step 2: Implement retriever**
+
+Create:
+
+```js
+export function retrieveMemoryAwareGraphContext({
+  graph,
+  query,
+  maxItems = 8,
+  restartProbability = 0.15,
+  iterations = 12,
+} = {}) {}
+```
+
+Rules:
+
+- Keep implementation deterministic and dependency-free.
+- Normalize scores to `0..1`.
+- Return items compatible with `composeUnifiedContext`.
+- Include source labels such as `memgraph:schema:*`, `memgraph:fact:*`, and `memgraph:passage:*`.
+
+- [ ] **Step 3: Wire GraphRAG composition**
+
+Update `graphRagComposer.js` and `unifiedContextComposer.js` to accept memory-aware graph retrieval items without changing existing context item format.
+
+- [ ] **Step 4: Verify retrieval tests**
+
+Run:
+
+```powershell
+npm test -- tests/harness-memory-aware-graph-retriever.test.js tests/harness-rag.test.js tests/harness-sidecar.test.js
+```
+
+Expected: all pass.
+
+### Task 5: RHO/BES/Evolution Hooks
+
+- [ ] **Step 1: Add failing RHO tests**
+
+Extend `tests/harness-rho-coreset.test.js`.
+
+Required hard-case reasons:
+
+- `memgraph_thematic_irrelevance`
+- `memgraph_logical_conflict`
+- `memgraph_temporal_conflict`
+- `memgraph_granularity_conflict`
+- `memgraph_fragmentation`
+- `memgraph_pending_activation_stall`
+
+- [ ] **Step 2: Extend RHO scoring**
+
+Update `coresetBuilder.js` to score MemGraphRAG-style graph construction failures and visual/research provenance conflicts when present.
+
+- [ ] **Step 3: Add evolution candidate hooks**
+
+Update `memoryPolicyEvolution.js` so candidate policies can tune:
+
+- `schemaThreshold`
+- `conflictThreshold`
+- `bridgingThreshold`
+- `pendingTtl`
+- `retrievalRestartProbability`
+- `maxBridgeItems`
+
+- [ ] **Step 4: Verify evolution hooks**
+
+Run:
+
+```powershell
+npm test -- tests/harness-rho-coreset.test.js tests/harness-memory-policy-evolution.test.js tests/harness-memgraphrag-construction.test.js tests/harness-memory-aware-graph-retriever.test.js
+```
+
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```powershell
+git add src/harness-sidecar/memory/globalMemoryLayers.js src/harness-sidecar/memory/memoryGraphConstructor.js src/harness-sidecar/memory/memoryConflictAdjudicator.js src/harness-sidecar/rag/memoryAwareGraphRetriever.js src/harness-sidecar/memory/graphMemoryMaintenance.js src/harness-sidecar/rag/graphRagComposer.js src/harness-sidecar/rag/unifiedContextComposer.js src/harness-sidecar/rho/coresetBuilder.js src/harness-sidecar/meta/memoryPolicyEvolution.js tests/harness-memgraphrag-construction.test.js tests/harness-memory-aware-graph-retriever.test.js tests/harness-rho-coreset.test.js tests/harness-memory-policy-evolution.test.js
+git commit -m "feat(memory): add memory guided graph construction"
+```
+
+---
+
 ## Chunk 11: MCP And Capability Trust Evolution
 
 **Agent:** MCP Trust Agent
@@ -1048,7 +1333,7 @@ Run after all chunks land.
 - [ ] **Step 1: Run focused evolution/swarm suite**
 
 ```powershell
-npm test -- tests/harness-swarm-evolution-planner.test.js tests/harness-swarm-evolution-budget.test.js tests/harness-swarm-parallel-executor.test.js tests/harness-swarm-agent-profiles.test.js tests/harness-swarm-meta-feedback.test.js tests/harness-context-policy-evolution.test.js tests/harness-tool-loop-policy-evolution.test.js tests/harness-budget-policy-evolution.test.js tests/harness-visual-policy-evolution.test.js tests/harness-memory-policy-evolution.test.js tests/harness-mcp-trust-evolution.test.js tests/harness-research-policy-evolution.test.js tests/harness-auto-approval-policy.test.js
+npm test -- tests/harness-swarm-evolution-planner.test.js tests/harness-swarm-evolution-budget.test.js tests/harness-swarm-parallel-executor.test.js tests/harness-swarm-agent-profiles.test.js tests/harness-swarm-meta-feedback.test.js tests/harness-context-policy-evolution.test.js tests/harness-tool-loop-policy-evolution.test.js tests/harness-budget-policy-evolution.test.js tests/harness-visual-policy-evolution.test.js tests/harness-memory-policy-evolution.test.js tests/harness-memgraphrag-construction.test.js tests/harness-memory-aware-graph-retriever.test.js tests/harness-mcp-trust-evolution.test.js tests/harness-research-policy-evolution.test.js tests/harness-auto-approval-policy.test.js
 ```
 
 Expected: all pass.
