@@ -101,6 +101,11 @@ test('context pressure at 90 percent freezes the decision ledger and rebuilds th
   assert.equal(state.decisionLedgerFrozen, true);
   assert.equal(state.contextPack.rebuilt, true);
   assert.equal(state.contextPack.decisionLedger.decisions.length, 1);
+  assert.equal(state.compactionPlan.profile, 'coding');
+  assert.equal(state.compactionPlan.trigger, 'auto');
+  assert.equal(state.compactionPlan.targetTokens, 550);
+  assert.equal(state.compactionPlan.actions.includes('rebuild_context_pack'), true);
+  assert.equal(state.compactionPlan.mustKeepItemIds.includes('system-instructions'), true);
 });
 
 test('context pressure at 95 percent stops and requests a budget or profile change', () => {
@@ -115,6 +120,32 @@ test('context pressure at 95 percent stops and requests a budget or profile chan
   assert.equal(state.threshold, 95);
   assert.equal(state.actions.includes('request_budget_or_profile_change'), true);
   assert.equal(state.requiresOperatorAction, true);
+});
+
+test('context pressure uses visual profile when task needs VLM artifacts', () => {
+  const state = evaluateContextWindow({
+    taskId: 'task_visual',
+    maxTokens: 1000,
+    usedTokens: 805,
+    task: {
+      kind: 'visual verifier screenshot diff',
+    },
+    items: [
+      ...makeItems(),
+      {
+        id: 'page-shot',
+        priority: 5,
+        type: 'screenshot',
+        path: 'artifacts/home.png',
+        content: 'browser screenshot for visual verifier',
+        tokensEstimated: 500,
+      },
+    ],
+  });
+
+  assert.equal(state.compactionPlan.profile, 'visual');
+  assert.equal(state.compactionPlan.mustKeepItemIds.includes('page-shot'), true);
+  assert.equal(state.compactionPlan.expectedArtifactFields.includes('riskFlags'), true);
 });
 
 test('working memory keeps priority-zero facts while compressing and dropping lower priority context', () => {

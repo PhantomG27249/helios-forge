@@ -1,4 +1,5 @@
 import { createWorkingMemory } from './workingMemory.js';
+import { planCompaction } from './compactionPlanner.js';
 
 const THRESHOLDS = [
   {
@@ -56,6 +57,9 @@ export function evaluateContextWindow({
   usedTokens = 0,
   items = [],
   decisionLedger = null,
+  task = {},
+  profile,
+  trigger,
 } = {}) {
   const percent = pressurePercent({ usedTokens, maxTokens });
   const threshold = thresholdFor(percent);
@@ -72,6 +76,19 @@ export function evaluateContextWindow({
   const decisionLedgerSnapshot = threshold.percent >= 90 && decisionLedger?.snapshot
     ? decisionLedger.snapshot()
     : null;
+  const compactionPlan = planCompaction({
+    task: {
+      taskId,
+      ...task,
+    },
+    pressureState: {
+      pressurePercent: percent,
+      maxTokens,
+    },
+    items,
+    profile,
+    trigger,
+  });
 
   return {
     taskId,
@@ -90,6 +107,7 @@ export function evaluateContextWindow({
     droppedItems: packed.droppedItems,
     compressedItems: packed.compressedItems,
     retainedP0Items: packed.retainedP0Items,
+    compactionPlan,
     decisionLedgerFrozen: threshold.percent >= 90,
     requiresOperatorAction: threshold.percent >= 95,
   };

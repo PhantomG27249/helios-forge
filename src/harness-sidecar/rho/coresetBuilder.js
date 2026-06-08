@@ -204,9 +204,21 @@ function scoreCompactionEvidence(trace) {
     score += 6;
     reasons.push(hasMode('compaction_lost_constraint') ? 'compaction_lost_constraint' : 'compaction_lost_constraints');
   }
-  if (hasMode('compaction_hallucination') || hasCompactionEvent(trace, 'compaction.hallucination')) {
+  if (hasMode('compaction_lost_file')) {
     score += 5;
-    reasons.push('compaction_hallucination');
+    reasons.push('compaction_lost_file');
+  }
+  if (hasMode('compaction_lost_test')) {
+    score += 4;
+    reasons.push('compaction_lost_test');
+  }
+  if (
+    hasMode('compaction_hallucination') ||
+    hasMode('compaction_hallucinated_decision') ||
+    hasCompactionEvent(trace, 'compaction.hallucination')
+  ) {
+    score += 5;
+    reasons.push(hasMode('compaction_hallucinated_decision') ? 'compaction_hallucinated_decision' : 'compaction_hallucination');
   }
   if (hasMode('compaction_continuation_failed') || trace?.compactionReplay?.continuationSucceeded === false) {
     score += 4;
