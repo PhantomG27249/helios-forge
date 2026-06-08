@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { createDefaultToolRegistry } from '../src/harness-sidecar/tools/defaultToolRegistry.js';
 import { evaluateFinalValidation } from '../src/harness-sidecar/tools/finalValidator.js';
 import { createPatchProposal, validatePatchProposal } from '../src/harness-sidecar/tools/patchManager.js';
 import { runShellCommand } from '../src/harness-sidecar/tools/shellBroker.js';
@@ -34,6 +35,76 @@ test('shell broker marks commands that exceed timeout', async () => {
 
   assert.equal(result.timedOut, true);
   assert.notEqual(result.exitCode, 0);
+});
+
+test('shell broker enforces workspace cwd and caps output', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-shell-policy-'));
+  try {
+    const outside = await runShellCommand({
+      command: `${nodeCommand} -e "console.log('outside')"`,
+      cwd: tmpdir(),
+      workspaceRoot,
+      timeoutMs: 2000,
+    });
+    assert.equal(outside.exitCode, 1);
+    assert.match(outside.stderr, /outside workspace/i);
+
+    const capped = await runShellCommand({
+      command: `${nodeCommand} -e "console.log('abcdefghijklmnopqrstuvwxyz')"`,
+      cwd: workspaceRoot,
+      workspaceRoot,
+      timeoutMs: 2000,
+      maxOutputBytes: 12,
+    });
+    assert.equal(capped.exitCode, 0);
+    assert.equal(capped.stdout.length <= 12, true);
+    assert.equal(capped.outputTruncated, true);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('default tool registry executes shell, verifier, and MCP tools through scoped adapters', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-default-tools-'));
+  const mcpCalls = [];
+  try {
+    const registry = createDefaultToolRegistry({
+      workspaceRoot,
+      mcpRuntime: {
+        async callTool(serverId, tool, args) {
+          mcpCalls.push({ serverId, tool, args });
+          return { status: 'completed', content: [{ type: 'text', text: 'mcp-ok' }] };
+        },
+      },
+    });
+    const tools = registry.list().map((tool) => tool.name).sort();
+
+    assert.deepEqual(tools, ['mcp.call', 'shell.run', 'verifier.run']);
+
+    const shell = await registry.execute('shell.run', {
+      command: `${nodeCommand} -e "console.log('shell-ok')"`,
+      cwd: workspaceRoot,
+      timeoutMs: 2000,
+    });
+    assert.equal(shell.exitCode, 0);
+    assert.match(shell.stdout, /shell-ok/);
+
+    const verifier = await registry.execute('verifier.run', {
+      taskId: 'task_default_tools',
+      verifiers: [{ name: 'node-ok', command: `${nodeCommand} -e "console.log('verified')"`, timeoutMs: 2000 }],
+    });
+    assert.equal(verifier.results[0].passed, true);
+
+    const mcp = await registry.execute('mcp.call', {
+      serverId: 'demo',
+      tool: 'demo.echo',
+      args: { text: 'hello' },
+    });
+    assert.equal(mcp.status, 'completed');
+    assert.deepEqual(mcpCalls, [{ serverId: 'demo', tool: 'demo.echo', args: { text: 'hello' } }]);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
 });
 
 test('verifier runner emits start, output, and finish events', async () => {

@@ -5,6 +5,7 @@ export async function runVerifiers({
   taskId,
   verifiers = [],
   emitEvent = () => {},
+  maxOutputBytes,
 }) {
   const results = [];
 
@@ -19,7 +20,9 @@ export async function runVerifiers({
     const shellResult = await runShellCommand({
       command: verifier.command,
       cwd: verifier.cwd || workspaceRoot,
+      workspaceRoot,
       timeoutMs: verifier.timeoutMs || 60000,
+      maxOutputBytes: verifier.maxOutputBytes || maxOutputBytes,
     });
 
     await emitEvent({
