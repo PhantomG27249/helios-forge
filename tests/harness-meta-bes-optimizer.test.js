@@ -199,3 +199,36 @@ test('BES meta optimizer generates verifier-policy candidates with verifier geno
     ],
   );
 });
+
+test('BES meta optimizer emits full bidirectional and Shinka-style evolution context with visual cases', async () => {
+  const optimizer = new BesMetaOptimizer({
+    now: () => new Date('2026-06-08T12:34:56.000Z'),
+    idPrefix: 'full_bes',
+    maxCandidates: 3,
+  });
+
+  const result = await optimizer.propose({
+    traceSummary: { failureModes: ['context_missing'] },
+    target: 'runtime_policy',
+    coreset: {
+      items: [
+        { taskId: 'trace-context', trace: { failureModes: ['context_missing'] } },
+        {
+          caseId: 'visual-layout',
+          source: 'verifier_case',
+          verifierCase: {
+            kind: 'visual',
+            expected: { tags: ['visual', 'vlm'] },
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.bes.bidirectional.goalTree.nodes.some((node) => node.id === 'goal_visual_verification'), true);
+  assert.equal(result.bes.bidirectional.bestCandidate.goalScore.satisfiedGoalIds.includes('goal_visual_verification'), true);
+  assert.equal(result.bes.evolution.archive.length > 0, true);
+  assert.equal(result.bes.evolution.runner, 'evolutionPopulationRunner.sync');
+  assert.deepEqual(result.bes.evolution.evaluationContext.visualCases.map((item) => item.caseId), ['visual-layout']);
+  assert.equal(result.candidates.every((candidate) => candidate.bes?.goalScore), true);
+});

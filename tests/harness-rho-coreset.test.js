@@ -126,3 +126,30 @@ test('selects verifier cases for false positives false negatives ambiguous score
   );
   assert.equal(coreset.totalCandidates, 6);
 });
+
+test('selects visual verifier cases from outcomes tags artifacts and tool names without thresholds', () => {
+  const coreset = buildRhoCoreset({
+    verifierCases: [
+      { caseId: 'visual-outcome', outcome: 'ambiguousVisualScore' },
+      { caseId: 'visual-tags', tags: ['vlm', 'screenshot'] },
+      { caseId: 'visual-artifacts', visualArtifacts: [{ path: 'diff.png' }] },
+      { caseId: 'visual-tool', toolName: 'vlm-screenshot-verifier' },
+    ],
+    limit: 10,
+  });
+
+  assert.deepEqual(
+    coreset.items.map((item) => item.caseId),
+    ['visual-outcome', 'visual-artifacts', 'visual-tags', 'visual-tool'],
+  );
+  assert.deepEqual(
+    coreset.items.map((item) => item.reasons[0]),
+    [
+      'verifier_ambiguous_visual_score',
+      'verifier_visual_evidence',
+      'verifier_visual_evidence',
+      'verifier_visual_evidence',
+    ],
+  );
+  assert.deepEqual(coreset.items.map((item) => item.score), [3, 2, 2, 2]);
+});

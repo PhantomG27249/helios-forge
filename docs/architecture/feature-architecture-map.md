@@ -78,7 +78,7 @@ flowchart TD
 | Memory and graph memory | Writes memory candidates, scores corpus, promotes useful memory, stores graph snapshots and retrieves promoted context. | `src/harness-sidecar/memory/*` |
 | Deep Research v2 | Builds research briefs, discovers/ingests sources, extracts claims, checks citations/contradictions, writes reports and handoff artifacts. | `src/harness-sidecar/research/*` |
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
-| BES primitives | Plans subgoals, seeds strategies, creates genomes, recombines attempts, tracks diversity, archives/selects champions. | `src/harness-sidecar/bes/*` |
+| Bidirectional BES and population evolution | Builds backward goal trees, scores dense goal satisfaction, alternates forward candidates with backward refinement, recombines partial progress, and runs Shinka-style population/island/archive evolution. | `src/harness-sidecar/bes/*` |
 | RHO coreset | Selects high-signal traces and verifier cases for optimization: failures, ambiguity, cost, flakiness, false positives/negatives. | `src/harness-sidecar/rho/coresetBuilder.js` |
 | Meta optimizer | Generates approval-ready policy candidates using BES/RHO evidence and promotion gates. | `src/harness-sidecar/meta/*` |
 | Verifier evolution | Evolves verifier policies through genomes, held-out cases, BES/RHO candidate generation, archive, and human-gated promotion. | `src/harness-sidecar/meta/verifier*.js`, `src/harness-sidecar/tools/verifierConfigApply.js` |
@@ -184,8 +184,9 @@ flowchart TD
 
 These systems make the harness improve itself without allowing direct self-application.
 
-- RHO picks high-signal cases from traces and verifier outcomes.
-- BES generates candidate policies/genomes using those cases.
+- RHO picks high-signal cases from traces, verifier outcomes, and visual/VLM verifier evidence.
+- Bidirectional BES uses those cases to build backward goal trees, score partial progress densely, and generate/recombine forward candidates.
+- The population runner applies Shinka-style generations, islands, correctness gates, visual/VLM case propagation, and archives.
 - Meta promotion policy evaluates whether a candidate is safe and useful.
 - Human approval gates are mandatory for applying risky changes.
 - Verifier evolution follows the same pattern, but its output is verifier config candidates.
@@ -194,9 +195,12 @@ Relationship:
 
 ```mermaid
 flowchart TD
-  TraceEvidence["Trace + verifier evidence"] --> RHO["RHO coreset"]
-  RHO --> BES["BES meta optimizer"]
-  BES --> Candidate["Candidate policy/genome"]
+  TraceEvidence["Trace + verifier + visual evidence"] --> RHO["RHO coreset"]
+  RHO --> Backward["Backward goal tree"]
+  Backward --> Forward["Forward candidate evolution"]
+  Forward --> DenseScore["Dense goal satisfaction"]
+  DenseScore --> Population["Population/island archive"]
+  Population --> Candidate["Candidate policy/genome"]
   Candidate --> Runner["Candidate runner"]
   Runner --> Metrics["Held-out metrics"]
   Metrics --> Promotion["Promotion policy"]

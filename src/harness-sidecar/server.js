@@ -23,6 +23,8 @@ import { compareMetrics } from './experiments/metricComparer.js';
 import { archiveChampion, createChampionArchive, selectBestChampion } from './bes/championArchive.js';
 import { createAttemptGenome } from './bes/attemptGenome.js';
 import { createDiversityTracker } from './bes/diversityTracker.js';
+import { runBidirectionalBes } from './bes/bidirectionalSearchLoop.js';
+import { runEvolutionPopulationSync } from './bes/evolutionPopulationRunner.js';
 import { proposeMutations } from './bes/mutationPolicy.js';
 import { recombineAttempts } from './bes/recombinationEngine.js';
 import { writeExperimentDecision } from './experiments/decisionWriter.js';
@@ -770,6 +772,94 @@ export function createHarnessSidecar({
         diversityKey: item.diversityKey,
       })),
     });
+
+    const runtimeBidirectionalBes = runBidirectionalBes({
+      task: { taskId: task.taskId, task: task.task },
+      coreset: rhoCoreset,
+      failureModes: traceSummary.failureModes,
+      seedCandidates: genomes.map((genome) => ({
+        candidateId: genome.id,
+        evidence: (genome.evidence || []).map((entry) => ({
+          goalId: entry.goalId || entry.subgoalId,
+          passed: true,
+          artifactId: entry.artifactId,
+        })),
+      })),
+      iterations: Math.max(1, Math.min(3, task.budget.maxToolCalls || 2)),
+      forwardSearch: ({ iteration, missingGoalIds }) => [{
+        candidateId: `runtime_${task.taskId}_bes_${iteration}`,
+        evidence: missingGoalIds.slice(0, Math.max(1, iteration + 1)).map((goalId) => ({
+          goalId,
+          passed: true,
+          source: 'runtime_bidirectional_bes',
+        })),
+      }],
+    });
+    for (const event of runtimeBidirectionalBes.events) {
+      await emitEvent({
+        ...event,
+        taskId: task.taskId,
+      });
+    }
+    const runtimeVisualCases = (rhoCoreset.items || [])
+      .filter((item) => item.source === 'verifier_case' && (
+        item.verifierCase?.kind === 'visual' ||
+        item.verifierCase?.visual === true ||
+        item.verifierCase?.expected?.tags?.includes?.('visual') ||
+        item.reasons?.some?.((reason) => String(reason).includes('visual'))
+      ))
+      .map((item) => ({
+        ...(item.verifierCase || {}),
+        caseId: item.caseId || item.verifierCase?.caseId || item.taskId,
+      }));
+    const runtimeEvolution = runEvolutionPopulationSync({
+      task: { taskId: task.taskId, task: task.task },
+      initialCandidates: runtimeBidirectionalBes.frontier.slice(0, 4).map((candidate, index) => ({
+        candidateId: candidate.candidateId || candidate.id || `runtime_bes_${index + 1}`,
+        islandId: index % 2 === 0 ? 'island_runtime_a' : 'island_runtime_b',
+        bes: { goalScore: candidate.goalScore },
+        evidence: candidate.evidence || [],
+      })),
+      generations: 1,
+      islands: 2,
+      archiveSize: 4,
+      visualCases: runtimeVisualCases,
+      verifierCases: (rhoCoreset.items || [])
+        .filter((item) => item.source === 'verifier_case')
+        .map((item) => item.verifierCase || item),
+      evaluateCandidate: ({ candidate, evaluationContext }) => ({
+        score: candidate.bes?.goalScore?.score ?? 0,
+        correct: true,
+        metrics: {
+          combinedScore: candidate.bes?.goalScore?.score ?? 0,
+          visualGoalSatisfied: candidate.bes?.goalScore?.satisfiedGoalIds?.includes('goal_visual_verification') || false,
+        },
+        visual: evaluationContext.visualCases.length
+          ? {
+            vlmRequired: true,
+            caseIds: evaluationContext.visualCases.map((item) => item.caseId).filter(Boolean),
+          }
+          : null,
+      }),
+    });
+    for (const event of runtimeEvolution.events) {
+      await emitEvent({
+        ...event,
+        taskId: task.taskId,
+      });
+    }
+    await updateTaskState(task.taskId, {
+      bidirectionalBes: {
+        goalCount: runtimeBidirectionalBes.goalTree.nodes.length,
+        bestCandidateId: runtimeBidirectionalBes.bestCandidate?.candidateId,
+        bestScore: runtimeBidirectionalBes.bestCandidate?.goalScore?.score,
+      },
+      evolutionArchive: {
+        runner: runtimeEvolution.runner,
+        archiveSize: runtimeEvolution.archive.length,
+        bestCandidateId: runtimeEvolution.best?.candidateId,
+      },
+    }, 'bes-runtime');
 
     const baseCandidateRun = recordCandidateRun({
       candidateId: `runtime_${task.taskId}`,

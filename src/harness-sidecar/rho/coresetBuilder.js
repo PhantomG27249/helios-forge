@@ -102,6 +102,38 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function stringIncludesVisualSignal(value) {
+  const text = stableString(value).toLowerCase();
+  return text.includes('visual') || text.includes('vlm');
+}
+
+function arrayHasVisualSignal(value) {
+  return Array.isArray(value) && value.some((item) => stringIncludesVisualSignal(item));
+}
+
+function hasVisualArtifacts(verifierCase) {
+  if (Array.isArray(verifierCase?.visualArtifacts)) {
+    return verifierCase.visualArtifacts.length > 0;
+  }
+  return verifierCase?.visualArtifacts !== undefined && verifierCase?.visualArtifacts !== null;
+}
+
+function hasVisualVerifierEvidence(verifierCase = {}) {
+  return Boolean(
+    verifierCase.kind === 'visual' ||
+      verifierCase.visual === true ||
+      hasVisualArtifacts(verifierCase) ||
+      arrayHasVisualSignal(verifierCase.tags) ||
+      arrayHasVisualSignal(verifierCase.result?.tags) ||
+      stringIncludesVisualSignal(verifierCase.verifier) ||
+      stringIncludesVisualSignal(verifierCase.tool) ||
+      stringIncludesVisualSignal(verifierCase.toolName) ||
+      stringIncludesVisualSignal(verifierCase.tool_name) ||
+      stringIncludesVisualSignal(verifierCase.result?.verifier) ||
+      stringIncludesVisualSignal(verifierCase.result?.tool),
+  );
+}
+
 function classifyVerifierCase(verifierCase = {}) {
   const classification = stableString(
     verifierCase.classification
@@ -109,11 +141,19 @@ function classifyVerifierCase(verifierCase = {}) {
       ?? verifierCase.outcome
       ?? verifierCase.type,
   );
+  const normalizedClassification = classification.toLowerCase();
   if (classification === 'falseNegative' || classification === 'false_negative') {
     return { score: 5, reason: 'verifier_false_negative' };
   }
   if (classification === 'falsePositive' || classification === 'false_positive') {
     return { score: 5, reason: 'verifier_false_positive' };
+  }
+  if (
+    classification === 'ambiguousVisualScore' ||
+    normalizedClassification === 'ambiguous_visual_score' ||
+    normalizedClassification === 'ambiguousvisualscore'
+  ) {
+    return { score: 3, reason: 'verifier_ambiguous_visual_score' };
   }
   if (verifierCase.flaky === true || numberOrNull(verifierCase.flakiness) > 0) {
     return { score: 4, reason: 'verifier_flaky' };
@@ -129,7 +169,7 @@ function classifyVerifierCase(verifierCase = {}) {
     score !== null
     && passThreshold !== null
     && Math.abs(score - passThreshold) <= 0.05
-    && (verifierCase.kind === 'visual' || verifierCase.visual === true || stableString(verifierCase.verifier).includes('visual'))
+    && hasVisualVerifierEvidence(verifierCase)
   ) {
     return { score: 3, reason: 'verifier_ambiguous_visual_score' };
   }
@@ -138,6 +178,10 @@ function classifyVerifierCase(verifierCase = {}) {
   const maxCost = numberOrNull(verifierCase.budget?.maxCost ?? verifierCase.maxCost);
   if (cost !== null && maxCost !== null && cost > maxCost) {
     return { score: 3, reason: 'verifier_high_cost' };
+  }
+
+  if (hasVisualVerifierEvidence(verifierCase)) {
+    return { score: 2, reason: 'verifier_visual_evidence' };
   }
 
   return { score: 0, reason: null };

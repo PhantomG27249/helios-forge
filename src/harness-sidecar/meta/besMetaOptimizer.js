@@ -1,6 +1,9 @@
 import { createAttemptGenome } from '../bes/attemptGenome.js';
 import { archiveChampion, createChampionArchive, selectBestChampion } from '../bes/championArchive.js';
 import { createDiversityTracker } from '../bes/diversityTracker.js';
+import { runEvolutionPopulationSync } from '../bes/evolutionPopulationRunner.js';
+import { runBidirectionalBes } from '../bes/bidirectionalSearchLoop.js';
+import { scoreGoalSatisfaction } from '../bes/goalSatisfactionScorer.js';
 import { proposeMutations } from '../bes/mutationPolicy.js';
 import { recombineAttempts } from '../bes/recombinationEngine.js';
 import { scoreSubgoals } from '../bes/subgoalScorer.js';
@@ -82,6 +85,38 @@ function collectFailureModes(traceSummary = {}, coreset) {
     failureModes.push(...(item.trace?.recoveryEvents || []).map((event) => event.category));
   }
   return [...new Set(failureModes.filter(Boolean))].sort();
+}
+
+function asArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function isVisualCoresetItem(item = {}) {
+  const kind = item.kind || item.verifierCase?.kind;
+  const reasonText = [...asArray(item.reason), ...asArray(item.reasons)].join(' ');
+  const tags = [
+    ...asArray(item.tags),
+    ...asArray(item.expected?.tags),
+    ...asArray(item.verifierCase?.expected?.tags),
+  ];
+  return Boolean(
+    kind === 'visual' ||
+      tags.includes('visual') ||
+      tags.includes('vlm') ||
+      reasonText.includes('visual') ||
+      asArray(item.visualArtifacts).length ||
+      asArray(item.verifierCase?.visualArtifacts).length
+  );
+}
+
+function collectVisualCases(coreset) {
+  return collectCoresetItems(coreset)
+    .filter(isVisualCoresetItem)
+    .map((item) => ({
+      ...(item.verifierCase || item),
+      caseId: item.caseId || item.verifierCase?.caseId || item.id || item.taskId,
+    }));
 }
 
 function subgoalIdFor(value) {
@@ -186,6 +221,53 @@ function buildRationale({ target, failureModes, subgoals, genome, coreset }) {
     `Strategy: ${genome.strategy?.name || 'unknown'}.`,
     `${coresetText}${lineageText}`.trim(),
   ].filter(Boolean).join(' ');
+}
+
+function evidenceForGoalIds(goalIds) {
+  return goalIds.map((goalId) => ({ goalId, passed: true }));
+}
+
+function buildEvolutionSnapshot({ task, candidates, visualCases, coreset }) {
+  return runEvolutionPopulationSync({
+    task,
+    initialCandidates: candidates.map((candidate, index) => ({
+      ...candidate,
+      candidateId: candidate.candidateId,
+      islandId: index % 2 === 0 ? 'island_seed' : 'island_recombined',
+    })),
+    generations: 1,
+    islands: 2,
+    archiveSize: Math.max(1, candidates.length),
+    visualCases,
+    verifierCases: collectCoresetItems(coreset)
+      .filter((item) => item.source === 'verifier_case')
+      .map((item) => item.verifierCase || item),
+    mutateCandidate: ({ parent, generation }) => ({
+      ...parent,
+      candidateId: `${parent.candidateId}_evo_${generation}`,
+      patch: {
+        ...(parent.patch || {}),
+        evolution: 'population_mutation',
+      },
+    }),
+    evaluateCandidate: ({ candidate, evaluationContext }) => {
+      const score = candidate.bes?.goalScore?.score ?? candidate.score ?? 0;
+      return {
+        score,
+        correct: true,
+        metrics: {
+          combinedScore: score,
+          visualGoalSatisfied: candidate.bes?.goalScore?.satisfiedGoalIds?.includes('goal_visual_verification') || false,
+        },
+        visual: evaluationContext.visualCases.length
+          ? {
+            vlmRequired: true,
+            caseIds: evaluationContext.visualCases.map((item) => item.caseId).filter(Boolean),
+          }
+          : null,
+      };
+    },
+  });
 }
 
 function buildVerifierRationale({ mutationType, failureModes, coreset }) {
@@ -325,34 +407,76 @@ export class BesMetaOptimizer {
       });
     }
     const champion = selectBestChampion(archive);
+    const visualCases = collectVisualCases(coreset);
+    const bidirectional = runBidirectionalBes({
+      task: {
+        taskId: baseId,
+        task: `Optimize ${normalizedTarget}`,
+      },
+      coreset,
+      failureModes,
+      seedCandidates: genomes.map((genome) => ({
+        candidateId: genome.id,
+        genome,
+        evidence: evidenceForGoalIds((genome.solvedSubgoalIds || []).filter(Boolean)),
+      })),
+      iterations: Math.max(1, Math.min(3, this.maxCandidates)),
+      forwardSearch: ({ iteration, missingGoalIds }) => [{
+        candidateId: `${baseId}_forward_${String(iteration).padStart(3, '0')}`,
+        evidence: evidenceForGoalIds(missingGoalIds.slice(0, Math.max(1, iteration + 1))),
+      }],
+    });
 
-    const candidates = genomes.map((genome, index) => ({
-      candidateId: `${baseId}_${String(index + 1).padStart(3, '0')}`,
-      target: normalizedTarget,
-      changeType: 'bes_policy_adjustment',
-      rationale: buildRationale({
+    const denseGoalIds = bidirectional.bestCandidate?.goalScore?.satisfiedGoalIds || [];
+    const candidates = genomes.map((genome, index) => {
+      const candidateId = `${baseId}_${String(index + 1).padStart(3, '0')}`;
+      const goalCandidate = {
+        candidateId,
+        evidence: evidenceForGoalIds([
+          ...denseGoalIds.slice(0, Math.max(1, index + 1)),
+          ...(genome.solvedSubgoalIds || []),
+        ]),
+      };
+      const goalScore = scoreGoalSatisfaction({
+        goalTree: bidirectional.goalTree,
+        candidate: goalCandidate,
+      });
+      return {
+        candidateId,
         target: normalizedTarget,
-        failureModes,
-        subgoals,
-        genome,
-        coreset,
-      }),
-      requiresApproval: true,
-      status: 'approval_required',
-      applied: false,
-      candidateRun,
-      patch: {
-        description: targetPatchDescription(normalizedTarget, genome),
+        changeType: 'bes_policy_adjustment',
+        rationale: buildRationale({
+          target: normalizedTarget,
+          failureModes,
+          subgoals,
+          genome,
+          coreset,
+        }),
+        requiresApproval: true,
+        status: 'approval_required',
         applied: false,
-        target: normalizedTarget,
-        strategy: genome.strategy?.name,
-        mutationTypes: (genome.mutations || []).map((mutation) => mutation.type),
-      },
-      bes: {
-        genome,
-        subgoalScore,
-      },
-    }));
+        candidateRun,
+        patch: {
+          description: targetPatchDescription(normalizedTarget, genome),
+          applied: false,
+          target: normalizedTarget,
+          strategy: genome.strategy?.name,
+          mutationTypes: (genome.mutations || []).map((mutation) => mutation.type),
+        },
+        bes: {
+          genome,
+          subgoalScore,
+          goalScore,
+          backwardGoalTree: bidirectional.goalTree,
+        },
+      };
+    });
+    const evolution = buildEvolutionSnapshot({
+      task: { taskId: baseId, task: `Optimize ${normalizedTarget}` },
+      candidates,
+      visualCases,
+      coreset,
+    });
 
     return {
       candidates,
@@ -362,6 +486,8 @@ export class BesMetaOptimizer {
         genomes,
         diversity,
         champion,
+        bidirectional,
+        evolution,
       },
     };
   }
