@@ -218,6 +218,79 @@ function buildRankings({ records, feedbackScores, evalScores, traceCounts }) {
   return rankings;
 }
 
+function estimateContextTokens(record = {}) {
+  const text = [
+    record.type,
+    record.summary,
+    record.subject,
+    record.predicate,
+    record.object,
+    ...normalizeList(record.tags),
+    ...normalizeList(record.taskKeywords),
+    ...normalizeList(record.evidence),
+  ].join(' ');
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function rankingReasons({ record, ranking }) {
+  const reasons = ['rank:graph_memory'];
+  if (record.reviewStatus) reasons.push(`review:${record.reviewStatus}`);
+  if (record.validatorBacked === true) reasons.push('validator_backed');
+  if (ranking.feedbackScore > 0) reasons.push('feedback:positive');
+  if (ranking.feedbackScore < 0) reasons.push('feedback:negative');
+  if (ranking.evalScore > 0) reasons.push(`eval:${ranking.evalScore}`);
+  if (ranking.traceCount > 0) reasons.push(`trace_observed:${ranking.traceCount}`);
+  for (const reason of staleReasons({ ...record, supersedes: [] })) {
+    reasons.push(reason);
+  }
+  return reasons;
+}
+
+function withoutUndefined(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
+}
+
+function buildRankedContextItems({ records, rankings }) {
+  return records
+    .map((record) => {
+      const memoryId = memoryIdFor(record);
+      const ranking = rankings[memoryId] || {
+        score: 0,
+        qualityScore: 0,
+        feedbackScore: 0,
+        evalScore: 0,
+        traceCount: 0,
+      };
+      return withoutUndefined({
+        id: memoryId,
+        memoryId,
+        source: 'graph_memory',
+        sourceLabel: `graph-memory:${memoryId}`,
+        type: record.type,
+        summary: record.summary || '',
+        subject: record.subject,
+        predicate: record.predicate,
+        object: record.object,
+        tags: normalizeList(record.tags),
+        taskKeywords: normalizeList(record.taskKeywords),
+        evidence: normalizeList(record.evidence),
+        provenance: normalizeList(record.provenance),
+        reviewStatus: record.reviewStatus,
+        validatorBacked: record.validatorBacked === true,
+        stale: Boolean(record.stale || record.supersededBy),
+        supersededBy: record.supersededBy ? validateGraphSnapshotId(record.supersededBy) : null,
+        ranking,
+        score: ranking.score,
+        reasons: rankingReasons({ record, ranking }),
+        tokensEstimated: estimateContextTokens(record),
+      });
+    })
+    .sort((left, right) => (
+      right.ranking.score - left.ranking.score
+      || left.memoryId.localeCompare(right.memoryId)
+    ));
+}
+
 function addMemoryNodesAndEdges({ records, source, nodes, edges }) {
   for (const record of records) {
     const memoryId = memoryIdFor(record);
@@ -300,6 +373,7 @@ export async function maintainGraphMemorySnapshot({
   addMemoryNodesAndEdges({ records: candidateRecords, source: 'candidate_memory', nodes, edges });
   addTraceNodesAndEdges({ traceSummaries: normalizeList(traceSummaries), nodes, edges });
 
+  const rankings = buildRankings({ records, feedbackScores, evalScores, traceCounts });
   const snapshot = await graphStore.save({
     nodes: [...nodes.values()].sort((left, right) => left.id.localeCompare(right.id)),
     edges: [...edges.values()].sort((left, right) => (
@@ -307,7 +381,8 @@ export async function maintainGraphMemorySnapshot({
       || left.to.localeCompare(right.to)
       || left.type.localeCompare(right.type)
     )),
-    rankings: buildRankings({ records, feedbackScores, evalScores, traceCounts }),
+    rankings,
+    rankedContextItems: buildRankedContextItems({ records, rankings }),
     staleReviewItems: buildStaleReviewItems(records),
     conflictReviewItems: buildConflictReviewItems(records),
     evalSummaries: summarizeEvalSets(normalizeList(evalSets)),

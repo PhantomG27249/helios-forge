@@ -1,4 +1,5 @@
 import { createPromotedMemoryStore } from './promotedMemoryStore.js';
+import { createGraphMemoryStore } from './graphMemoryStore.js';
 
 function normalizeList(value) {
   if (!value) return [];
@@ -78,6 +79,48 @@ export async function retrievePromotedMemory({
     .filter((item) => item.reason.length > 0)
     .sort((left, right) => (
       right.reason.length - left.reason.length
+      || left.memoryId.localeCompare(right.memoryId)
+    ))
+    .slice(0, limit);
+}
+
+function graphContextText(item = {}) {
+  return [
+    item.memoryId,
+    item.type,
+    item.summary,
+    item.subject,
+    item.predicate,
+    item.object,
+    ...normalizeList(item.tags),
+    ...normalizeList(item.taskKeywords),
+    ...normalizeList(item.evidence),
+    ...normalizeList(item.reasons),
+  ].join(' ');
+}
+
+function graphTaskMatches(item, task) {
+  const taskTokens = normalizeText(task).split(/[^a-z0-9_]+/).filter(Boolean);
+  if (taskTokens.length === 0) return true;
+  const text = normalizeText(graphContextText(item));
+  return taskTokens.some((token) => text.includes(token));
+}
+
+export async function retrieveGraphMemoryContext({
+  workspaceRoot,
+  task = '',
+  limit = 8,
+  includeStale = false,
+  snapshot,
+  store,
+} = {}) {
+  const graphStore = store || (snapshot ? null : createGraphMemoryStore({ workspaceRoot }));
+  const loadedSnapshot = snapshot || await graphStore.load();
+  return normalizeList(loadedSnapshot.rankedContextItems)
+    .filter((item) => includeStale || item.stale !== true)
+    .filter((item) => graphTaskMatches(item, task))
+    .sort((left, right) => (
+      (right.ranking?.score || 0) - (left.ranking?.score || 0)
       || left.memoryId.localeCompare(right.memoryId)
     ))
     .slice(0, limit);

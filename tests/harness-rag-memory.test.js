@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { buildContextPack } from '../src/harness-sidecar/rag/contextPackBuilder.js';
+import { composeUnifiedContext } from '../src/harness-sidecar/rag/unifiedContextComposer.js';
 import { indexWorkspace } from '../src/harness-sidecar/rag/workspaceIndexer.js';
 import { retrieveWorkspaceContext } from '../src/harness-sidecar/rag/retriever.js';
 import { writeMemoryCandidate } from '../src/harness-sidecar/memory/memoryWriter.js';
@@ -85,4 +86,69 @@ test('memory writer stores candidate records with evidence and review status', a
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
+});
+
+test('unified context composer combines workspace, memory, and graph sources deterministically', () => {
+  const contextPack = composeUnifiedContext({
+    taskId: 'task_unified',
+    profile: 'coding_small',
+    maxTokens: 26,
+    workspaceItems: [
+      {
+        chunkId: 'chunk_server_1',
+        path: 'src/server.js',
+        lineStart: 1,
+        lineEnd: 4,
+        snippet: 'startSidecarWebSocket opens the harness websocket',
+        score: 12,
+        reason: 'Matched websocket terms',
+        tokensEstimated: 10,
+      },
+      {
+        chunkId: 'chunk_server_2',
+        path: 'src/server.js',
+        lineStart: 20,
+        lineEnd: 24,
+        snippet: 'secondary server detail',
+        score: 11,
+        reason: 'Matched server terms',
+        tokensEstimated: 10,
+      },
+    ],
+    memoryItems: [
+      {
+        memoryId: 'mem_fix_0001',
+        type: 'reusable_fix',
+        summary: 'Run focused node --test before the full suite.',
+        reason: ['tag:harness', 'task:graph memory'],
+        provenance: [{ taskId: 'task_memory', evidence: ['tests/harness-rag-memory.test.js'] }],
+        tokenEstimate: 8,
+      },
+    ],
+    graphItems: [
+      {
+        id: 'run:run_001',
+        type: 'run',
+        label: 'focused harness run',
+        reason: 'supports claim routing-stable',
+        provenance: [{ taskId: 'task_graph', reason: 'claim evidence link' }],
+        tokensEstimated: 8,
+      },
+    ],
+  });
+
+  assert.equal(contextPack.taskId, 'task_unified');
+  assert.equal(contextPack.items.length, 3);
+  assert.deepEqual(
+    contextPack.items.map((item) => item.source),
+    ['workspace_rag', 'promoted_memory', 'knowledge_graph'],
+  );
+  assert.deepEqual(
+    contextPack.items.map((item) => item.sourceLabel),
+    ['workspace:src/server.js', 'memory:mem_fix_0001', 'graph:run:run_001'],
+  );
+  assert.deepEqual(contextPack.items[1].reasons, ['tag:harness', 'task:graph memory']);
+  assert.equal(contextPack.items[1].provenance[0].taskId, 'task_memory');
+  assert.equal(contextPack.excludedDueToBudget.length, 1);
+  assert.equal(contextPack.excludedDueToBudget[0].chunkId, 'chunk_server_2');
 });

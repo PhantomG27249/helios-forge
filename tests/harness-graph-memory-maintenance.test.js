@@ -170,6 +170,24 @@ test('maintenance rebuilds graph snapshot with rankings, review items, and eval 
     assert.equal(snapshot.rankings.mem_fix_0001.feedbackScore, 3);
     assert.equal(snapshot.rankings.mem_old_0001.feedbackScore, -2);
     assert.equal(snapshot.rankings.mem_fix_0001.score > snapshot.rankings.mem_old_0001.score, true);
+    assert.deepEqual(snapshot.rankedContextItems.map((item) => item.memoryId), [
+      'mem_fix_0001',
+      'mem_fact_0001',
+      'mem_fact_0002',
+      'mem_old_0001',
+    ]);
+    assert.equal(snapshot.rankedContextItems[0].source, 'graph_memory');
+    assert.equal(snapshot.rankedContextItems[0].sourceLabel, 'graph-memory:mem_fix_0001');
+    assert.equal(snapshot.rankedContextItems[0].ranking.feedbackScore, 3);
+    assert.deepEqual(snapshot.rankedContextItems[0].reasons, [
+      'rank:graph_memory',
+      'review:reviewed',
+      'validator_backed',
+      'feedback:positive',
+      'eval:100',
+      'trace_observed:1',
+    ]);
+    assert.equal(snapshot.rankedContextItems[0].provenance[0].taskId, 'task_graph');
     assert.deepEqual(snapshot.staleReviewItems.map((item) => item.memoryId), ['mem_old_0001']);
     assert.equal(snapshot.staleReviewItems[0].supersededBy, 'mem_fix_0001');
     assert.equal(snapshot.conflictReviewItems.length, 1);
