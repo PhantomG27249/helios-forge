@@ -35,6 +35,15 @@ let harnessState = {
   artifacts: new Map(),
   latestEvents: [],
   currentApproval: null,
+  verifierEvolution: {
+    status: 'idle',
+    latestScore: null,
+    baselineScore: null,
+    candidateScore: null,
+    latestCandidateId: null,
+    pendingVerifierPromotions: 0,
+    visualVerifierArtifacts: [],
+  },
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -144,6 +153,11 @@ const harnessSubtitle = $('#harness-subtitle');
 const harnessStatePill = $('#harness-state-pill');
 const harnessTaskCount = $('#harness-task-count');
 const harnessApprovalCount = $('#harness-approval-count');
+const harnessVerifierEvolutionStatus = $('#harness-verifier-evolution-status');
+const harnessVerifierLatestScore = $('#harness-verifier-latest-score');
+const harnessVerifierBaselineComparison = $('#harness-verifier-baseline-comparison');
+const harnessVerifierPendingPromotions = $('#harness-verifier-pending-promotions');
+const harnessVerifierArtifacts = $('#harness-verifier-artifacts');
 const harnessSubagentCount = $('#harness-subagent-count');
 const harnessSubagents = $('#harness-subagents');
 const harnessEvents = $('#harness-events');
@@ -510,19 +524,96 @@ function handleHarnessEvent(event) {
   }
 
   updateHarnessSubagent(event);
+  updateHarnessVerifierEvolution(event);
 
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
     harnessState.currentApproval = event;
     renderHarnessApproval(event);
     openModal('harness-approval');
+    updateHarnessVerifierEvolution(event);
   }
 
   if (event.type === 'approval.resolved') {
     harnessState.pendingApprovals.delete(event.actionId);
+    updateHarnessVerifierEvolution(event);
   }
 
   renderHarnessPanel();
+}
+
+function isVerifierPromotionApproval(event) {
+  const action = event?.proposedAction || event?.payload || {};
+  return event?.kind === 'verifier_config_apply'
+    || action.kind === 'verifier_config_apply'
+    || action.tool === 'verifier_config_apply'
+    || action.type === 'verifier_config_apply';
+}
+
+function scoreValue(value) {
+  if (Number.isFinite(value)) return value;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatScore(value) {
+  const score = scoreValue(value);
+  return score === null ? 'n/a' : score.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function metricScore(source = {}) {
+  return scoreValue(source.score)
+    ?? scoreValue(source.candidateScore)
+    ?? scoreValue(source.metrics?.score)
+    ?? scoreValue(source.metrics?.f1)
+    ?? scoreValue(source.metrics?.precision)
+    ?? scoreValue(source.result?.score);
+}
+
+function visualArtifactRecords(event = {}) {
+  return (event.artifacts || []).filter(artifact => {
+    const type = String(artifact.type || artifact.title || '').toLowerCase();
+    return type.includes('visual')
+      || type.includes('screenshot')
+      || type.includes('image')
+      || type.includes('pdf')
+      || type.includes('diff');
+  });
+}
+
+function updateHarnessVerifierEvolution(event) {
+  const state = harnessState.verifierEvolution;
+  const visualArtifacts = visualArtifactRecords(event);
+  if (visualArtifacts.length) {
+    state.visualVerifierArtifacts = [...visualArtifacts, ...state.visualVerifierArtifacts]
+      .filter((artifact, index, all) => all.findIndex(item => item.artifactId === artifact.artifactId) === index)
+      .slice(0, 4);
+  }
+
+  if (event.type === 'verifier_evolution.started') {
+    state.status = 'running';
+  }
+  if (event.type === 'verifier_evolution.candidate_completed') {
+    state.status = event.status || 'candidate completed';
+    state.latestCandidateId = event.candidateId || event.genomeId || state.latestCandidateId;
+    state.latestScore = metricScore(event);
+    state.candidateScore = scoreValue(event.candidateScore) ?? metricScore(event) ?? state.candidateScore;
+    state.baselineScore = scoreValue(event.baselineScore) ?? scoreValue(event.baseline?.score) ?? state.baselineScore;
+  }
+  if (event.type === 'verifier_evolution.promotion_evaluated') {
+    state.status = event.approved || event.passed ? 'promotion eligible' : event.reason || 'promotion blocked';
+    state.latestCandidateId = event.candidateId || state.latestCandidateId;
+    state.candidateScore = scoreValue(event.candidateScore) ?? scoreValue(event.candidate?.score) ?? state.candidateScore;
+    state.baselineScore = scoreValue(event.baselineScore) ?? scoreValue(event.baseline?.score) ?? state.baselineScore;
+  }
+  if (event.type === 'verifier_evolution.proposal_created') {
+    state.status = 'awaiting approval';
+    state.latestCandidateId = event.candidateId || state.latestCandidateId;
+  }
+  if (event.type === 'approval.required' || event.type === 'approval.resolved') {
+    state.pendingVerifierPromotions = Array.from(harnessState.pendingApprovals.values())
+      .filter(isVerifierPromotionApproval).length;
+  }
 }
 
 function updateHarnessSubagent(event) {
@@ -604,6 +695,7 @@ function renderHarnessPanel() {
   harnessStatePill.className = `harness-pill ${harnessState.status}`;
   harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
+  renderHarnessVerifierEvolution();
   renderHarnessSubagents();
   renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
@@ -621,6 +713,29 @@ function renderHarnessPanel() {
       ` : ''}
     </div>
   `).join('') || '<div class="harness-empty">No harness events yet</div>';
+}
+
+function renderHarnessVerifierEvolution() {
+  const state = harnessState.verifierEvolution;
+  if (harnessVerifierEvolutionStatus) {
+    const candidateText = state.latestCandidateId ? ` | ${state.latestCandidateId}` : '';
+    harnessVerifierEvolutionStatus.textContent = `verifier evolution ${state.status || 'idle'}${candidateText}`;
+  }
+  if (harnessVerifierLatestScore) {
+    harnessVerifierLatestScore.textContent = `score ${formatScore(state.latestScore ?? state.candidateScore)}`;
+  }
+  if (harnessVerifierBaselineComparison) {
+    harnessVerifierBaselineComparison.textContent = `baseline ${formatScore(state.baselineScore)} | candidate ${formatScore(state.candidateScore)}`;
+  }
+  if (harnessVerifierPendingPromotions) {
+    const count = state.pendingVerifierPromotions;
+    harnessVerifierPendingPromotions.textContent = `${count} verifier approval${count === 1 ? '' : 's'}`;
+  }
+  if (harnessVerifierArtifacts) {
+    harnessVerifierArtifacts.innerHTML = state.visualVerifierArtifacts.map(artifact => `
+      <button class="harness-artifact-link" type="button" onclick="openHarnessArtifact('${escAttr(artifact.artifactId)}')">${esc(artifact.title || artifact.type || 'visual artifact')}</button>
+    `).join('') || '<span class="harness-empty compact">No visual artifacts</span>';
+  }
 }
 
 function switchHarnessTab(tabId) {

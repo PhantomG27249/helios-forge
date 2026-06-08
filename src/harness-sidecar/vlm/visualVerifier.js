@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 import { buildMultimodalRequest } from '../model/multimodalRequestBuilder.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { readImageArtifact } from './imageIO.js';
@@ -34,14 +36,38 @@ function visualPathsForArtifact(artifact) {
   return [...new Set(preferred.filter(Boolean))];
 }
 
-function artifactMetadata(artifact) {
+function relativePathIfInside(workspaceRoot, value) {
+  if (typeof value !== 'string' || !value.trim()) return value;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value;
+  if (!path.isAbsolute(value)) return value.replace(/\\/g, '/');
+  const resolvedRoot = path.resolve(workspaceRoot);
+  const resolvedValue = path.resolve(value);
+  const relative = path.relative(resolvedRoot, resolvedValue);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return value;
+  return relative.replace(/\\/g, '/');
+}
+
+function sanitizeArtifactPaths(value, workspaceRoot) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeArtifactPaths(item, workspaceRoot));
+  }
+  if (!value || typeof value !== 'object') {
+    return relativePathIfInside(workspaceRoot, value);
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+    key,
+    key === 'ocrText' ? undefined : sanitizeArtifactPaths(item, workspaceRoot),
+  ]).filter(([, item]) => item !== undefined));
+}
+
+function artifactMetadata(artifact, workspaceRoot) {
   return {
     artifactId: artifact.artifactId,
     taskId: artifact.taskId,
     type: artifact.type,
     summary: artifact.summary,
-    artifacts: artifact.artifacts,
-    metadata: artifact.metadata,
+    artifacts: sanitizeArtifactPaths(artifact.artifacts, workspaceRoot),
+    metadata: sanitizeArtifactPaths(artifact.metadata, workspaceRoot),
     visualContext: artifact.visualContext,
   };
 }
@@ -90,17 +116,31 @@ function modelFromResponse(response, payload) {
     || null;
 }
 
+function redactUrlForTrace(value) {
+  if (!value) return value;
+  try {
+    const url = new URL(String(value));
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
 function normalizeVerifierOutput({ response, rubric }) {
   const payload = parseJudgePayload(response);
   const score = normalizeNumber(payload.score, 0);
   const confidence = normalizeNumber(payload.confidence, 0);
-  const passed = typeof payload.passed === 'boolean'
-    ? payload.passed
-    : score >= rubric.passThreshold && confidence >= rubric.confidenceThreshold;
+  const modelPassed = typeof payload.passed === 'boolean' ? payload.passed : null;
+  const passed = score >= rubric.passThreshold && confidence >= rubric.confidenceThreshold;
 
   return {
     name: 'visual.verifier',
     passed,
+    modelPassed,
     score,
     confidence,
     findings: normalizeFindings(payload.findings),
@@ -214,11 +254,12 @@ export async function runVisualVerifier({
   }
 
   const startedAt = Date.now();
+  const redactedTargetUrl = redactUrlForTrace(targetUrl);
   await emitMaybe(emitEvent, {
     type: 'visual_verifier.started',
     taskId,
     goal,
-    targetUrl,
+    targetUrl: redactedTargetUrl,
     hasBeforePath: Boolean(beforePath),
     hasAfterPath: Boolean(afterPath),
   });
@@ -235,7 +276,7 @@ export async function runVisualVerifier({
       emitEvent,
     });
     const artifacts = artifactList(captureResult);
-    const artifactMetadataItems = artifacts.map(artifactMetadata);
+    const artifactMetadataItems = artifacts.map((artifact) => artifactMetadata(artifact, workspaceRoot));
     const artifactRoots = [captureResult.outputDir].filter(Boolean);
     const imageInputs = await loadImageInputs({ artifacts, workspaceRoot, artifactRoots });
 

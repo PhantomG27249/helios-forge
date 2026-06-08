@@ -60,6 +60,23 @@ test('harness panel exposes live subagent activity', async () => {
   assert.match(appJs, /renderHarnessSubagents/);
 });
 
+test('harness panel exposes verifier evolution operator visibility', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-verifier-evolution"/);
+  assert.match(html, /id="harness-verifier-evolution-status"/);
+  assert.match(html, /id="harness-verifier-latest-score"/);
+  assert.match(html, /id="harness-verifier-baseline-comparison"/);
+  assert.match(html, /id="harness-verifier-pending-promotions"/);
+  assert.match(html, /id="harness-verifier-artifacts"/);
+  assert.match(appJs, /verifier_evolution\.candidate_completed/);
+  assert.match(appJs, /verifier_evolution\.promotion_evaluated/);
+  assert.match(appJs, /renderHarnessVerifierEvolution/);
+  assert.match(appJs, /pendingVerifierPromotions/);
+  assert.match(appJs, /visualVerifierArtifacts/);
+});
+
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 

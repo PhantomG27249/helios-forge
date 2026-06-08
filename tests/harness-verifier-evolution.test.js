@@ -165,6 +165,7 @@ test('runs verifier candidates against held-out cases and computes confusion met
         expected: { shouldPass: false, tags: ['visual'] },
       },
     ],
+    baselineResults: [{ name: 'unit', kind: 'unit', passed: true }],
     verifierRunner: async ({ caseRecord }) => [{
       name: genome.verifier.name,
       passed: outcomes.get(caseRecord.caseId),
@@ -192,6 +193,23 @@ test('runs verifier candidates against held-out cases and computes confusion met
     'verifier_evolution.case_completed',
     'verifier_evolution.candidate_completed',
   ]);
+});
+
+test('marks candidates unsafe when baseline safety results are missing', async () => {
+  const genome = createVerifierGenome({ verifier: commandVerifier() });
+  const run = await runVerifierCandidate({
+    genome,
+    heldOutCases: [{
+      caseId: 'clean-ui-change',
+      task: { taskId: 'task-clean', task: 'accept clean visual update' },
+      changedFiles: ['public/app.js'],
+      expected: { shouldPass: true, tags: ['visual'] },
+    }],
+    verifierRunner: async () => [{ name: genome.verifier.name, passed: true, cost: 0, durationMs: 5 }],
+  });
+
+  assert.equal(run.metrics.safetyPassed, false);
+  assert.deepEqual(run.safety.failures, ['baseline_results']);
 });
 
 test('marks candidates unsafe when baseline smoke, unit, or security cases fail', async () => {

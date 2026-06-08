@@ -82,6 +82,85 @@ test('promotion policy accepts approved smoke-passing non-dominated improvement'
   assert.equal(decision.candidateId, 'cand_meta_001');
 });
 
+test('promotion policy gates verifier candidates on approval holdout baseline flakiness and cost', () => {
+  const baselineVerifierMetrics = {
+    falsePositive: 2,
+    falseNegative: 3,
+    recall: 0.4,
+    averageCost: 0.4,
+  };
+  const approved = [{ candidateId: 'vg_candidate_001', choice: 'approve', approver: 'human' }];
+  const candidate = {
+    candidateId: 'vg_candidate_001',
+    target: 'verifier_policy',
+    verifierGenome: { genomeId: 'vg_candidate_001' },
+    metrics: {
+      falsePositive: 1,
+      falseNegative: 1,
+      recall: 0.8,
+      safetyPassed: true,
+      flakiness: 0.1,
+      averageCost: 0.44,
+    },
+    safety: { passed: true, failures: [] },
+  };
+
+  const accepted = evaluatePromotion({
+    candidateRun: candidate,
+    baselineVerifierMetrics,
+    approvals: approved,
+    verifierPolicy: {
+      flakinessThreshold: 0.2,
+      costIncreaseThreshold: 0.2,
+    },
+  });
+  assert.equal(accepted.status, 'promoted');
+  assert.deepEqual(accepted.reasons, [
+    'human_approved',
+    'verifier_holdout_improved',
+    'verifier_baseline_clean',
+    'verifier_flakiness_ok',
+    'verifier_cost_ok',
+  ]);
+
+  const missingApproval = evaluatePromotion({
+    candidateRun: candidate,
+    baselineVerifierMetrics,
+    approvals: [],
+  });
+  assert.equal(missingApproval.reasons.includes('missing_human_approval'), true);
+
+  const noHoldout = evaluatePromotion({
+    candidateRun: { ...candidate, metrics: { ...candidate.metrics, falsePositive: 2, falseNegative: 4, recall: 0.2 } },
+    baselineVerifierMetrics,
+    approvals: approved,
+  });
+  assert.equal(noHoldout.reasons.includes('missing_verifier_holdout'), true);
+
+  const regressed = evaluatePromotion({
+    candidateRun: { ...candidate, safety: { passed: false, failures: ['baseline-smoke'] } },
+    baselineVerifierMetrics,
+    approvals: approved,
+  });
+  assert.equal(regressed.reasons.includes('verifier_regression'), true);
+
+  const flaky = evaluatePromotion({
+    candidateRun: { ...candidate, metrics: { ...candidate.metrics, flakiness: 0.5 } },
+    baselineVerifierMetrics,
+    approvals: approved,
+    verifierPolicy: { flakinessThreshold: 0.2 },
+  });
+  assert.equal(flaky.reasons.includes('verifier_flaky'), true);
+
+  const costly = evaluatePromotion({
+    candidateRun: { ...candidate, metrics: { ...candidate.metrics, averageCost: 0.8 } },
+    baselineVerifierMetrics,
+    approvals: approved,
+    verifierPolicy: { costIncreaseThreshold: 0.2 },
+  });
+  assert.equal(costly.reasons.includes('verifier_cost_regression'), true);
+});
+
 test('change proposal is approval-ready and blocks direct apply without approval', async () => {
   const proposal = createChangeProposal({
     candidate: {

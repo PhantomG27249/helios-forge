@@ -60,7 +60,8 @@ test('captures web screenshot, OCR, PDF pages, and visual diff through injected 
     assert.equal(result.artifacts.pdfPages.length, 1);
     assert.equal(result.artifacts.visualDiff.type, 'visual_diff');
     assert.equal(result.ocr.text, 'OCR for web-preview.png');
-    assert.equal(result.artifacts.screenshot.metadata.ocrText, 'OCR for web-preview.png');
+    assert.equal(result.artifacts.screenshot.metadata.ocrText, undefined);
+    assert.equal(result.artifacts.screenshot.metadata.ocrTextLength, 'OCR for web-preview.png'.length);
     assert.equal(result.artifacts.screenshot.metadata.ocrConfidence, 0.91);
     assert.equal(await readFile(result.artifacts.screenshot.artifacts.image, 'utf8'), 'screenshot:http://127.0.0.1:3777/');
     assert.equal(await readFile(result.artifacts.visualDiff.artifacts.diff, 'utf8'), 'diff');
@@ -70,6 +71,30 @@ test('captures web screenshot, OCR, PDF pages, and visual diff through injected 
     assert.equal(events.some((event) => event.type === 'vlm.production_ocr_completed'), true);
     assert.equal(events.some((event) => event.type === 'vlm.production_visual_diff_captured'), true);
     assert.equal(JSON.stringify(events).includes('screenshot:http'), false);
+    assert.equal(JSON.stringify(result.artifacts.screenshot.metadata).includes('OCR for'), false);
+  });
+});
+
+test('production capture redacts private URL components from artifact metadata', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const result = await captureProductionVisualArtifacts({
+      taskId: 'task_redact_url',
+      workspaceRoot,
+      targetUrl: 'http://user:pass@127.0.0.1:3777/path?token=secret#frag',
+      captureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await writeFile(outputPath, 'screenshot');
+          return { imagePath: outputPath, width: 100, height: 100 };
+        },
+      },
+    });
+
+    const serialized = JSON.stringify(result.artifacts.screenshot);
+    assert.equal(serialized.includes('user'), false);
+    assert.equal(serialized.includes('pass'), false);
+    assert.equal(serialized.includes('secret'), false);
+    assert.equal(serialized.includes('#frag'), false);
+    assert.equal(result.artifacts.screenshot.metadata.source.url, 'http://127.0.0.1:3777/path');
   });
 });
 
@@ -176,7 +201,8 @@ test('production capture uses injected worker runtimes and limits OCR metadata t
       },
     });
 
-    assert.equal(result.artifacts.screenshot.metadata.ocrText, 'text tha');
+    assert.equal(result.artifacts.screenshot.metadata.ocrText, undefined);
+    assert.equal(result.artifacts.screenshot.metadata.ocrTextLength, 8);
     assert.equal(result.ocr.text, 'text that should be trimmed');
     assert.equal(result.artifacts.pdfPages.length, 1);
     assert.equal(result.artifacts.visualDiff.summary, 'changed');

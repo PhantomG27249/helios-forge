@@ -149,3 +149,53 @@ test('HarnessOptimizer keeps legacy propose shape unless BES mode is selected', 
   assert.equal(bes.candidates[0].candidateId, 'rho_harness_20260608t123456000z_001');
   assert.equal(bes.bes.genomes.length, 2);
 });
+
+test('BES meta optimizer generates verifier-policy candidates with verifier genomes', () => {
+  const optimizer = new BesMetaOptimizer({
+    now: () => new Date('2026-06-08T12:34:56.000Z'),
+    idPrefix: 'verifier_bes',
+    maxCandidates: 6,
+  });
+
+  const result = optimizer.propose({
+    traceSummary: { failureModes: ['verifier_false_negative'] },
+    target: 'verifier_policy',
+    coreset: {
+      items: [
+        { caseId: 'visual-fn', source: 'verifier_case', reasons: ['verifier_false_negative'] },
+        { caseId: 'visual-costly', source: 'verifier_case', reasons: ['verifier_high_cost'] },
+      ],
+    },
+    parentCandidates: [{
+      verifierGenome: {
+        verifier: {
+          name: 'visual-ui',
+          kind: 'visual',
+          tool: 'visual.verifier.run',
+          appliesTo: ['public/**/*.js'],
+          tags: ['visual', 'ui'],
+          rubric: { strictness: 'balanced', prompt: 'Check layout regressions.' },
+          thresholds: { pass: 0.75, confidence: 0.6 },
+          timeoutMs: 120000,
+          budget: { maxCost: 0.5 },
+        },
+      },
+    }],
+  });
+
+  assert.equal(result.candidates.length, 6);
+  assert.equal(result.candidates.every((candidate) => candidate.target === 'verifier_policy'), true);
+  assert.equal(result.candidates.every((candidate) => candidate.expectedMetric), true);
+  assert.equal(result.candidates.every((candidate) => candidate.verifierGenome?.safety?.requiresApproval), true);
+  assert.deepEqual(
+    result.candidates.map((candidate) => candidate.verifierGenome.mutation.type),
+    [
+      'threshold_adjustment',
+      'rubric_prompt_refinement',
+      'selector_rule_expansion',
+      'timeout_budget_adjustment',
+      'visual_crop_policy_adjustment',
+      'ocr_weight_adjustment',
+    ],
+  );
+});

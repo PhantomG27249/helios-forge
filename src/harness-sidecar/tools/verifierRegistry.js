@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const DEFAULT_TIMEOUT_MS = 120000;
+const SAFE_COMMAND_PREFIX = /^(npm|node|npx|pnpm|yarn|git)\b/;
+const UNSAFE_COMMAND = /(\r|\n|&&|\|\||[;|`<>]|\$\(|\brm\s+-rf\b|\bremove-item\b|\bdel\s+\/[sq]\b|\bformat\b)/i;
 
 function isInsideRoot(root, target) {
   const relative = path.relative(path.resolve(root), path.resolve(target));
@@ -93,6 +95,15 @@ function normalizeObject(value) {
   return { ...value };
 }
 
+function assertSafeCommand(command) {
+  if (typeof command !== 'string' || !command.trim()) {
+    throw new Error('Verifier command must be a non-empty string');
+  }
+  if (!SAFE_COMMAND_PREFIX.test(command.trim()) || UNSAFE_COMMAND.test(command)) {
+    throw new Error(`Unsafe verifier command: ${command}`);
+  }
+}
+
 function normalizeCwd({ workspaceRoot, verifier }) {
   if (!verifier.cwd || verifier.cwd === '.') return null;
   if (path.isAbsolute(verifier.cwd)) {
@@ -120,6 +131,7 @@ function normalizeVerifier({ workspaceRoot, verifier, index }) {
   if (hasCommand === hasTool) {
     throw new Error(`Verifier "${verifier.name}" must define exactly one of command or tool`);
   }
+  if (hasCommand) assertSafeCommand(verifier.command);
   if (hasTool && !/^[A-Za-z0-9_.:-]+$/.test(verifier.tool)) {
     throw new Error(`Verifier "${verifier.name}" has invalid tool name`);
   }
@@ -138,6 +150,15 @@ function normalizeVerifier({ workspaceRoot, verifier, index }) {
     tags: normalizeArray(verifier.tags),
     maxOutputBytes: verifier.maxOutputBytes,
   };
+}
+
+export function normalizeVerifierRecord({ workspaceRoot, verifier, index = 0 } = {}) {
+  if (!workspaceRoot) throw new Error('workspaceRoot is required');
+  return normalizeVerifier({
+    workspaceRoot: path.resolve(workspaceRoot),
+    verifier,
+    index,
+  });
 }
 
 async function createDefaultVerifiers(workspaceRoot) {

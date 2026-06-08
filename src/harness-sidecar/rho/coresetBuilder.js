@@ -97,6 +97,75 @@ function scoreTrace(trace) {
   return { score, reasons };
 }
 
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function classifyVerifierCase(verifierCase = {}) {
+  const classification = stableString(
+    verifierCase.classification
+      ?? verifierCase.result?.classification
+      ?? verifierCase.outcome
+      ?? verifierCase.type,
+  );
+  if (classification === 'falseNegative' || classification === 'false_negative') {
+    return { score: 5, reason: 'verifier_false_negative' };
+  }
+  if (classification === 'falsePositive' || classification === 'false_positive') {
+    return { score: 5, reason: 'verifier_false_positive' };
+  }
+  if (verifierCase.flaky === true || numberOrNull(verifierCase.flakiness) > 0) {
+    return { score: 4, reason: 'verifier_flaky' };
+  }
+
+  const score = numberOrNull(verifierCase.score ?? verifierCase.visualScore ?? verifierCase.result?.score);
+  const passThreshold = numberOrNull(
+    verifierCase.thresholds?.pass
+      ?? verifierCase.thresholds?.passThreshold
+      ?? verifierCase.rubric?.passThreshold,
+  );
+  if (
+    score !== null
+    && passThreshold !== null
+    && Math.abs(score - passThreshold) <= 0.05
+    && (verifierCase.kind === 'visual' || verifierCase.visual === true || stableString(verifierCase.verifier).includes('visual'))
+  ) {
+    return { score: 3, reason: 'verifier_ambiguous_visual_score' };
+  }
+
+  const cost = numberOrNull(verifierCase.cost ?? verifierCase.averageCost ?? verifierCase.result?.cost);
+  const maxCost = numberOrNull(verifierCase.budget?.maxCost ?? verifierCase.maxCost);
+  if (cost !== null && maxCost !== null && cost > maxCost) {
+    return { score: 3, reason: 'verifier_high_cost' };
+  }
+
+  return { score: 0, reason: null };
+}
+
+function getVerifierCaseId(verifierCase, index) {
+  return stableString(verifierCase?.caseId ?? verifierCase?.id ?? verifierCase?.taskId ?? `verifier_case_${index}`);
+}
+
+function resolveVerifierDiversityKey(verifierCase, caseId, reason) {
+  return stableString(reason ?? verifierCase?.verifier ?? verifierCase?.kind ?? caseId);
+}
+
+function rankedVerifierCase(verifierCase, index) {
+  const caseId = getVerifierCaseId(verifierCase, index);
+  const scored = classifyVerifierCase(verifierCase);
+  return {
+    id: caseId,
+    taskId: caseId,
+    caseId,
+    score: scored.score,
+    reasons: scored.reason ? [scored.reason] : [],
+    verifierCase,
+    source: 'verifier_case',
+    diversityKey: resolveVerifierDiversityKey(verifierCase, caseId, scored.reason),
+  };
+}
+
 function resolveDiversityKey(trace, taskId, diversityKey) {
   if (typeof diversityKey === 'function') {
     return stableString(diversityKey(trace));
@@ -126,9 +195,14 @@ function compareRankedItems(a, b) {
   return a.taskId.localeCompare(b.taskId);
 }
 
-export function buildRhoCoreset({ traces = [], limit = DEFAULT_LIMIT, diversityKey } = {}) {
+export function buildRhoCoreset({
+  traces = [],
+  verifierCases = [],
+  limit = DEFAULT_LIMIT,
+  diversityKey,
+} = {}) {
   const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
-  const ranked = traces.map((trace, index) => {
+  const rankedTraces = traces.map((trace, index) => {
     const taskId = getTaskId(trace, index);
     const scored = scoreTrace(trace);
     return {
@@ -138,7 +212,11 @@ export function buildRhoCoreset({ traces = [], limit = DEFAULT_LIMIT, diversityK
       trace,
       diversityKey: resolveDiversityKey(trace, taskId, diversityKey),
     };
-  }).sort(compareRankedItems);
+  });
+  const rankedVerifierCases = verifierCases
+    .map(rankedVerifierCase)
+    .filter((item) => item.score > 0 || item.reasons.length > 0);
+  const ranked = [...rankedTraces, ...rankedVerifierCases].sort(compareRankedItems);
 
   if (safeLimit === 0) {
     return { items: [], totalCandidates: ranked.length, selectedCount: 0 };

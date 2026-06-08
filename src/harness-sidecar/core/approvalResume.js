@@ -1,5 +1,6 @@
 import { applyChangeProposal } from '../meta/changeProposal.js';
 import { applyChampion } from '../swarm/championApply.js';
+import { applyVerifierConfigCandidate } from '../tools/verifierConfigApply.js';
 
 function clonePlain(value) {
   if (value === undefined || value === null) {
@@ -167,25 +168,38 @@ export async function executeApprovedApplyAction({
     return result;
   }
 
-  if (!action || !['champion_apply', 'change_proposal_apply'].includes(action.kind)) {
+  if (!action || !['champion_apply', 'change_proposal_apply', 'verifier_config_apply'].includes(action.kind)) {
     const result = baseApplyResult(action, 'rejected', 'unknown_apply_kind');
     await emitMaybe(emitEvent, { type: 'approval.apply_rejected', ...result });
     return result;
   }
 
-  const applyResult = action.kind === 'champion_apply'
-    ? await applyChampion({
+  let applyResult;
+  if (action.kind === 'champion_apply') {
+    applyResult = await applyChampion({
       workspaceRoot,
       champion: action.payload?.champion,
       approved: true,
       approvedBy: action.approvedBy || action.payload?.approvedBy || null,
       applyAdapter,
-    })
-    : await applyChangeProposal({
+    });
+  } else if (action.kind === 'change_proposal_apply') {
+    applyResult = await applyChangeProposal({
       proposal: action.payload?.proposal,
       approved: true,
       applyAdapter,
     });
+  } else {
+    applyResult = await applyVerifierConfigCandidate({
+      workspaceRoot,
+      candidate: action.payload?.candidate,
+      approval: {
+        approved: true,
+        approvedBy: action.approvedBy || action.payload?.approvedBy || null,
+      },
+      currentRegistry: action.payload?.currentRegistry,
+    });
+  }
 
   const result = {
     actionId: action.actionId,

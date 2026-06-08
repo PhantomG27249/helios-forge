@@ -344,7 +344,7 @@ test('full runtime invokes VLM observation when configured model supports vision
       assert.equal(vlmEvent.model.model, 'local-test-vlm');
       const toolRegistryEvent = events.find((event) => event.type === 'tools.default_registry_available');
       assert.equal(Boolean(toolRegistryEvent), true);
-      assert.deepEqual(toolRegistryEvent.toolNames, ['mcp.call', 'shell.run', 'verifier.run']);
+      assert.deepEqual(toolRegistryEvent.toolNames, ['mcp.call', 'shell.run', 'verifier.run', 'visual.verifier.run']);
       assert.equal(toolRegistryEvent.toolLoopReady, true);
 
       unsubscribe();
@@ -427,6 +427,66 @@ test('task startup launches enabled MCP capabilities through injected runtime', 
               env: { API_TOKEN: 'secret-value' },
             }],
           }),
+        );
+      },
+    },
+  );
+});
+
+test('full runtime gates verifier evolution behind config and creates approval action', async () => {
+  await withSidecar(
+    async ({ sidecar }) => {
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'exercise verifier evolution',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const summary = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && (
+          event.type === 'verifier_evolution.summary'
+            || event.type === 'verifier_evolution.failed'
+        ),
+        8000,
+      );
+
+      assert.equal(summary.type, 'verifier_evolution.summary');
+      assert.equal(summary.promoted, false);
+      assert.equal(summary.proposalCount >= 1, true);
+      const approval = events.find((event) => (
+        event.taskId === body.taskId
+          && event.type === 'approval.required'
+          && event.kind === 'verifier_config_apply'
+      ));
+      assert.equal(Boolean(approval), true);
+      assert.equal(approval.risk, 'high');
+      assert.equal(approval.reason, 'verifier_config_promotion_requested');
+      assert.equal(approval.proposedAction.kind, 'verifier_config_apply');
+
+      unsubscribe();
+    },
+    {
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  verifierEvolution: true',
+            '',
+          ].join('\n'),
         );
       },
     },

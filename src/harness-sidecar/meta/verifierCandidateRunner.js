@@ -57,9 +57,9 @@ function computeFlakiness(caseResults) {
 }
 
 function baselineSafetyPassed(baselineResults = []) {
-  return baselineResults
-    .filter((result = {}) => BASELINE_SAFETY_TAGS.has(result.kind) || BASELINE_SAFETY_TAGS.has(result.name))
-    .every((result) => result.passed !== false);
+  const safetyResults = baselineResults
+    .filter((result = {}) => BASELINE_SAFETY_TAGS.has(result.kind) || BASELINE_SAFETY_TAGS.has(result.name));
+  return safetyResults.length > 0 && safetyResults.every((result) => result.passed !== false);
 }
 
 export async function runVerifierCandidate({

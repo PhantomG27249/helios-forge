@@ -1,6 +1,6 @@
 import { ToolRegistry } from './toolRegistry.js';
 import { runShellCommand } from './shellBroker.js';
-import { loadVerifierRegistry } from './verifierRegistry.js';
+import { loadVerifierRegistry, normalizeVerifierRecord } from './verifierRegistry.js';
 import { runVerifiers } from './verifierRunner.js';
 import { selectVerifiersForTask } from './verifierSelector.js';
 import { runVisualVerifier } from '../vlm/visualVerifier.js';
@@ -69,7 +69,9 @@ export function createDefaultToolRegistry({
       recentFailures = [],
       maxVerifiers,
     } = {}) => {
-      let selectedVerifiers = Array.isArray(verifiers) ? verifiers : null;
+      let selectedVerifiers = Array.isArray(verifiers)
+        ? verifiers.map((verifier, index) => normalizeVerifierRecord({ workspaceRoot, verifier, index }))
+        : null;
       if (!selectedVerifiers) {
         const verifierRegistry = await loadVerifierRegistry({ workspaceRoot });
         await emitEvent({

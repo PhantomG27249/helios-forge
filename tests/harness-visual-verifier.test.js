@@ -35,7 +35,7 @@ test('visual verifier captures artifacts and returns normalized vlmJudge evidenc
       workspaceRoot,
       goal: 'Verify the page still shows the pricing table.',
       expected: ['pricing table visible'],
-      targetUrl: 'http://127.0.0.1:3000/',
+      targetUrl: 'http://user:pass@127.0.0.1:3000/?token=private#frag',
       beforePath,
       afterPath,
       emitEvent: (event) => events.push(event),
@@ -78,6 +78,9 @@ test('visual verifier captures artifacts and returns normalized vlmJudge evidenc
     assert.equal(events.some((event) => event.type === 'visual_verifier.artifacts_captured'), true);
     assert.equal(events.some((event) => event.type === 'visual_verifier.completed'), true);
     assert.equal(JSON.stringify(events).includes('data:image'), false);
+    assert.equal(JSON.stringify(events).includes('private'), false);
+    assert.equal(JSON.stringify(result.artifacts).includes('private'), false);
+    assert.equal(result.artifacts[0].metadata.source.url, 'http://127.0.0.1:3000/');
   });
 });
 
@@ -103,6 +106,36 @@ test('visual verifier fails when no visual artifact is available', async () => {
     assert.equal(result.reason, 'visual_artifact_unavailable');
     assert.equal(result.artifacts.length, 0);
     assert.equal(events.some((event) => event.type === 'visual_verifier.failed' && event.reason === 'visual_artifact_unavailable'), true);
+  });
+});
+
+test('visual verifier treats model passed as advisory and enforces thresholds', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const result = await runVisualVerifier({
+      taskId: 'task_visual_thresholds',
+      workspaceRoot,
+      goal: 'Verify the page is visually correct.',
+      targetUrl: 'http://127.0.0.1:3000/',
+      strictness: 'strict',
+      captureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await writeFile(outputPath, PNG_1X1);
+          return { imagePath: outputPath, width: 320, height: 200 };
+        },
+      },
+      vlmJudge: async () => ({
+        score: 0.2,
+        confidence: 0.2,
+        findings: [],
+        passed: true,
+        model: { model: 'prompt-injected-vlm' },
+      }),
+    });
+
+    assert.equal(result.modelPassed, true);
+    assert.equal(result.passed, false);
+    assert.equal(result.score, 0.2);
+    assert.equal(result.confidence, 0.2);
   });
 });
 

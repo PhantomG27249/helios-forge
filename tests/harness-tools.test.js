@@ -91,7 +91,7 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
 
     const verifier = await registry.execute('verifier.run', {
       taskId: 'task_default_tools',
-      verifiers: [{ name: 'node-ok', command: `${nodeCommand} -e "console.log('verified')"`, timeoutMs: 2000 }],
+      verifiers: [{ name: 'node-ok', command: 'node -e "console.log(\'verified\')"', timeoutMs: 2000 }],
     });
     assert.equal(verifier.results[0].passed, true);
 
@@ -102,6 +102,23 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
     });
     assert.equal(mcp.status, 'completed');
     assert.deepEqual(mcpCalls, [{ serverId: 'demo', tool: 'demo.echo', args: { text: 'hello' } }]);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('default tool registry rejects unsafe ad-hoc verifier commands', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-default-tools-unsafe-verifier-'));
+  try {
+    const registry = createDefaultToolRegistry({ workspaceRoot });
+
+    await assert.rejects(
+      () => registry.execute('verifier.run', {
+        taskId: 'task_unsafe_verifier',
+        verifiers: [{ name: 'unsafe', command: 'npm test && echo leaked' }],
+      }),
+      /unsafe verifier command/i,
+    );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

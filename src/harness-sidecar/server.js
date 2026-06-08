@@ -46,9 +46,11 @@ import { scoreMemoryCorpus } from './memory/memoryEvals.js';
 import { createChangeProposal } from './meta/changeProposal.js';
 import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
+import { BesMetaOptimizer } from './meta/besMetaOptimizer.js';
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
 import { evaluatePromotion } from './meta/promotionPolicy.js';
 import { inspectTrace } from './meta/traceInspector.js';
+import { runVerifierEvolutionLoop } from './meta/verifierEvolutionLoop.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
 import { composeUnifiedContext } from './rag/unifiedContextComposer.js';
 import { buildRhoCoreset } from './rho/coresetBuilder.js';
@@ -430,13 +432,14 @@ export function createHarnessSidecar({
       'audit',
     ];
     const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
-    let defaultToolRegistry = null;
+    const defaultToolRegistry = createDefaultToolRegistry({
+      workspaceRoot: resolvedWorkspaceRoot,
+      emitEvent,
+      mcpRuntime: mountedMcpRuntime,
+      visualCaptureAdapter,
+      modelGateway: runtimeSwarmModel?.gateway,
+    });
     if (runtimeSwarmModel) {
-      defaultToolRegistry = createDefaultToolRegistry({
-        workspaceRoot: resolvedWorkspaceRoot,
-        emitEvent,
-        mcpRuntime: mountedMcpRuntime,
-      });
       const toolNames = defaultToolRegistry.list().map((tool) => tool.name).sort();
       await emitEvent({
         type: 'tools.default_registry_available',
@@ -1549,6 +1552,122 @@ export function createHarnessSidecar({
           taskId: task.taskId,
           reason: error.message,
           sourceArtifactIds: [screenshotArtifact.artifactId],
+        });
+      }
+    }
+    const verifierEvolutionEnabled = harnessConfig?.features?.verifierEvolution === true
+      || process.env.HELIOS_VERIFIER_EVOLUTION === '1';
+    if (verifierEvolutionEnabled) {
+      try {
+        const verifierRegistry = await loadVerifierRegistry({ workspaceRoot: resolvedWorkspaceRoot });
+        const visualVerifierRegistry = {
+          ...verifierRegistry,
+          verifiers: verifierRegistry.verifiers.filter((verifier) => verifier.tool || verifier.kind === 'visual'),
+        };
+        const verifierCases = [{
+          caseId: `runtime-${task.taskId}-visual-ambiguous`,
+          classification: 'ambiguousVisualScore',
+          task: { taskId: task.taskId, task: task.task },
+          changedFiles: ['public/app.js'],
+          expected: { shouldPass: true, tags: ['visual'] },
+          score: 0.62,
+          confidence: 0.58,
+          cost: 0.1,
+          durationMs: 20,
+        }];
+        const baselineResults = [
+          { name: 'unit', kind: 'unit', passed: true },
+          { name: 'release-smoke', kind: 'smoke', passed: true },
+        ];
+        const verifierEvolution = await runVerifierEvolutionLoop({
+          workspaceRoot: resolvedWorkspaceRoot,
+          registry: visualVerifierRegistry,
+          verifierCases,
+          baselineResults,
+          baselineVerifierMetrics: {
+            falseNegative: 1,
+            falsePositive: 1,
+            precision: 0.5,
+            recall: 0.5,
+            averageCost: 0.1,
+            flakiness: 0,
+          },
+          approvals: [],
+          optimizer: new BesMetaOptimizer({ maxCandidates: 1 }),
+          verifierRunner: ({ verifier, caseRecord }) => runVerifiers({
+            workspaceRoot: resolvedWorkspaceRoot,
+            taskId: task.taskId,
+            task: caseRecord.task,
+            verifiers: [verifier],
+            toolRegistry: defaultToolRegistry,
+            emitEvent,
+            maxOutputBytes: 16 * 1024,
+          }),
+          toolRegistry: defaultToolRegistry,
+          emitEvent: (event) => emitEvent({ taskId: task.taskId, ...event }),
+          verifierPolicy: harnessConfig?.verifierEvolution || {},
+        });
+
+        for (const proposal of verifierEvolution.proposals) {
+          const candidate = verifierEvolution.candidates.find((item) => item.candidateId === proposal.candidateId);
+          if (!candidate?.verifierGenome) continue;
+          const verifierActionId = makeId('act');
+          const verifierApplyAction = {
+            actionId: verifierActionId,
+            taskId: task.taskId,
+            kind: 'verifier_config_apply',
+            payload: {
+              candidate: {
+                candidateId: candidate.candidateId,
+                genome: candidate.verifierGenome,
+              },
+              currentRegistry: verifierRegistry,
+            },
+            status: 'pending',
+          };
+          approvalResumeStore.register({
+            ...verifierApplyAction,
+            resume: async ({ actor } = {}) => executeApprovedApplyAction({
+              action: {
+                ...verifierApplyAction,
+                approvedBy: actor || 'human',
+              },
+              approved: true,
+              workspaceRoot: resolvedWorkspaceRoot,
+              emitEvent,
+            }),
+          });
+          pendingApprovals.set(verifierActionId, verifierApplyAction);
+          await emitEvent({
+            type: 'approval.required',
+            taskId: task.taskId,
+            actionId: verifierActionId,
+            kind: 'verifier_config_apply',
+            risk: 'high',
+            reason: 'verifier_config_promotion_requested',
+            choices: ['approve', 'reject', 'defer'],
+            proposedAction: {
+              kind: 'verifier_config_apply',
+              tool: 'verifier_config_apply',
+              candidateId: candidate.candidateId,
+              verifier: candidate.verifierGenome.verifier.name,
+              proposalId: proposal.proposalId,
+            },
+          });
+        }
+
+        await emitEvent({
+          type: 'verifier_evolution.summary',
+          taskId: task.taskId,
+          candidateCount: verifierEvolution.candidates.length,
+          proposalCount: verifierEvolution.proposals.length,
+          promoted: false,
+        });
+      } catch (error) {
+        await emitEvent({
+          type: 'verifier_evolution.failed',
+          taskId: task.taskId,
+          reason: error.message,
         });
       }
     }

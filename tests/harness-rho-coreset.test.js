@@ -95,3 +95,34 @@ test('returns deterministic ordering for equal-score traces', () => {
   assert.deepEqual(first.items.map((item) => item.taskId), ['task-a', 'task-b', 'task-c']);
   assert.deepEqual(second.items.map((item) => item.taskId), ['task-a', 'task-b', 'task-c']);
 });
+
+test('selects verifier cases for false positives false negatives ambiguous scores cost and flakiness', () => {
+  const coreset = buildRhoCoreset({
+    traces: [{ taskId: 'trace-easy', status: 'success' }],
+    verifierCases: [
+      { caseId: 'visual-fp', classification: 'falsePositive', verifier: 'visual-ui' },
+      { caseId: 'visual-fn', classification: 'falseNegative', verifier: 'visual-ui' },
+      { caseId: 'visual-ambiguous', score: 0.74, thresholds: { pass: 0.75 }, kind: 'visual' },
+      { caseId: 'visual-costly', cost: 1.2, budget: { maxCost: 0.5 } },
+      { caseId: 'visual-flaky', flaky: true },
+    ],
+    limit: 10,
+  });
+
+  const verifierItems = coreset.items.filter((item) => item.source === 'verifier_case');
+  assert.deepEqual(
+    verifierItems.map((item) => item.caseId),
+    ['visual-fn', 'visual-fp', 'visual-flaky', 'visual-ambiguous', 'visual-costly'],
+  );
+  assert.deepEqual(
+    verifierItems.map((item) => item.reasons[0]),
+    [
+      'verifier_false_negative',
+      'verifier_false_positive',
+      'verifier_flaky',
+      'verifier_ambiguous_visual_score',
+      'verifier_high_cost',
+    ],
+  );
+  assert.equal(coreset.totalCandidates, 6);
+});

@@ -81,6 +81,20 @@ function isUnavailable(result) {
   return result?.status === 'unavailable';
 }
 
+function redactUrlForTrace(value) {
+  if (!value) return value;
+  try {
+    const url = new URL(String(value));
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
 export async function captureProductionVisualArtifacts({
   taskId,
   workspaceRoot,
@@ -129,6 +143,7 @@ export async function captureProductionVisualArtifacts({
         skipped.push({ kind: 'screenshot', reason: captured.reason });
       } else {
         const imagePath = captured?.imagePath || outputPath;
+        const redactedUrl = redactUrlForTrace(targetUrl);
         artifacts.screenshot = createScreenshotArtifact({
           taskId,
           imagePath,
@@ -136,8 +151,8 @@ export async function captureProductionVisualArtifacts({
             width: captured?.width || captured?.viewport?.width || 0,
             height: captured?.height || captured?.viewport?.height || 0,
           },
-          source: { type: 'web_preview', url: targetUrl },
-          summary: `Production web preview screenshot for ${targetUrl}`,
+          source: { type: 'web_preview', url: redactedUrl },
+          summary: `Production web preview screenshot for ${redactedUrl}`,
         });
         await emitMaybe(emitEvent, {
           type: 'vlm.production_screenshot_captured',
@@ -158,7 +173,7 @@ export async function captureProductionVisualArtifacts({
               : String(ocr?.text || '').slice(0, maxOcrMetadataTextLength);
             artifacts.screenshot.metadata = {
               ...artifacts.screenshot.metadata,
-              ocrText: metadataText,
+              ocrTextLength: metadataText.length,
               ocrConfidence: ocr?.confidence,
               ocrTextTruncated: Boolean(ocr?.truncated),
             };

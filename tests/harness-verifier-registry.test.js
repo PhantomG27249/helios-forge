@@ -141,6 +141,24 @@ test('verifier registry rejects unsafe or ambiguous tool verifier records', asyn
   });
 });
 
+test('verifier registry rejects unsafe command verifier records', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const harnessDir = path.join(workspaceRoot, '.harness');
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(path.join(harnessDir, 'verifiers.json'), JSON.stringify({
+      verifiers: [{
+        name: 'unsafe-command',
+        command: 'npm test && echo leaked',
+      }],
+    }));
+
+    await assert.rejects(
+      () => loadVerifierRegistry({ workspaceRoot }),
+      /unsafe verifier command/i,
+    );
+  });
+});
+
 test('verifier runner executes command and tool verifiers and normalizes tool results', async () => {
   await withWorkspace(async (workspaceRoot) => {
     const events = [];
