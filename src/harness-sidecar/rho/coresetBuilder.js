@@ -170,6 +170,66 @@ function scoreSwarmEvidence(trace) {
   return { score, reasons };
 }
 
+function compactionFailureModes(trace) {
+  const fromTrace = Array.isArray(trace?.failureModes)
+    ? trace.failureModes
+    : [];
+  const fromReplay = Array.isArray(trace?.compactionReplay?.failureModes)
+    ? trace.compactionReplay.failureModes
+    : [];
+  const fromEvents = getEvents(trace).flatMap((event) => (
+    Array.isArray(event?.replay?.failureModes) ? event.replay.failureModes : []
+  ));
+  return [...fromTrace, ...fromReplay, ...fromEvents]
+    .map((mode) => stableString(mode))
+    .filter((mode) => mode.startsWith('compaction_'));
+}
+
+function hasCompactionEvent(trace, value) {
+  return getEvents(trace).some((event) => stableString(event?.type).toLowerCase().includes(value));
+}
+
+function scoreCompactionEvidence(trace) {
+  const reasons = [];
+  let score = 0;
+  const failureModes = compactionFailureModes(trace);
+  const hasMode = (mode) => failureModes.includes(mode);
+
+  if (
+    hasMode('compaction_lost_constraints') ||
+    hasMode('compaction_lost_constraint') ||
+    Array.isArray(trace?.compaction?.lostConstraints) && trace.compaction.lostConstraints.length > 0 ||
+    Array.isArray(trace?.compactionReplay?.lostConstraints) && trace.compactionReplay.lostConstraints.length > 0
+  ) {
+    score += 6;
+    reasons.push(hasMode('compaction_lost_constraint') ? 'compaction_lost_constraint' : 'compaction_lost_constraints');
+  }
+  if (hasMode('compaction_hallucination') || hasCompactionEvent(trace, 'compaction.hallucination')) {
+    score += 5;
+    reasons.push('compaction_hallucination');
+  }
+  if (hasMode('compaction_continuation_failed') || trace?.compactionReplay?.continuationSucceeded === false) {
+    score += 4;
+    reasons.push('compaction_continuation_failed');
+  }
+  if (hasMode('compaction_bad_trigger')) {
+    score += 4;
+    reasons.push('compaction_bad_trigger');
+  }
+  if (
+    hasMode('compaction_token_bloat') ||
+    (
+      numberOrNull(trace?.compaction?.tokenReduction) !== null &&
+      numberOrNull(trace?.compaction?.tokenReduction) < 0.1
+    )
+  ) {
+    score += 2;
+    reasons.push('compaction_token_bloat');
+  }
+
+  return { score, reasons };
+}
+
 function scoreTrace(trace) {
   const reasons = [];
   let score = 0;
@@ -196,6 +256,9 @@ function scoreTrace(trace) {
   const swarm = scoreSwarmEvidence(trace);
   score += swarm.score;
   reasons.push(...swarm.reasons);
+  const compaction = scoreCompactionEvidence(trace);
+  score += compaction.score;
+  reasons.push(...compaction.reasons);
 
   return { score, reasons };
 }

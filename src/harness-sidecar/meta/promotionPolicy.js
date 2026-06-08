@@ -41,6 +41,10 @@ function isVerifierPolicyCandidate(candidateRun = {}) {
   );
 }
 
+function isShadowOnlyCandidate(candidateRun = {}) {
+  return candidateRun.status === 'shadow_only' || candidateRun.directApplyAllowed === false;
+}
+
 function verifierHoldoutImproved(metrics = {}, baseline = {}) {
   if (!baseline || !Object.keys(baseline).length) return false;
   const reducedFalseNegatives = Number.isFinite(metrics.falseNegative) && Number.isFinite(baseline.falseNegative)
@@ -195,11 +199,16 @@ export function evaluatePromotion({
     reasons.push('not_pareto_improvement');
   }
 
+  if (isShadowOnlyCandidate(candidateRun)) {
+    reasons.push('shadow_policy_no_self_apply');
+  }
+
   const status = (
     reasons.includes('human_approved')
     && reasons.includes('smoke_passed')
     && reasons.includes('safety_threshold_met')
     && reasons.includes('pareto_improvement')
+    && !reasons.includes('shadow_policy_no_self_apply')
   ) ? 'promoted' : 'rejected';
 
   const result = {

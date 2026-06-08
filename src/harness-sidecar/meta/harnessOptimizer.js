@@ -1,5 +1,6 @@
 import { generateCandidateChange } from './candidateGenerator.js';
 import { BesMetaOptimizer } from './besMetaOptimizer.js';
+import { proposeCompactionPolicies } from './compactionPolicyEvolution.js';
 
 export class HarnessOptimizer {
   constructor(options = {}) {
@@ -8,6 +9,19 @@ export class HarnessOptimizer {
   }
 
   propose({ traceSummary, target, candidateRun, coreset, parentCandidates } = {}) {
+    if (target === 'compaction_policy' && (this.mode === 'rho-meta' || this.mode === 'bes-rho')) {
+      const candidates = proposeCompactionPolicies({
+        coreset,
+        baselinePolicy: this.options.compactionPolicy || {},
+        maxCandidates: this.options.maxCandidates,
+      });
+      return {
+        candidates,
+        coreset,
+        target: 'compaction_policy',
+      };
+    }
+
     if (this.mode === 'bes-rho') {
       return new BesMetaOptimizer(this.options).propose({
         traceSummary,

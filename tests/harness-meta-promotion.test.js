@@ -161,6 +161,31 @@ test('promotion policy gates verifier candidates on approval holdout baseline fl
   assert.equal(costly.reasons.includes('verifier_cost_regression'), true);
 });
 
+test('promotion policy never self-applies shadow compaction candidates', () => {
+  const approvedShadow = evaluatePromotion({
+    candidateRun: candidateRun({
+      candidateId: 'compaction_shadow_1',
+      target: 'compaction_policy',
+      status: 'shadow_only',
+      directApplyAllowed: false,
+      metrics: {
+        quality: 0.95,
+        safety: 0.98,
+        cost: 0.2,
+        latency: 0.2,
+      },
+    }),
+    baselineFrontier: [
+      { candidateId: 'baseline', quality: 0.8, safety: 0.9, cost: 0.5, latency: 0.4 },
+    ],
+    approvals: [{ candidateId: 'compaction_shadow_1', choice: 'approve', approver: 'human' }],
+  });
+
+  assert.equal(approvedShadow.status, 'rejected');
+  assert.equal(approvedShadow.reasons.includes('shadow_policy_no_self_apply'), true);
+  assert.equal(approvedShadow.reasons.includes('human_approved'), true);
+});
+
 test('change proposal is approval-ready and blocks direct apply without approval', async () => {
   const proposal = createChangeProposal({
     candidate: {

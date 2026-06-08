@@ -197,3 +197,67 @@ test('selects MemGraphRAG construction failures as hard cases', () => {
     ],
   );
 });
+
+test('selects compaction replay and evolution failures as hard cases', () => {
+  const coreset = buildRhoCoreset({
+    traces: [
+      {
+        taskId: 'resume-gap',
+        failureModes: ['compaction_continuation_failed'],
+      },
+      {
+        taskId: 'lost-constraints',
+        compaction: { lostConstraints: ['no external API calls'] },
+      },
+      {
+        taskId: 'hallucinated-summary',
+        events: [{ type: 'compaction.hallucination_detected', summary: 'Invented approval' }],
+      },
+      {
+        taskId: 'token-bloat',
+        compaction: { tokenReduction: 0.04 },
+      },
+    ],
+    limit: 10,
+  });
+
+  assert.deepEqual(
+    coreset.items.map((item) => item.reasons.find((reason) => reason.startsWith('compaction_'))),
+    [
+      'compaction_lost_constraints',
+      'compaction_hallucination',
+      'compaction_continuation_failed',
+      'compaction_token_bloat',
+    ],
+  );
+});
+
+test('selects compaction replay failures as hard cases', () => {
+  const coreset = buildRhoCoreset({
+    traces: [
+      {
+        taskId: 'lost-constraint',
+        compactionReplay: {
+          score: 0.4,
+          failureModes: ['compaction_lost_constraint', 'compaction_lost_file'],
+        },
+      },
+      {
+        taskId: 'bad-trigger',
+        events: [
+          {
+            type: 'context.compaction_replay',
+            replay: { score: 0.55, failureModes: ['compaction_bad_trigger'] },
+          },
+        ],
+      },
+    ],
+    limit: 5,
+  });
+
+  assert.deepEqual(
+    coreset.items.map((item) => item.reasons.find((reason) => reason.startsWith('compaction_'))),
+    ['compaction_lost_constraint', 'compaction_bad_trigger'],
+  );
+  assert.equal(coreset.items[0].score >= 5, true);
+});
