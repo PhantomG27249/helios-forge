@@ -327,3 +327,4 @@ These are known follow-up areas rather than blockers for local testing:
 - Broader MCP quarantine coverage for future model-visible fields beyond current returned-content scanning.
 - Rename or clarify code-impact events that use context-pack paths as seed files, so they are not mistaken for actual diff changed files.
 - Expand the operator dashboard from compact data events into a fuller dedicated browser panel for context pressure, recovery, policy evolution, memory graph health, verifier evolution, and budget alerts.
+- Add a disabled-by-default Pi-native swarm mode that supervises independent Pi Agent worker sessions as `pi_native_subagent` attempts, while preserving sidecar-owned tracing, review, RHO/BES feedback, and approval-gated apply.

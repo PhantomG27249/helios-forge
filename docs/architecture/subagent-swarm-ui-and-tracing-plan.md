@@ -27,6 +27,33 @@ The missing UI layer is a richer subagent workspace:
 - no UI grouping for "thinking summaries" versus raw private reasoning;
 - no visual connection from swarm outcomes back into RHO/BES/meta evolution.
 
+There is also one deeper runtime gap that should be treated as a separate upgrade goal: Helios has sidecar-managed model-driven swarm attempts, but it does not yet spawn multiple independent Pi Agent sessions as long-lived native subagents. True Pi-native swarms should be added as a future execution mode, not confused with the current model-gateway attempt loop.
+
+## Pi-Native Swarm Goal
+
+Add an optional Pi-native swarm mode where Helios can launch and supervise multiple independent Pi Agent worker sessions for the same task.
+
+Target behavior:
+
+- each worker has its own Pi process/session, workspace scope, context pack, budget, role/profile, and capability manifest;
+- each worker can use Pi's normal model configuration and kwargs handling;
+- the harness assigns each worker a bounded objective and output contract;
+- the sidecar receives each worker's visible thinking summaries, tool intents, verifier evidence, artifacts, and final compact handoff;
+- workers stream lifecycle and trace events into the same `.harness/traces/<task-id>/events.jsonl` record;
+- failures in one Pi worker do not collapse the swarm;
+- champion selection, review, recombination, RHO/BES feedback, and approval-gated apply remain owned by the sidecar;
+- safe defaults keep concurrency low until the operator opts in.
+
+This should sit alongside the existing worker modes:
+
+- `deterministic_subagent`: dry-run deterministic fallback;
+- `model_driven`: structured model call through Helios `ModelGateway`;
+- `command_subagent`: command adapter attempt;
+- `worktree_command`: isolated worktree attempt;
+- `pi_native_subagent`: independent Pi Agent process/session supervised by Helios.
+
+The first version can run Pi-native workers sequentially with isolated trace streams. Later versions can enable bounded parallel Pi workers after process supervision, cancellation, and budget accounting are reliable.
+
 ## Product Shape
 
 Add a first-class `Swarm` tab inside the harness panel.
@@ -278,7 +305,34 @@ Acceptance:
 - Model-worker tests assert `thinkingSummary` is captured without requiring raw hidden reasoning.
 - Failure tests assert trace events still emit on worker failure.
 
-### Wave 3: Trace Projector And Replay Filters
+### Wave 3: Pi-Native Worker Adapter
+
+Files:
+
+- Create `src/harness-sidecar/swarm/piNativeWorker.js`
+- Modify `src/harness-sidecar/swarm/swarmOrchestrator.js`
+- Modify `src/pi/piRpcManager.js` or add a sidecar-safe Pi process wrapper if the app-level manager is too UI-coupled.
+- Modify `src/harness-sidecar/config/configLoader.js`
+- Add `tests/harness-swarm-pi-native-worker.test.js`
+
+Work:
+
+- Add a `features.piNativeSwarm` gate and optional `swarmExecution.piNativeConcurrency`.
+- Start worker Pi processes with scoped workspace, task prompt, context manifest, and role contract.
+- Subscribe to visible worker events and normalize them into `swarm.subagent_trace`.
+- Capture visible thinking summaries only when Pi exposes them as user-visible content.
+- Convert each worker's final answer into the existing compact handoff contract.
+- Support abort/cancel and process cleanup.
+- Keep current model-driven and deterministic workers as fallback.
+
+Acceptance:
+
+- Unit tests can inject a fake Pi worker process and verify start, event relay, handoff normalization, failure isolation, and cleanup.
+- The default config keeps `piNativeSwarm` disabled.
+- Enabling Pi-native mode produces worker kind `pi_native_subagent`.
+- No worker can bypass sidecar approval gates.
+
+### Wave 4: Trace Projector And Replay Filters
 
 Files:
 
@@ -302,7 +356,7 @@ Acceptance:
 - Replay can return only `attempt_a` events.
 - Unsafe ids cannot escape the trace root.
 
-### Wave 4: Live UI Timeline
+### Wave 5: Live UI Timeline
 
 Files:
 
@@ -324,7 +378,7 @@ Acceptance:
 - Render state remains bounded by max attempts and max timeline rows per attempt.
 - Approval responsiveness coalescing remains in place.
 
-### Wave 5: Evolution Feedback Visibility
+### Wave 6: Evolution Feedback Visibility
 
 Files:
 
@@ -463,9 +517,10 @@ Recommended order:
 2. Add browser state for selected attempt and bounded timelines.
 3. Enrich existing swarm events with additive fields.
 4. Add `swarm.subagent_trace` events.
-5. Add trace projector and replay filters.
-6. Wire detail drawer to projected trace data.
-7. Add evolution feedback badges.
-8. Run full test suite and do a browser smoke check.
+5. Add the Pi-native worker adapter behind a disabled-by-default feature gate.
+6. Add trace projector and replay filters.
+7. Wire detail drawer to projected trace data.
+8. Add evolution feedback badges.
+9. Run full test suite and do a browser smoke check.
 
 This order gives useful UI value early while keeping deeper trace projection and replay filtering as separately testable backend work.
