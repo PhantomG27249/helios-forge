@@ -58,6 +58,15 @@ function withReason(verifier, reason) {
   return { ...verifier, reason };
 }
 
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
 function pushUnique(selected, verifier, reason) {
   if (!verifier || selected.some((item) => item.name === verifier.name)) return;
   selected.push(withReason(verifier, reason));
@@ -78,6 +87,7 @@ export function selectVerifiersForTask({
   registry,
   recentFailures = [],
   maxVerifiers = 4,
+  visualPolicy = null,
 } = {}) {
   if (!registry?.verifiers?.length) return [];
   const selected = [];
@@ -119,5 +129,11 @@ export function selectVerifiersForTask({
     pushUnique(selected, findByKindOrTag(registry, ['smoke']), 'task_requires_smoke');
   }
 
-  return selected.slice(0, Math.max(1, maxVerifiers));
+  const sliced = selected.slice(0, Math.max(1, maxVerifiers));
+  if (!visualPolicy) return sliced;
+  return sliced.map((verifier) => (
+    verifier.kind === 'visual' || verifier.tags?.includes?.('visual') || verifier.tags?.includes?.('vlm')
+      ? { ...verifier, policy: policyMetadata(visualPolicy) }
+      : verifier
+  ));
 }

@@ -1,3 +1,5 @@
+import { decideAutoApproval } from './autoApprovalPolicy.js';
+
 function dominates(left, right) {
   const noWorse = (
     left.quality >= right.quality
@@ -153,6 +155,7 @@ export function evaluatePromotion({
   approvals = [],
   safetyThreshold = 0.9,
   verifierPolicy = {},
+  autoApproval = null,
 } = {}) {
   if (isVerifierPolicyCandidate(candidateRun)) {
     return evaluateVerifierPromotion({
@@ -199,11 +202,22 @@ export function evaluatePromotion({
     && reasons.includes('pareto_improvement')
   ) ? 'promoted' : 'rejected';
 
-  return {
+  const result = {
     candidateId,
     status,
     reasons,
     metrics,
     safetyThreshold,
   };
+  if (autoApproval) {
+    result.autoApprovalEligibility = decideAutoApproval({
+      candidate: candidateRun,
+      evidence: autoApproval.evidence || {},
+      rollback: autoApproval.rollback || null,
+      trust: autoApproval.trust || {},
+      approvals,
+      policy: autoApproval.policy || {},
+    });
+  }
+  return result;
 }

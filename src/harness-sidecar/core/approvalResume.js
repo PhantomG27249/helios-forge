@@ -39,6 +39,10 @@ function summarizeAction(action, { includeResumeResult = true } = {}) {
     resumeRan: action.resumeRan,
   };
 
+  if (action.autoApprovalEligibility !== undefined) {
+    summary.autoApprovalEligibility = clonePlain(action.autoApprovalEligibility);
+  }
+
   if (includeResumeResult && action.resumeResult !== undefined) {
     summary.resumeResult = clonePlain(action.resumeResult);
   }
@@ -78,6 +82,9 @@ export class PendingActionResumeStore {
       resumeRan: Boolean(action.resumeRan),
       resumeResult: clonePlain(action.resumeResult),
     };
+    if (action.autoApprovalEligibility !== undefined) {
+      record.autoApprovalEligibility = clonePlain(action.autoApprovalEligibility);
+    }
     this.actions.set(record.actionId, record);
     return summarizeAction(record, { includeResumeResult: false });
   }

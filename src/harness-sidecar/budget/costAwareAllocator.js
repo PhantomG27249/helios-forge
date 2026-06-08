@@ -1,6 +1,7 @@
 export function recommendCostAwareAllocation({
   pressure = {},
   desired = {},
+  policy = null,
 } = {}) {
   const contextPercent = pressure.contextPercent || 0;
   const budgetPercent = pressure.budgetPercent || 0;
@@ -10,12 +11,20 @@ export function recommendCostAwareAllocation({
   const events = [];
 
   if (!shouldDownshift) {
-    return {
+    const allocation = {
       retrievalItems,
       subagents,
       modelProfile: desired.modelProfile,
       events,
     };
+    if (policy) {
+      allocation.policy = {
+        policyId: policy.policyId,
+        status: policy.status || 'shadow_only',
+        mode: 'metadata_only',
+      };
+    }
+    return allocation;
   }
 
   const recommendation = {
@@ -32,11 +41,19 @@ export function recommendCostAwareAllocation({
     },
   });
 
-  return {
+  const allocation = {
     retrievalItems: Math.max(1, Math.floor(retrievalItems / 2)),
     subagents: Math.max(1, Math.floor(subagents / 2)),
     modelProfile: 'critic_low_temp',
     recommendation,
     events,
   };
+  if (policy) {
+    allocation.policy = {
+      policyId: policy.policyId,
+      status: policy.status || 'shadow_only',
+      mode: 'metadata_only',
+    };
+  }
+  return allocation;
 }

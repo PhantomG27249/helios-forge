@@ -18,10 +18,20 @@ function riskLevelFor(flags) {
   return 'low';
 }
 
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
 export function assessNoveltyAndRisk({
   claims = [],
   contradictions = [],
   figureCandidates = [],
+  researchPolicy = null,
 } = {}) {
   const figureIds = new Set(figureCandidates.map((figure) => figure.figureId));
   const flags = [];
@@ -68,8 +78,12 @@ export function assessNoveltyAndRisk({
       || a.kind.localeCompare(b.kind);
   });
 
-  return {
+  const result = {
     riskLevel: riskLevelFor(flags),
     flags,
   };
+  if (researchPolicy) {
+    result.policy = policyMetadata(researchPolicy);
+  }
+  return result;
 }

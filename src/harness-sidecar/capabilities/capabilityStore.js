@@ -130,6 +130,15 @@ function decorateRegistry(registry) {
   return decorated;
 }
 
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
 async function readStoredRegistry(workspaceRoot) {
   try {
     const raw = await readFile(getRegistryPath(workspaceRoot), 'utf8');
@@ -189,7 +198,7 @@ export async function deleteCapabilityRecord({ workspaceRoot, capabilityId } = {
   });
 }
 
-export async function buildRuntimeMountManifest({ workspaceRoot, profileId = null } = {}) {
+export async function buildRuntimeMountManifest({ workspaceRoot, profileId = null, trustPolicy = null } = {}) {
   const registry = await loadCapabilityRegistry({ workspaceRoot });
   const capabilities = registry.capabilities.filter((capability) => capability.enabled === true);
   const manifestPath = getRuntimeManifestPath(workspaceRoot);
@@ -205,6 +214,9 @@ export async function buildRuntimeMountManifest({ workspaceRoot, profileId = nul
     byType: manifest.byType,
     counts: manifest.counts,
   };
+  if (trustPolicy) {
+    runtimeManifest.trustPolicy = policyMetadata(trustPolicy);
+  }
 
   await mkdir(path.dirname(manifestPath), { recursive: true });
   await writeFile(manifestPath, `${JSON.stringify(runtimeManifest, null, 2)}\n`, 'utf8');

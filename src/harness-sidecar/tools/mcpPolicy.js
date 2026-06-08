@@ -67,6 +67,15 @@ function publicPoisoningSummary(promptInjection) {
   };
 }
 
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
 export function createMcpPolicy({
   allowedServers = [],
   allowedTools = [],
@@ -75,6 +84,7 @@ export function createMcpPolicy({
   minRiskyTrustTier = 'verified',
   rateLimits = {},
   credentialScopes = {},
+  trustPolicy = null,
   emitEvent,
   clock = now,
 } = {}) {
@@ -158,6 +168,9 @@ export function createMcpPolicy({
         tool: decision.tool,
         retryAfterMs: decision.retryAfterMs,
       });
+    }
+    if (trustPolicy) {
+      decision.policy = policyMetadata(trustPolicy);
     }
     return decision;
   }

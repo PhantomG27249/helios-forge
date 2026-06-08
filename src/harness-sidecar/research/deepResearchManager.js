@@ -241,6 +241,7 @@ export async function createDeepResearchV2Artifacts({
   sources = [],
   contradictions = [],
   workers,
+  researchPolicy = null,
 } = {}) {
   assertSafeRunId(runId);
 
@@ -249,7 +250,12 @@ export async function createDeepResearchV2Artifacts({
 
   const { pageMetadata, figureCandidates } = extractFigureCandidates({ sources });
   const claims = collectClaims(sources);
-  const noveltyControls = assessNoveltyAndRisk({ claims, contradictions, figureCandidates });
+  const noveltyControls = assessNoveltyAndRisk({
+    claims,
+    contradictions,
+    figureCandidates,
+    researchPolicy,
+  });
   const sourceMap = normalizeSourceMap({ sources, pageMetadata });
   const graph = claimEvidenceGraph({
     claims,

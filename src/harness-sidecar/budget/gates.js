@@ -12,7 +12,16 @@ function percentUsed(used, limit) {
   return Math.round(((used || 0) / limit) * 100);
 }
 
-export function evaluateBudgetGates({ used, limits }) {
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
+export function evaluateBudgetGates({ used, limits, policy = null }) {
   const decisions = [];
   for (const rule of GATE_RULES) {
     const limit = limits[rule.limit];
@@ -37,8 +46,12 @@ export function evaluateBudgetGates({ used, limits }) {
         ? 'warn'
         : 'allow';
 
-  return {
+  const result = {
     action: strongestAction,
     decisions,
   };
+  if (policy) {
+    result.policy = policyMetadata(policy);
+  }
+  return result;
 }

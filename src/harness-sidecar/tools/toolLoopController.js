@@ -37,6 +37,15 @@ function terminalStatus(toolResults) {
   return null;
 }
 
+function policyMetadata(policy) {
+  if (!policy) return undefined;
+  return {
+    policyId: policy.policyId,
+    status: policy.status || 'shadow_only',
+    mode: 'metadata_only',
+  };
+}
+
 async function executeToolCall({ call, toolRegistry }) {
   const tool = toolRegistry?.get?.(call.name);
   const gate = resultStatusForTool(tool);
@@ -86,6 +95,7 @@ export async function runToolLoop({
   toolRegistry,
   maxIterations = 5,
   recovery,
+  policy = null,
 } = {}) {
   if (!modelGateway?.call) {
     throw new Error('Tool loop requires a modelGateway with call()');
@@ -104,9 +114,12 @@ export async function runToolLoop({
     : null;
 
   function resultPayload(payload) {
-    if (!recoveryManager) return payload;
+    const withPolicy = policy
+      ? { ...payload, policy: policyMetadata(policy) }
+      : payload;
+    if (!recoveryManager) return withPolicy;
     return {
-      ...payload,
+      ...withPolicy,
       recoveryEvents: [...recoveryManager.events],
     };
   }
