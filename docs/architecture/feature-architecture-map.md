@@ -282,6 +282,7 @@ Start here for common questions:
 - "How are verifiers selected?" Read `src/harness-sidecar/tools/verifierSelector.js`.
 - "How does visual verification work?" Read `src/harness-sidecar/vlm/visualVerifier.js`.
 - "How does verifier evolution work?" Read `src/harness-sidecar/meta/verifierEvolutionLoop.js`.
+- "How should swarm use meta evolution?" Read `docs/architecture/swarm-evolution-integration-plan.md`.
 - "Where are approvals handled?" Read `src/harness-sidecar/core/approvalResume.js`.
 - "Where are traces written?" Read `src/harness-sidecar/core/traceWriter.js`.
 - "Where is UI state shown?" Read `public/app.js`.
