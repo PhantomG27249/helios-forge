@@ -43,6 +43,8 @@ Source baseline for the Claude Code comparison:
 | Memory decay and contradiction pressure | Downgrade stale memories, quarantine contradicted lessons, and record when memory hurt a run. | Durable memory is only valuable if it can be corrected. | `src/harness-sidecar/memory/*`, `src/harness-sidecar/graph/claimEvidenceGraph.js` |
 | Tool schema fuzzing | Fuzz registered tool schemas, MCP envelopes, path inputs, and malformed model tool calls. | Hardens the machinery the model depends on most. | `src/harness-sidecar/tools/*`, `src/harness-sidecar/reliability/toolCallRecovery.js` |
 | Confidence budgeting | Treat confidence as a budget across context, memory, verifier, visual, and final-audit signals. | When confidence is low, the harness should spend more verification before acting. | `src/harness-sidecar/budget/*`, `src/harness-sidecar/tools/finalValidator.js` |
+| TreeQuest-style adaptive search scheduler | Explore an optional AB-MCTS backend inspired by SakanaAI TreeQuest for batched ask/tell search over model, tool, verifier, visual, and refinement actions. | Current ToolTree/BES already provides tree search and evolution, but adaptive branching could spend inference-time compute more intelligently on hard tasks. | `src/harness-sidecar/bes/toolTreePlanner.js`, `src/harness-sidecar/bes/bidirectionalSearchLoop.js`, `src/harness-sidecar/swarm/attemptScheduler.js` |
+| Evidence-gated autonomous approvals | Explore policy-limited auto-approval for narrow, reversible, low-risk changes when verifier evidence, held-out replay, rollback, budget, and trust-tier constraints all pass. | Lets long-running harness evolution continue without a human watching every safe micro-promotion, while preserving hard stops for risky mutations. | `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/meta/promotionPolicy.js`, `src/harness-sidecar/tools/verifierConfigApply.js` |
 
 ## Recommended Spine
 
@@ -160,6 +162,7 @@ This gives every future meta-harness improvement a way to prove itself before it
 | More dashboards create noise. | Show operator-grade summaries first; keep raw traces behind drill-down views. |
 | Parallel agents create merge conflicts. | Prefer read-heavy subagents; isolate write-heavy attempts in worktrees; require controlled champion apply. |
 | MCP and external tools leak trust. | Fingerprint capabilities, require trust tiers, scan model-visible fields, and log tool provenance. |
+| Fully autonomous approval becomes a self-approval loophole. | Only allow auto-approval through explicit policy tiers, shadow/replay evidence, rollback records, bounded blast radius, immutable audit logs, and deny-by-default gates for branch mutation, secrets, external network, MCP writes, cost increases, and verifier safety weakening. |
 
 ## Proposed Implementation Waves
 
@@ -211,6 +214,17 @@ Turn internal orchestration into configurable, inspectable machinery.
 - Add trusted lifecycle hooks for tool, verifier, approval, trace, memory, and final-audit events.
 - Add a small CLI for trace replay, verifier score, capability audit, and eval corpus runs.
 
+### Wave F: Adaptive Search And Autonomous Approval Research
+
+Explore stronger inference-time search and safe unattended evolution without replacing the current BES/RHO/verifier spine.
+
+- Prototype a TreeQuest-style AB-MCTS scheduler behind a feature flag, using Helios actions as search actions and normalized BES/RHO/verifier/VLM scores as node scores.
+- Add batched ask/tell semantics so subagents, model calls, visual checks, and verifier runs can complete out of order while still updating the same search tree.
+- Compare adaptive branching against the existing ToolTree planner on trace replay, adversarial tasks, visual verifier tasks, and meta-harness promotion candidates.
+- Define auto-approval tiers: `never`, `shadow_only`, `local_config_only`, `reversible_workspace_change`, and `human_required`.
+- Permit autonomous approval only for changes with passing held-out evaluation, no cost/security regression, rollback metadata, low blast radius, and trusted capability provenance.
+- Keep branch mutation, external network expansion, secret-bearing config, verifier safety weakening, and MCP write-scope expansion human-required by default.
+
 ## Priority Ranking
 
 | Rank | Work | Effort | Impact | Why now |
@@ -226,6 +240,8 @@ Turn internal orchestration into configurable, inspectable machinery.
 | 9 | Named agent profiles | Medium | Medium/high | Makes swarm behavior configurable and inspectable. |
 | 10 | Hook bus | Medium | Medium/high | Lets local policy enforce itself without burying logic in the sidecar. |
 | 11 | Helios CLI | Small/medium | Medium | Makes eval, trace, and verifier workflows scriptable. |
+| 12 | TreeQuest-style adaptive search | Medium | Medium/high | Could make BES/ToolTree spend model and verifier budget more intelligently on difficult tasks. |
+| 13 | Evidence-gated autonomous approvals | Medium/high | High | Enables unattended safe evolution for low-risk changes while preserving hard human gates. |
 
 ## Bottom Line
 
