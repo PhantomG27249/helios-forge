@@ -27,6 +27,8 @@ let autoHarnessEnabled = true;
 let lastBackgroundHarnessAt = 0;
 const HARNESS_BACKGROUND_COOLDOWN_MS = 1500;
 const DEFAULT_HARNESS_BUDGET = { maxToolCalls: 20, maxWallMinutes: 15 };
+const HARNESS_MAX_SUBAGENTS = 50;
+let harnessRenderScheduled = false;
 let harnessState = {
   status: 'unknown',
   activeTasks: new Map(),
@@ -427,7 +429,7 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_task_started' && msg.data) {
     harnessState.activeTasks.set(msg.data.taskId, msg.data);
-    renderHarnessPanel();
+    scheduleHarnessRender({ immediate: true });
     toast('Harness task started', 'success');
     return;
   }
@@ -438,7 +440,7 @@ function handleMessage(msg) {
   if (msg.type === 'harness_approval_resolved' && msg.data) {
     harnessState.pendingApprovals.delete(msg.data.actionId);
     closeModal('harness-approval');
-    renderHarnessPanel();
+    scheduleHarnessRender({ immediate: true });
     toast(`Approval ${msg.data.choice}`, 'success');
     return;
   }
@@ -507,7 +509,26 @@ function handleMessage(msg) {
 
 function updateHarnessStatus(status) {
   harnessState.status = status.state || 'unknown';
-  renderHarnessPanel();
+  scheduleHarnessRender({ immediate: true });
+}
+
+function scheduleHarnessRender({ immediate = false } = {}) {
+  if (immediate) {
+    harnessRenderScheduled = false;
+    renderHarnessPanel();
+    return;
+  }
+  if (harnessRenderScheduled) return;
+  harnessRenderScheduled = true;
+  const run = () => {
+    harnessRenderScheduled = false;
+    renderHarnessPanel();
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(run);
+  } else {
+    setTimeout(run, 16);
+  }
 }
 
 function handleHarnessEvent(event) {
@@ -524,6 +545,7 @@ function handleHarnessEvent(event) {
   }
 
   updateHarnessSubagent(event);
+  pruneHarnessSubagents();
   updateHarnessVerifierEvolution(event);
   updateHarnessPolicyEvolution(event);
 
@@ -540,7 +562,7 @@ function handleHarnessEvent(event) {
     updateHarnessVerifierEvolution(event);
   }
 
-  renderHarnessPanel();
+  scheduleHarnessRender();
 }
 
 function updateHarnessPolicyEvolution(event) {
@@ -670,6 +692,28 @@ function updateHarnessSubagent(event) {
     patchStats: event.patchStats || existing.patchStats,
     updatedAt: event.completedAt || event.startedAt || new Date().toISOString(),
   });
+}
+
+function pruneHarnessSubagents() {
+  if (harnessState.subagents.size <= HARNESS_MAX_SUBAGENTS) return;
+
+  const records = Array.from(harnessState.subagents.values())
+    .sort((a, b) => {
+      const aActive = ['running', 'scheduled'].includes(a.status) ? 1 : 0;
+      const bActive = ['running', 'scheduled'].includes(b.status) ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    });
+  const keep = new Set(records
+    .slice(0, HARNESS_MAX_SUBAGENTS)
+    .map(agent => agent.attemptId)
+    .filter(Boolean));
+
+  for (const attemptId of harnessState.subagents.keys()) {
+    if (!keep.has(attemptId)) {
+      harnessState.subagents.delete(attemptId);
+    }
+  }
 }
 
 function renderHarnessSubagents() {

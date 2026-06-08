@@ -60,6 +60,28 @@ test('harness panel exposes live subagent activity', async () => {
   assert.match(appJs, /renderHarnessSubagents/);
 });
 
+test('harness events coalesce panel renders so approval controls stay responsive', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+  const handlerStart = appJs.indexOf('function handleHarnessEvent(event)');
+  const handlerEnd = appJs.indexOf('function updateHarnessPolicyEvolution', handlerStart);
+  const handler = appJs.slice(handlerStart, handlerEnd);
+
+  assert.match(appJs, /let harnessRenderScheduled = false/);
+  assert.match(appJs, /function scheduleHarnessRender\(\{ immediate = false \} = \{\}\)/);
+  assert.match(appJs, /requestAnimationFrame\(run\)/);
+  assert.match(handler, /scheduleHarnessRender\(\);/);
+  assert.doesNotMatch(handler, /\n\s*renderHarnessPanel\(\);\s*\n\}/);
+});
+
+test('harness subagent render state is bounded during event bursts', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(appJs, /const HARNESS_MAX_SUBAGENTS = \d+/);
+  assert.match(appJs, /function pruneHarnessSubagents\(\)/);
+  assert.match(appJs, /harnessState\.subagents\.size <= HARNESS_MAX_SUBAGENTS/);
+  assert.match(appJs, /pruneHarnessSubagents\(\);/);
+});
+
 test('harness panel recognizes evolution-aware swarm feedback events', async () => {
   const appJs = await readFile('public/app.js', 'utf8');
 
@@ -90,6 +112,6 @@ test('harness panel exposes verifier evolution operator visibility', async () =>
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250618/);
-  assert.match(html, /app\.js\?v=20250618/);
+  assert.match(html, /app\.css\?v=20250619/);
+  assert.match(html, /app\.js\?v=20250619/);
 });
