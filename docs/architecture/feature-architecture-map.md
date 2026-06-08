@@ -312,6 +312,7 @@ Start here for common questions:
 - "How do swarm outcomes feed evolution?" Read `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`.
 - "Which policies can evolve in shadow mode?" Read `src/harness-sidecar/meta/*PolicyEvolution.js`.
 - "How should swarm use meta evolution?" Read `docs/architecture/swarm-evolution-integration-plan.md`.
+- "How should subagents and swarm traces appear in the UI?" Read `docs/architecture/subagent-swarm-ui-and-tracing-plan.md`.
 - "Where else should RHO/BES/evolution expand?" Read `docs/architecture/rho-bes-evolution-expansion-roadmap.md`.
 - "What are the subagent implementation plans?" Read `docs/superpowers/plans/2026-06-08-evolution-aware-swarm-and-rho-bes-expansion-subagent-plans.md`.
 - "Where are approvals handled?" Read `src/harness-sidecar/core/approvalResume.js`.
