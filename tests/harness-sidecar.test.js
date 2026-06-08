@@ -207,6 +207,20 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     assert.equal(coresetEvent.selectedCount >= 1, true);
     assert.equal(coresetEvent.items.some((item) => item.taskId === body.taskId), true);
 
+    const unifiedContextEvent = events.find((event) => event.type === 'context.unified_context_composed');
+    assert.equal(Boolean(unifiedContextEvent), true);
+    assert.equal(unifiedContextEvent.taskId, body.taskId);
+    assert.equal(unifiedContextEvent.contextPackId.startsWith('ctx_'), true);
+    assert.equal(unifiedContextEvent.sources.includes('workspace_rag'), true);
+    assert.equal(unifiedContextEvent.sources.includes('promoted_memory'), true);
+    assert.equal(unifiedContextEvent.sources.includes('knowledge_graph'), true);
+    assert.equal(unifiedContextEvent.sourceCounts.workspace_rag >= 1, true);
+    assert.equal(unifiedContextEvent.sourceCounts.promoted_memory >= 1, true);
+    assert.equal(unifiedContextEvent.sourceCounts.knowledge_graph >= 1, true);
+    assert.equal(unifiedContextEvent.itemCount >= 3, true);
+    assert.equal(unifiedContextEvent.sourceLabels.some((label) => label.startsWith('memory:')), true);
+    assert.equal(unifiedContextEvent.sourceLabels.some((label) => label.startsWith('graph:run:')), true);
+
     const besMetaEvent = events.find((event) => event.type === 'bes.meta_candidates_generated');
     assert.equal(besMetaEvent.candidateCount, 4);
     assert.equal(Boolean(besMetaEvent.champion), true);
@@ -223,6 +237,22 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'utf8',
     );
     assert.match(memoryContent, /exercise every harness subsystem/);
+    const graphSnapshotEvent = events.find((event) => event.type === 'memory.graph_snapshot_maintained');
+    assert.equal(Boolean(graphSnapshotEvent), true);
+    assert.equal(graphSnapshotEvent.nodeCount >= 2, true);
+    assert.equal(graphSnapshotEvent.rankedContextItemCount >= 1, true);
+
+    const graphSnapshot = JSON.parse(await readFile(
+      path.join(workspaceRoot, '.harness', 'memory', 'graph-snapshot.json'),
+      'utf8',
+    ));
+    assert.equal(graphSnapshot.schemaVersion, 1);
+    assert.equal(
+      graphSnapshot.nodes.some((node) => node.kind === 'memory' && node.source === 'promoted_memory'),
+      true,
+    );
+    assert.equal(graphSnapshot.nodes.some((node) => node.kind === 'trace' && node.taskId === body.taskId), true);
+    assert.equal(graphSnapshot.rankedContextItems.some((item) => item.source === 'graph_memory'), true);
 
     const tracePath = path.join(workspaceRoot, '.harness', 'traces', body.taskId, 'events.jsonl');
     const traceContent = await readFile(tracePath, 'utf8');
@@ -306,6 +336,10 @@ test('full runtime invokes VLM observation when configured model supports vision
       assert.equal(vlmEvent.score, 0.86);
       assert.equal(vlmEvent.risks.length, 1);
       assert.equal(vlmEvent.model.model, 'local-test-vlm');
+      const toolRegistryEvent = events.find((event) => event.type === 'tools.default_registry_available');
+      assert.equal(Boolean(toolRegistryEvent), true);
+      assert.deepEqual(toolRegistryEvent.toolNames, ['mcp.call', 'shell.run', 'verifier.run']);
+      assert.equal(toolRegistryEvent.toolLoopReady, true);
 
       unsubscribe();
     },

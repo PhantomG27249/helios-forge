@@ -30,6 +30,7 @@ import { buildClaimEvidenceGraph } from './graph/claimEvidenceGraph.js';
 import { createCodeGraphFromIndex } from './graph/codeGraph.js';
 import { buildExperimentGraph } from './graph/experimentGraph.js';
 import { buildVisualGraph } from './graph/visualGraph.js';
+import { maintainGraphMemorySnapshot } from './memory/graphMemoryMaintenance.js';
 import { retrievePromotedMemory } from './memory/memoryRetriever.js';
 import { promoteMemoryCandidates } from './memory/promotionPolicy.js';
 import { decideReflectionGate } from './memory/reflectionGate.js';
@@ -42,6 +43,7 @@ import { HarnessOptimizer } from './meta/harnessOptimizer.js';
 import { evaluatePromotion } from './meta/promotionPolicy.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
+import { composeUnifiedContext } from './rag/unifiedContextComposer.js';
 import { buildRhoCoreset } from './rho/coresetBuilder.js';
 import { judgeCandidatePreference } from './rho/preferenceJudge.js';
 import { auditCitations } from './research/citationAuditor.js';
@@ -63,6 +65,7 @@ import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
+import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
 import { runVerifiers } from './tools/verifierRunner.js';
 import { interpretDiagram } from './vlm/diagramInterpreter.js';
 import { createFigureCropArtifact } from './vlm/figureCropper.js';
@@ -164,6 +167,14 @@ function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function countContextSources(items = []) {
+  return items.reduce((counts, item) => {
+    const source = item?.source || 'unknown';
+    counts[source] = (counts[source] || 0) + 1;
+    return counts;
+  }, {});
+}
+
 async function loadCapabilityStore() {
   return import(CAPABILITY_STORE_MODULE);
 }
@@ -172,6 +183,9 @@ export function createHarnessSidecar({
   workspaceRoot = process.cwd(),
   port = 49321,
   modelProviderFactory = createOpenAICompatibleProvider,
+  swarmWorktreeManager,
+  swarmCommandAdapter,
+  swarmVerifierAdapter,
 } = {}) {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
   const subscribers = new Set();
@@ -348,6 +362,20 @@ export function createHarnessSidecar({
       'audit',
     ];
     const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
+    if (runtimeSwarmModel) {
+      const defaultToolRegistry = createDefaultToolRegistry({
+        workspaceRoot: resolvedWorkspaceRoot,
+        emitEvent,
+      });
+      const toolNames = defaultToolRegistry.list().map((tool) => tool.name).sort();
+      await emitEvent({
+        type: 'tools.default_registry_available',
+        taskId: task.taskId,
+        toolCount: toolNames.length,
+        toolNames,
+        toolLoopReady: true,
+      });
+    }
     await emitEvent({
       type: 'harness_runtime.enabled',
       taskId: task.taskId,
@@ -523,6 +551,27 @@ export function createHarnessSidecar({
       eventCount: traceSummary.eventCount,
       failureModes: traceSummary.failureModes,
       budgetGateCount: traceSummary.budgetGates.length,
+    });
+    const graphMemoryTraceSummary = {
+      traceId: `trace_${task.taskId}`,
+      taskId: task.taskId,
+      summary: `Runtime trace for ${task.task}`,
+      memoryIds: promotionResult.promoted.map((record) => record.memoryId),
+      outcome: 'pending_approval',
+    };
+    const graphMemorySnapshot = await maintainGraphMemorySnapshot({
+      workspaceRoot: resolvedWorkspaceRoot,
+      promotedMemories: promotionResult.promoted,
+      traceSummaries: [graphMemoryTraceSummary],
+    });
+    await emitEvent({
+      type: 'memory.graph_snapshot_maintained',
+      taskId: task.taskId,
+      snapshotPath: path.join(resolvedWorkspaceRoot, '.harness', 'memory', 'graph-snapshot.json'),
+      nodeCount: graphMemorySnapshot.nodeCount,
+      edgeCount: graphMemorySnapshot.edgeCount,
+      rankedContextItemCount: graphMemorySnapshot.snapshot.rankedContextItems.length,
+      promotedMemoryIds: promotionResult.promoted.map((record) => record.memoryId),
     });
 
     const recentTraceSummaries = await listTraces({ workspaceRoot: resolvedWorkspaceRoot });
@@ -964,6 +1013,42 @@ export function createHarnessSidecar({
       itemCount: graphRagContext.items.length,
       items: graphRagContext.items,
     });
+    const executionContextPack = composeUnifiedContext({
+      taskId: task.taskId,
+      profile: harnessConfig?.defaults?.contextProfile || contextPack.profile,
+      workspaceItems: contextPack.items,
+      memoryItems: promotedMemoryContext,
+      graphMemoryItems: graphMemorySnapshot.snapshot.rankedContextItems,
+      graphItems: graphRagContext.items,
+      maxTokens: 6000,
+    });
+    await emitEvent({
+      type: 'context.unified_context_composed',
+      taskId: task.taskId,
+      contextPackId: executionContextPack.contextPackId,
+      profile: executionContextPack.profile,
+      itemCount: executionContextPack.items.length,
+      tokensEstimated: executionContextPack.tokensEstimated,
+      sourceCounts: countContextSources(executionContextPack.items),
+      sources: executionContextPack.sources,
+      sourceLabels: executionContextPack.sourceLabels,
+      excludedDueToBudget: executionContextPack.excludedDueToBudget,
+    });
+
+    const defaultSwarmCommandAdapter = async ({ attempt }) => ({
+      summary: `Dry-run attempt ${attempt.attemptId} evaluated by full runtime.`,
+      patch: `attempt:${attempt.attemptId}`,
+      stdout: `Dry-run attempt ${attempt.attemptId} completed.\n`,
+      exitCode: 0,
+      verifierEvidence: [{ artifactId: patchArtifact.artifactId, status: 'passed' }],
+      score: subgoalScore.percent - Math.max(0, attempt.index || 0),
+      patchStats: { changedLines: Math.max(1, (attempt.index || 0) + 1) },
+    });
+    const worktreeOptIn = harnessConfig?.features?.worktreeSwarm === true
+      || process.env.HELIOS_SWARM_WORKTREE === '1';
+    const injectedSafeWorktree = Boolean(swarmWorktreeManager && swarmCommandAdapter);
+    const useWorktreeOptions = !runtimeSwarmModel && (worktreeOptIn || injectedSafeWorktree);
+    const swarmCommandRunner = swarmCommandAdapter || defaultSwarmCommandAdapter;
 
     const swarmRun = await orchestrateSwarm({
       task,
@@ -976,7 +1061,7 @@ export function createHarnessSidecar({
         rootState: {
           taskId: task.taskId,
           taskType: 'coding_bugfix',
-          contextPackId: contextPack.contextPackId,
+          contextPackId: executionContextPack.contextPackId,
           subgoalScore: subgoalScore.percent,
         },
         budget: {
@@ -997,7 +1082,7 @@ export function createHarnessSidecar({
               strategy: strategy.name,
               budgetWeight: strategy.budgetWeight,
               subgoalScore: subgoalScore.percent,
-              contextItems: contextPack.items.length,
+              contextItems: executionContextPack.items.length,
             },
           }));
         },
@@ -1008,20 +1093,18 @@ export function createHarnessSidecar({
         },
       },
       context: {
-        contextPackId: contextPack.contextPackId,
-        allowedFiles: contextPack.items.map((item) => item.path),
+        contextPackId: executionContextPack.contextPackId,
+        allowedFiles: executionContextPack.items.map((item) => item.path).filter(Boolean),
+        sourceLabels: executionContextPack.sourceLabels,
       },
       budget: { maxOutputChars: 1200 },
       modelGateway: runtimeSwarmModel?.gateway,
       modelProfileName: runtimeSwarmModel?.profileName,
       onAttemptEvent: emitEvent,
-      commandAdapter: async ({ attempt }) => ({
-        summary: `Dry-run attempt ${attempt.attemptId} evaluated by full runtime.`,
-        patch: `attempt:${attempt.attemptId}`,
-        verifierEvidence: [{ artifactId: patchArtifact.artifactId, status: 'passed' }],
-        score: subgoalScore.percent - Math.max(0, attempt.index || 0),
-        patchStats: { changedLines: Math.max(1, (attempt.index || 0) + 1) },
-      }),
+      commandAdapter: swarmCommandRunner,
+      verifierAdapter: useWorktreeOptions ? swarmVerifierAdapter : undefined,
+      workspaceRoot: useWorktreeOptions ? resolvedWorkspaceRoot : undefined,
+      worktreeManager: useWorktreeOptions ? swarmWorktreeManager : undefined,
     });
     const attempts = swarmRun.attempts;
     const champion = swarmRun.champion || chooseChampion(attempts);
