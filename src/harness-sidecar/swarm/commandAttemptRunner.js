@@ -14,7 +14,9 @@ export async function runCommandAttempt({
   attempt = {},
   worktreePath,
   command,
+  verifierCommand,
   commandAdapter,
+  verifierAdapter,
   timeoutMs,
 } = {}) {
   if (typeof commandAdapter !== 'function') {
@@ -45,13 +47,39 @@ export async function runCommandAttempt({
       durationMs: commandResult?.durationMs,
     },
   ];
+  const adapterEvidence = Array.isArray(commandResult?.verifierEvidence)
+    ? commandResult.verifierEvidence
+    : [];
+  verifierEvidence.push(...adapterEvidence);
+
+  let verifierExitCode = null;
+  if (typeof verifierAdapter === 'function') {
+    const verifierResult = await verifierAdapter({
+      attempt,
+      command: verifierCommand,
+      cwd: worktreePath,
+      timeoutMs,
+    });
+    verifierExitCode = Number.isFinite(verifierResult?.exitCode) ? verifierResult.exitCode : 1;
+    verifierEvidence.push({
+      command: verifierCommand,
+      cwd: worktreePath,
+      exitCode: verifierExitCode,
+      stdout: normalizeText(verifierResult?.stdout),
+      stderr: normalizeText(verifierResult?.stderr),
+      durationMs: verifierResult?.durationMs,
+    });
+  }
+
+  const passed = exitCode === 0 && (verifierExitCode === null || verifierExitCode === 0);
 
   return {
     attemptId: attempt.attemptId,
     strategy: attempt.strategy,
     patch,
     verifierEvidence,
-    score: Number.isFinite(commandResult?.score) ? commandResult.score : (exitCode === 0 ? 100 : 0),
+    passed,
+    score: Number.isFinite(commandResult?.score) ? commandResult.score : (passed ? 100 : 0),
     patchStats: commandResult?.patchStats || inferPatchStats(patch),
     command: {
       text: command,

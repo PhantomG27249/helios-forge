@@ -57,6 +57,44 @@ test('failed command attempt includes verifier evidence and zero score', async (
   assert.match(result.verifierEvidence[0].stderr, /focused failure/);
 });
 
+test('command attempt runs verifier adapter in the same worktree cwd', async () => {
+  const calls = [];
+  const result = await runCommandAttempt({
+    attempt: { attemptId: 'attempt_verify', strategy: 'minimal_patch' },
+    worktreePath: 'C:\\workspace\\.harness\\attempt_verify',
+    command: 'npm run build',
+    verifierCommand: 'node --test tests/focused.test.js',
+    commandAdapter: async (input) => {
+      calls.push(['command', input.cwd]);
+      return {
+        patch: 'diff --git a/src/harness-sidecar/swarm/worktreeAttemptRunner.js b/src/harness-sidecar/swarm/worktreeAttemptRunner.js\n+ok\n',
+        stdout: 'build ok\n',
+        exitCode: 0,
+      };
+    },
+    verifierAdapter: async (input) => {
+      calls.push(['verifier', input.cwd]);
+      return {
+        stdout: 'TAP version 13\nok 1 - focused\n',
+        exitCode: 0,
+        durationMs: 9,
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ['command', 'C:\\workspace\\.harness\\attempt_verify'],
+    ['verifier', 'C:\\workspace\\.harness\\attempt_verify'],
+  ]);
+  assert.equal(result.score, 100);
+  assert.deepEqual(result.verifierEvidence.map((evidence) => evidence.command), [
+    'npm run build',
+    'node --test tests/focused.test.js',
+  ]);
+  assert.equal(result.verifierEvidence[1].exitCode, 0);
+  assert.match(result.verifierEvidence[1].stdout, /focused/);
+});
+
 test('champion apply refuses unapproved apply', async () => {
   const workspaceRoot = path.resolve('C:/workspace/helios-forge');
   const champion = {

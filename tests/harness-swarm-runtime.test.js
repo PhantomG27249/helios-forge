@@ -192,6 +192,151 @@ test('swarm orchestrator schedules multiple attempts and selects champion from v
   assert.deepEqual(result.recombination.sourceAttemptIds, ['attempt_2', 'attempt_3']);
 });
 
+test('swarm orchestrator runs real command attempts inside isolated worktrees and cleans up', async () => {
+  const lifecycle = [];
+  const commandCwds = [];
+  const verifierCwds = [];
+  const worktreeManager = {
+    async isGitRepo() {
+      lifecycle.push(['isGitRepo']);
+      return true;
+    },
+    async createAttemptWorktree({ taskId, attemptId }) {
+      lifecycle.push(['create', taskId, attemptId]);
+      return {
+        available: true,
+        taskId,
+        attemptId,
+        branchName: `harness/${taskId}/${attemptId}`,
+        worktreePath: `C:\\repo\\.harness\\worktrees\\${taskId}\\${attemptId}`,
+      };
+    },
+    async removeAttemptWorktree(attemptWorktree) {
+      lifecycle.push(['remove', attemptWorktree.attemptId]);
+    },
+  };
+
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_worktree', goal: 'Run isolated attempts.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 2,
+    workspaceRoot: 'C:\\repo',
+    worktreeManager,
+    command: 'npm run attempt',
+    verifierCommand: 'node --test tests/harness-swarm-runtime.test.js',
+    commandAdapter: async ({ attempt, cwd }) => {
+      commandCwds.push([attempt.attemptId, cwd]);
+      return {
+        patch: `diff --git a/src/harness-sidecar/swarm/${attempt.attemptId}.js b/src/harness-sidecar/swarm/${attempt.attemptId}.js\n+ok\n`,
+        stdout: 'attempt ok\n',
+        exitCode: 0,
+      };
+    },
+    verifierAdapter: async ({ attempt, cwd }) => {
+      verifierCwds.push([attempt.attemptId, cwd]);
+      return {
+        stdout: `verified ${attempt.attemptId}\n`,
+        exitCode: 0,
+      };
+    },
+  });
+
+  assert.deepEqual(commandCwds, [
+    ['attempt_1', 'C:\\repo\\.harness\\worktrees\\task_worktree\\attempt_1'],
+    ['attempt_2', 'C:\\repo\\.harness\\worktrees\\task_worktree\\attempt_2'],
+  ]);
+  assert.deepEqual(verifierCwds, commandCwds);
+  assert.deepEqual(lifecycle, [
+    ['isGitRepo'],
+    ['create', 'task_worktree', 'attempt_1'],
+    ['remove', 'attempt_1'],
+    ['isGitRepo'],
+    ['create', 'task_worktree', 'attempt_2'],
+    ['remove', 'attempt_2'],
+  ]);
+  assert.equal(result.runMode.mode, 'real');
+  assert.deepEqual(result.attempts.map((attempt) => attempt.worker.kind), [
+    'worktree_command',
+    'worktree_command',
+  ]);
+  assert.deepEqual(result.attempts.map((attempt) => attempt.worktree.cleanedUp), [true, true]);
+  assert.equal(result.attempts[0].verifierEvidence.length, 2);
+  assert.equal(result.champion.verifierPassed, true);
+});
+
+test('swarm orchestrator cleans up worktree attempts after command adapter failure', async () => {
+  const lifecycle = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_worktree_failure', goal: 'Clean up failed worktree.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    workspaceRoot: 'C:\\repo',
+    worktreeManager: {
+      async isGitRepo() {
+        return true;
+      },
+      async createAttemptWorktree({ attemptId }) {
+        lifecycle.push(['create', attemptId]);
+        return {
+          available: true,
+          attemptId,
+          branchName: `harness/task_worktree_failure/${attemptId}`,
+          worktreePath: `C:\\repo\\.harness\\worktrees\\task_worktree_failure\\${attemptId}`,
+        };
+      },
+      async removeAttemptWorktree(attemptWorktree) {
+        lifecycle.push(['remove', attemptWorktree.attemptId]);
+      },
+    },
+    commandAdapter: async () => {
+      throw new Error('attempt command failed');
+    },
+  });
+
+  assert.deepEqual(lifecycle, [
+    ['create', 'attempt_1'],
+    ['remove', 'attempt_1'],
+  ]);
+  assert.equal(result.attempts[0].status, 'failed');
+  assert.equal(result.attempts[0].failure.reason, 'worktree_command_failed');
+  assert.match(result.attempts[0].failure.message, /attempt command failed/);
+  assert.equal(result.attempts[0].worktree.cleanedUp, true);
+});
+
+test('swarm orchestrator marks worktree attempt verifier failed when verifier adapter fails', async () => {
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_worktree_verifier_fail', goal: 'Report failed verifier.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    workspaceRoot: 'C:\\repo',
+    worktreeManager: {
+      async isGitRepo() {
+        return true;
+      },
+      async createAttemptWorktree({ attemptId }) {
+        return {
+          available: true,
+          attemptId,
+          worktreePath: `C:\\repo\\.harness\\worktrees\\task_worktree_verifier_fail\\${attemptId}`,
+        };
+      },
+      async removeAttemptWorktree() {},
+    },
+    commandAdapter: async () => ({
+      patch: 'diff --git a/src/harness-sidecar/swarm/a.js b/src/harness-sidecar/swarm/a.js\n+ok\n',
+      exitCode: 0,
+    }),
+    verifierAdapter: async () => ({
+      stderr: 'not ok 1 - verifier failed\n',
+      exitCode: 1,
+    }),
+  });
+
+  assert.equal(result.attempts[0].score, 0);
+  assert.equal(result.attempts[0].verifierPassed, false);
+  assert.equal(result.attempts[0].verifierEvidence.at(-1).exitCode, 1);
+});
+
 test('swarm orchestrator preserves deterministic dry-run fallback without a model executor', async () => {
   const result = await orchestrateSwarm({
     task: { taskId: 'task_dry_run', goal: 'Stay deterministic offline.' },

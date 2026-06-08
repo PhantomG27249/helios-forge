@@ -4,6 +4,7 @@ import { runModelDrivenAttempt } from './modelDrivenWorker.js';
 import { recombineApprovedOutputs } from './recombiner.js';
 import { reviewAttempt } from './reviewer.js';
 import { runSubagentAttempt } from './subagentRunner.js';
+import { runWorktreeAttempt } from './worktreeAttemptRunner.js';
 
 function buildRiskPolicy(context = {}, riskPolicy = {}) {
   return {
@@ -93,6 +94,12 @@ async function runScheduledAttempt({
   budget,
   outputContract,
   commandAdapter,
+  verifierAdapter,
+  command,
+  verifierCommand,
+  timeoutMs,
+  workspaceRoot,
+  worktreeManager,
   modelGateway,
   modelProvider,
   modelExecutor,
@@ -164,6 +171,38 @@ async function runScheduledAttempt({
     }
   }
 
+  if (commandAdapter && (workspaceRoot || worktreeManager)) {
+    const runnerResult = await runWorktreeAttempt({
+      task: { ...task, taskId },
+      attempt: scheduledAttempt,
+      role,
+      workspaceRoot,
+      worktreeManager,
+      command,
+      verifierCommand,
+      commandAdapter,
+      verifierAdapter,
+      timeoutMs,
+      outputContract,
+    });
+
+    if (runnerResult.status !== 'unavailable') {
+      const verifierEvidence = runnerResult.verifierEvidence || [];
+      return {
+        ...scheduledAttempt,
+        ...runnerResult,
+        worker: {
+          kind: 'worktree_command',
+        },
+        verifierPassed: runnerResult.passed === true,
+        verifierEvidence,
+        patchStats: runnerResult.patchStats,
+        score: runnerResult.score || 0,
+        failure: runnerResult.failure,
+      };
+    }
+  }
+
   const runnerResult = await runSubagentAttempt({
     task,
     attempt: scheduledAttempt,
@@ -204,6 +243,12 @@ export async function orchestrateSwarm({
   budget = {},
   outputContract = { requiredFields: ['patch', 'verifierEvidence'] },
   commandAdapter,
+  verifierAdapter,
+  command,
+  verifierCommand,
+  timeoutMs,
+  workspaceRoot,
+  worktreeManager,
   modelGateway,
   modelProvider,
   modelExecutor,
@@ -221,6 +266,7 @@ export async function orchestrateSwarm({
     modelExecutor,
     provider,
   }));
+  const hasWorktreeWorker = Boolean(commandAdapter && (workspaceRoot || worktreeManager));
   const mode = runMode || (hasModelWorker ? 'model-driven' : (commandAdapter ? 'real' : 'dry-run'));
   const scheduledAttempts = scheduleAttempts({ taskId, taskType, maxAttempts, planner });
   const attempts = [];
@@ -238,7 +284,9 @@ export async function orchestrateSwarm({
       strategy: scheduledAttempt.strategy,
       planning: scheduledAttempt.planning,
       worker: {
-        kind: hasModelWorker ? 'model_driven' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent'),
+        kind: hasModelWorker
+          ? 'model_driven'
+          : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')),
         requestId,
       },
       model: hasModelWorker ? { requestId, profileName: modelProfileName || 'critic_low_temp' } : undefined,
@@ -254,6 +302,12 @@ export async function orchestrateSwarm({
       budget,
       outputContract,
       commandAdapter,
+      verifierAdapter,
+      command,
+      verifierCommand,
+      timeoutMs,
+      workspaceRoot,
+      worktreeManager,
       modelGateway,
       modelProvider,
       modelExecutor,
