@@ -160,6 +160,14 @@ export class McpRuntimeRegistry {
     return { status: 'allowed' };
   }
 
+  evaluateToolResult({ serverId, tool, result }) {
+    const server = this.ensureServer(serverId);
+    if (this.policy && typeof this.policy.evaluateToolResult === 'function') {
+      return this.policy.evaluateToolResult({ serverId, server, tool, result });
+    }
+    return result;
+  }
+
   async callTool(serverId, tool, args = {}, options = {}) {
     const instance = this.getRunning(serverId);
     const decision = this.evaluatePolicy({ serverId, tool, args });
@@ -178,10 +186,11 @@ export class McpRuntimeRegistry {
         options.timeoutMs ?? this.callTimeoutMs,
         `MCP tools/call ${serverId}.${tool}`,
       );
+      const evaluatedResult = this.evaluateToolResult({ serverId, tool, result });
       this.audit({ type: 'mcp.tool.called', serverId, tool, isError: result.isError === true });
       return {
         status: 'completed',
-        ...result,
+        ...evaluatedResult,
       };
     } catch (error) {
       this.audit({ type: 'mcp.tool.failed', serverId, tool, reason: error.message });

@@ -193,3 +193,99 @@ test('tool loop stops when max iterations is reached', async () => {
   assert.equal(result.toolResults.length, 2);
   assert.equal(result.finalText, '');
 });
+
+test('tool loop can repair malformed tool JSON when recovery is explicitly enabled', async () => {
+  const events = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'demo.echo',
+    execute: async (args) => ({ echoed: args.value }),
+  });
+
+  let calls = 0;
+  const result = await runToolLoop({
+    taskId: 'task_repair_tool_json',
+    toolRegistry: registry,
+    recovery: { enabled: true, emitEvent: (event) => events.push(event) },
+    modelGateway: {
+      call: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            text: '{ "tool": "demo.echo", "args": { "value": "fixed" }',
+          };
+        }
+        return { text: 'Recovered and finished.' };
+      },
+    },
+    messages: [{ role: 'user', content: 'Use the tool.' }],
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.toolResults[0].status, 'completed');
+  assert.deepEqual(result.toolResults[0].result, { echoed: 'fixed' });
+  assert.equal(result.recoveryEvents.some((event) => (
+    event.type === 'recovery.failure_classified' &&
+    event.category === 'malformed_tool_call'
+  )), true);
+});
+
+test('tool loop adds available tools to unknown-tool results only when recovery is enabled', async () => {
+  const events = [];
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'safe.echo',
+    execute: async (args) => args,
+  });
+
+  const result = await runToolLoop({
+    taskId: 'task_unknown_tool_recovery',
+    toolRegistry: registry,
+    recovery: { enabled: true, emitEvent: (event) => events.push(event) },
+    modelGateway: {
+      call: async () => ({
+        text: '',
+        toolCalls: [{ id: 'missing', name: 'missing.tool', args: {} }],
+      }),
+    },
+    messages: [{ role: 'user', content: 'Use a missing tool.' }],
+  });
+
+  assert.equal(result.status, 'blocked');
+  assert.deepEqual(result.toolResults[0].recovery.availableTools, ['safe.echo']);
+  assert.equal(events.some((event) => (
+    event.type === 'recovery.failure_classified' &&
+    event.category === 'unknown_tool'
+  )), true);
+});
+
+test('tool loop emits no-progress recovery event for repeated identical failures when enabled', async () => {
+  const events = [];
+
+  const result = await runToolLoop({
+    taskId: 'task_repeated_missing_tool',
+    recovery: {
+      enabled: true,
+      noProgressThreshold: 3,
+      emitEvent: (event) => events.push(event),
+    },
+    modelGateway: {
+      call: async () => ({
+        text: '',
+        toolCalls: [
+          { id: 'missing_1', name: 'missing.tool', args: { path: 'same' } },
+          { id: 'missing_2', name: 'missing.tool', args: { path: 'same' } },
+          { id: 'missing_3', name: 'missing.tool', args: { path: 'same' } },
+        ],
+      }),
+    },
+    messages: [{ role: 'user', content: 'Repeat the same failed call.' }],
+  });
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(events.some((event) => (
+    event.type === 'recovery.no_progress_detected' &&
+    event.category === 'no_progress' &&
+    event.repeatedFailure.category === 'repeated_tool_failure'
+  )), true);
+});

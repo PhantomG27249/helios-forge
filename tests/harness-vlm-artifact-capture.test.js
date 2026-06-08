@@ -105,3 +105,83 @@ test('skips missing adapter capabilities without failing the whole capture', asy
     assert.deepEqual(result.skipped.map((item) => item.kind), ['screenshot', 'visual_diff']);
   });
 });
+
+test('default production workers return unavailable statuses without embedding binary payloads', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const events = [];
+    const result = await captureProductionVisualArtifacts({
+      taskId: 'task_default',
+      workspaceRoot,
+      targetUrl: 'http://127.0.0.1:3777/',
+      beforePath: path.join(workspaceRoot, 'before.png'),
+      afterPath: path.join(workspaceRoot, 'after.png'),
+      emitEvent: (event) => events.push(event),
+    });
+
+    assert.equal(result.outputDir, path.join(workspaceRoot, '.harness', 'visual', 'task_default'));
+    assert.equal(result.artifacts.screenshot, null);
+    assert.equal(result.artifacts.visualDiff, null);
+    assert.deepEqual(result.skipped, [
+      { kind: 'screenshot', reason: 'browser_runtime_required' },
+      { kind: 'visual_diff', reason: 'visual_diff_runtime_required' },
+    ]);
+    assert.equal(events.some((event) => event.type === 'vlm.production_artifacts_created'), true);
+    assert.equal(JSON.stringify(events).includes('PNG'), false);
+  });
+});
+
+test('production capture uses injected worker runtimes and limits OCR metadata text', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const events = [];
+    const pdfPath = path.join(workspaceRoot, 'docs', 'spec.pdf');
+    const beforePath = path.join(workspaceRoot, 'before.png');
+    const afterPath = path.join(workspaceRoot, 'after.png');
+    await mkdir(path.dirname(pdfPath), { recursive: true });
+    await writeFile(pdfPath, 'pdf');
+    await writeFile(beforePath, 'before');
+    await writeFile(afterPath, 'after');
+
+    const result = await captureProductionVisualArtifacts({
+      taskId: 'task_workers',
+      workspaceRoot,
+      targetUrl: 'http://127.0.0.1:3777/',
+      pdfPath,
+      beforePath,
+      afterPath,
+      maxOcrMetadataTextLength: 8,
+      emitEvent: (event) => events.push(event),
+      workerRuntimes: {
+        browserRuntime: {
+          capture: async ({ outputPath }) => {
+            await writeFile(outputPath, Buffer.from('PNGDATA'));
+            return { imagePath: outputPath, width: 320, height: 200 };
+          },
+        },
+        ocrRuntime: {
+          recognize: async () => ({ text: 'text that should be trimmed', confidence: 0.77 }),
+        },
+        pdfRuntime: {
+          renderPages: async ({ outputDir }) => {
+            const imagePath = path.join(outputDir, 'page-1.png');
+            await writeFile(imagePath, Buffer.from('PDFPAGE'));
+            return { pages: [{ pageNumber: 1, imagePath, width: 100, height: 200, textSnippet: 'Page' }] };
+          },
+        },
+        visualDiffRuntime: {
+          compare: async ({ outputPath }) => {
+            await writeFile(outputPath, Buffer.from('DIFFDATA'));
+            return { diffPath: outputPath, summary: 'changed' };
+          },
+        },
+      },
+    });
+
+    assert.equal(result.artifacts.screenshot.metadata.ocrText, 'text tha');
+    assert.equal(result.ocr.text, 'text that should be trimmed');
+    assert.equal(result.artifacts.pdfPages.length, 1);
+    assert.equal(result.artifacts.visualDiff.summary, 'changed');
+    assert.equal(result.outputDir, path.join(workspaceRoot, '.harness', 'visual', 'task_workers'));
+    assert.equal(JSON.stringify(events).includes('PNGDATA'), false);
+    assert.equal(JSON.stringify(result).includes('PNGDATA'), false);
+  });
+});

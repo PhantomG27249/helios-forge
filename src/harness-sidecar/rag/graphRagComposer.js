@@ -11,12 +11,60 @@ function dedupeById(items) {
   });
 }
 
-export function composeGraphRagContext({ graph, queries = [], maxItems = 8 } = {}) {
-  const items = dedupeById(queries.flatMap((query) => queryGraph(graph, query)))
+function impactItemFromFile(item) {
+  return {
+    id: `impact:file:${item.path}`,
+    source: 'code_impact_graph',
+    type: 'file',
+    label: item.path,
+    path: item.path,
+    value: {
+      distance: item.distance,
+      via: item.via,
+    },
+    reason: item.reason,
+    provenance: [],
+  };
+}
+
+function impactItemFromSymbol(item) {
+  return {
+    id: `impact:symbol:${item.symbolId}`,
+    source: 'code_impact_graph',
+    type: 'symbol',
+    label: item.name,
+    path: item.filePath,
+    value: {
+      via: item.via,
+      heuristic: item.heuristic,
+    },
+    reason: item.reason,
+    provenance: [],
+  };
+}
+
+function impactItemsFromAnalysis(impactAnalysis) {
+  if (!impactAnalysis) {
+    return [];
+  }
+  return [
+    ...(impactAnalysis.impactedFiles || []).map(impactItemFromFile),
+    ...(impactAnalysis.impactedSymbols || []).map(impactItemFromSymbol),
+  ];
+}
+
+export function composeGraphRagContext({
+  graph,
+  queries = [],
+  impactAnalysis,
+  maxItems = 8,
+} = {}) {
+  const graphItems = graph ? queries.flatMap((query) => queryGraph(graph, query)) : [];
+  const items = dedupeById([...graphItems, ...impactItemsFromAnalysis(impactAnalysis)])
     .slice(0, maxItems)
     .map((item) => ({
       id: item.id,
-      source: 'knowledge_graph',
+      source: item.source || 'knowledge_graph',
       type: item.type,
       label: item.label,
       path: item.path,
@@ -26,7 +74,16 @@ export function composeGraphRagContext({ graph, queries = [], maxItems = 8 } = {
     }));
 
   return {
-    source: 'knowledge_graph',
+    source: impactAnalysis ? 'knowledge_graph_with_code_impact' : 'knowledge_graph',
     items,
   };
+}
+
+export function composeGraphRagContextWithImpact({
+  graph,
+  queries = [],
+  impactAnalysis,
+  maxItems = 8,
+} = {}) {
+  return composeGraphRagContext({ graph, queries, impactAnalysis, maxItems });
 }

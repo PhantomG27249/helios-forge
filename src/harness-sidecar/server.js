@@ -5,11 +5,14 @@ import { planSubgoals } from './bes/subgoalPlanner.js';
 import { scoreSubgoals } from './bes/subgoalScorer.js';
 import { seedAttemptStrategies } from './bes/strategySeeder.js';
 import { BudgetManager } from './budget/budgetManager.js';
+import { buildBudgetDashboard } from './budget/budgetDashboard.js';
+import { BudgetHierarchy } from './budget/budgetHierarchy.js';
 import { AuditLog } from './collaboration/auditLog.js';
 import { LockService } from './collaboration/locks.js';
 import { VersionedState } from './collaboration/versionedState.js';
 import { WorkspaceLeaseService } from './collaboration/workspaceLeases.js';
 import { loadHarnessConfig } from './config/configLoader.js';
+import { evaluateContextWindow } from './context/contextWindowManager.js';
 import { compileFinalAuditReport } from './core/finalAudit.js';
 import { createApprovalResumeStore, executeApprovedApplyAction } from './core/approvalResume.js';
 import { resumeTaskFromTrace } from './core/taskResume.js';
@@ -28,8 +31,11 @@ import { compileExperimentReport } from './experiments/experimentReports.js';
 import { classifyNoise } from './experiments/noiseGate.js';
 import { RunTracker } from './experiments/runTracker.js';
 import { buildClaimEvidenceGraph } from './graph/claimEvidenceGraph.js';
+import { extractCallGraphFromIndex } from './graph/callGraphHeuristics.js';
 import { createCodeGraphFromIndex } from './graph/codeGraph.js';
 import { buildExperimentGraph } from './graph/experimentGraph.js';
+import { analyzeCodeImpact } from './graph/impactAnalyzer.js';
+import { extractImportGraphFromIndex } from './graph/importGraph.js';
 import { buildVisualGraph } from './graph/visualGraph.js';
 import { maintainGraphMemorySnapshot } from './memory/graphMemoryMaintenance.js';
 import { retrievePromotedMemory } from './memory/memoryRetriever.js';
@@ -49,7 +55,7 @@ import { buildRhoCoreset } from './rho/coresetBuilder.js';
 import { judgeCandidatePreference } from './rho/preferenceJudge.js';
 import { auditCitations } from './research/citationAuditor.js';
 import { findContradictions } from './research/contradictionFinder.js';
-import { createDeepResearchReport } from './research/deepResearchManager.js';
+import { createDeepResearchReport, createDeepResearchV2Artifacts } from './research/deepResearchManager.js';
 import { createImplementationHandoff } from './research/implementationHandoff.js';
 import { compileResearchReport } from './research/reportCompiler.js';
 import { createResearchBrief } from './research/researchBrief.js';
@@ -68,6 +74,8 @@ import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
 import { createGitApplyAdapter } from './tools/gitApplyAdapter.js';
+import { loadVerifierRegistry } from './tools/verifierRegistry.js';
+import { selectVerifiersForTask } from './tools/verifierSelector.js';
 import { startMcpRuntimesFromCapabilities } from './tools/mcpCapabilityRuntime.js';
 import { runToolLoop } from './tools/toolLoopController.js';
 import { runVerifiers } from './tools/verifierRunner.js';
@@ -166,6 +174,35 @@ function normalizeMountResult(mountResult, profileId) {
     manifestPath,
     enabledCounts,
   };
+}
+
+function budgetDashboardSnapshot({ task, budgetManager, contextState, activeSubagents = [], recovery = {} }) {
+  const workspaceScopeId = `workspace:${task.workspaceId || 'local'}`;
+  const taskScopeId = `task:${task.taskId}`;
+  const hierarchy = new BudgetHierarchy({ rootScopeId: workspaceScopeId });
+  hierarchy.defineScope({
+    id: workspaceScopeId,
+    type: 'workspace',
+    limits: { count: Math.max(1, budgetManager.limits.maxToolCalls) },
+  });
+  hierarchy.defineScope({
+    id: taskScopeId,
+    type: 'task',
+    parentId: workspaceScopeId,
+    limits: { count: Math.max(1, budgetManager.limits.maxToolCalls) },
+  });
+  hierarchy.recordUsage({
+    scopeId: taskScopeId,
+    usage: { count: budgetManager.used.toolCalls + budgetManager.used.verifierCalls },
+  });
+
+  return buildBudgetDashboard({
+    context: contextState,
+    budget: hierarchy.snapshot(),
+    subagents: activeSubagents,
+    approvals: [],
+    recovery,
+  });
 }
 
 function makeId(prefix) {
@@ -422,6 +459,11 @@ export function createHarnessSidecar({
         modelGateway: runtimeSwarmModel.gateway,
         toolRegistry: defaultToolRegistry,
         maxIterations: Math.max(1, Math.min(8, task.budget.maxToolCalls || 4)),
+        recovery: {
+          enabled: true,
+          emitEvent,
+          noProgressThreshold: 2,
+        },
         messages: [{
           role: 'user',
           content: [
@@ -931,6 +973,43 @@ export function createHarnessSidecar({
       artifacts: [researchArtifact],
     });
     budgetManager.recordUsage({ scope: 'research', kind: 'artifact', artifacts: 1 });
+    try {
+      const researchV2 = await createDeepResearchV2Artifacts({
+        workspaceRoot: resolvedWorkspaceRoot,
+        runId: task.taskId,
+        question: task.task,
+        sources: sources.map((source) => ({
+          ...source,
+          type: 'local',
+          locator: source.path,
+          content: source.claims.join('\n'),
+          claims: source.claims.map((claim, index) => ({
+            claimId: `${source.sourceId}_claim_${index + 1}`,
+            sourceId: source.sourceId,
+            claim,
+            evidence: [{ sourceId: source.sourceId, quote: claim }],
+            status: 'supported',
+          })),
+        })),
+        contradictions,
+      });
+      await emitEvent({
+        type: 'research.v2_artifacts_created',
+        taskId: task.taskId,
+        runId: researchV2.runId,
+        artifactDir: researchV2.artifactDir,
+        artifactNames: researchV2.artifacts.map((artifact) => artifact.name),
+        figureCandidateCount: researchV2.figureCandidates.length,
+        riskLevel: researchV2.noveltyControls.riskLevel,
+      });
+      budgetManager.recordUsage({ scope: 'research', kind: 'artifact', artifacts: researchV2.artifacts.length });
+    } catch (error) {
+      await emitEvent({
+        type: 'research.v2_artifacts_failed',
+        taskId: task.taskId,
+        reason: error.message,
+      });
+    }
     const implementationHandoff = createImplementationHandoff({
       report: {
         ...research,
@@ -1085,7 +1164,7 @@ export function createHarnessSidecar({
       || harnessConfig?.webPreview?.url
       || null;
     let productionVisualCapture = null;
-    if (visualCaptureAdapter && (previewUrl || harnessConfig?.features?.visualArtifacts === true)) {
+    if (previewUrl || harnessConfig?.features?.visualArtifacts === true) {
       try {
         productionVisualCapture = await captureProductionVisualArtifacts({
           taskId: task.taskId,
@@ -1149,12 +1228,32 @@ export function createHarnessSidecar({
       sourceFiles: workspaceIndex.items.slice(0, 2).map((file) => file.path),
       observations: [{ id: `obs-${task.taskId}`, text: visualDiff.summary }],
     });
+    const changedFilesForImpact = [...new Set(contextPack.items.map((item) => item.path).filter(Boolean))]
+      .slice(0, 4);
+    const importGraph = extractImportGraphFromIndex(workspaceIndex, { taskId: task.taskId });
+    const callGraph = extractCallGraphFromIndex(workspaceIndex, { taskId: task.taskId });
+    const impactAnalysis = analyzeCodeImpact({
+      taskId: task.taskId,
+      changedFiles: changedFilesForImpact,
+      importGraph,
+      callGraph,
+    });
+    await emitEvent({
+      type: 'graph.code_impact_analyzed',
+      taskId: task.taskId,
+      changedFiles: impactAnalysis.changedFiles,
+      impactedFileCount: impactAnalysis.impactedFiles.length,
+      impactedSymbolCount: impactAnalysis.impactedSymbols.length,
+      verifierHints: impactAnalysis.verifierHints,
+      reasons: impactAnalysis.reasons,
+    });
     const graphRagContext = composeGraphRagContext({
       graph: codeGraph,
       queries: [{
         type: 'supporting_runs_for_claim',
         claimId: `runtime-${task.taskId}`,
       }],
+      impactAnalysis,
       maxItems: 4,
     });
     await emitEvent({
@@ -1184,6 +1283,29 @@ export function createHarnessSidecar({
       sources: executionContextPack.sources,
       sourceLabels: executionContextPack.sourceLabels,
       excludedDueToBudget: executionContextPack.excludedDueToBudget,
+    });
+    const contextWindowState = evaluateContextWindow({
+      taskId: task.taskId,
+      maxTokens: 6000,
+      usedTokens: executionContextPack.tokensEstimated,
+      items: executionContextPack.items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        content: item.label || item.value || item.summary || '',
+        path: item.path,
+        priority: item.source === 'promoted_memory' ? 0 : 3,
+        tokensEstimated: item.tokensEstimated || 200,
+      })),
+    });
+    await emitEvent({
+      type: 'context.window_evaluated',
+      taskId: task.taskId,
+      status: contextWindowState.status,
+      threshold: contextWindowState.threshold,
+      pressurePercent: contextWindowState.pressurePercent,
+      actions: contextWindowState.actions,
+      retainedP0Count: contextWindowState.retainedP0Items.length,
+      droppedCount: contextWindowState.droppedItems.length,
     });
 
     const defaultSwarmCommandAdapter = async ({ attempt }) => ({
@@ -1258,6 +1380,23 @@ export function createHarnessSidecar({
       worktreeManager: useWorktreeOptions ? swarmWorktreeManager : undefined,
     });
     const attempts = swarmRun.attempts;
+    await emitEvent({
+      type: 'budget.dashboard_updated',
+      taskId: task.taskId,
+      dashboard: budgetDashboardSnapshot({
+        task,
+        budgetManager,
+        contextState: contextWindowState,
+        activeSubagents: attempts.map((attempt) => ({
+          id: attempt.attemptId,
+          status: attempt.status || 'completed',
+        })),
+        recovery: {
+          status: 'stable',
+          latest: null,
+        },
+      }),
+    });
     const champion = swarmRun.champion || chooseChampion(attempts);
     const championArchive = createChampionArchive();
     if (champion) {
@@ -1595,6 +1734,42 @@ export function createHarnessSidecar({
       tokensEstimated: contextPack.tokensEstimated,
       excludedDueToBudget: contextPack.excludedDueToBudget,
     });
+    try {
+      const verifierRegistry = await loadVerifierRegistry({ workspaceRoot: resolvedWorkspaceRoot });
+      const contextPaths = contextPack.items.map((item) => item.path).filter(Boolean);
+      const selectedVerifiers = selectVerifiersForTask({
+        task,
+        changedFiles: [],
+        registry: verifierRegistry,
+        maxVerifiers: 3,
+      });
+      await emitEvent({
+        type: 'verifier.registry_loaded',
+        taskId,
+        verifierCount: verifierRegistry.verifiers.length,
+        verifierNames: verifierRegistry.verifiers.map((verifier) => verifier.name),
+      });
+      await emitEvent({
+        type: 'verifier.selection_created',
+        taskId,
+        selection: selectedVerifiers.map((verifier) => ({
+          name: verifier.name,
+          kind: verifier.kind,
+          command: verifier.command,
+          reason: verifier.reason,
+        })),
+        selectionBasis: 'task_start_context_hints',
+        changedFiles: [],
+        contextPaths,
+        autoRun: false,
+      });
+    } catch (error) {
+      await emitEvent({
+        type: 'verifier.selection_failed',
+        taskId,
+        reason: error.message,
+      });
+    }
     budgetManager.recordUsage({ toolCalls: 1 });
     if (!autonomousToolLoopEnabled) {
       await runVerifiers({

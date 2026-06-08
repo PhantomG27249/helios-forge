@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -102,6 +102,39 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
     });
     assert.equal(mcp.status, 'completed');
     assert.deepEqual(mcpCalls, [{ serverId: 'demo', tool: 'demo.echo', args: { text: 'hello' } }]);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('default tool registry auto-selects verifiers from changed files', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-default-verifier-select-'));
+  const events = [];
+
+  try {
+    await writeFile(path.join(workspaceRoot, 'package.json'), JSON.stringify({
+      scripts: {
+        test: 'node -e "console.log(\'unit selected\')"',
+        'release:smoke': 'node -e "console.log(\'smoke selected\')"',
+      },
+    }));
+    const registry = createDefaultToolRegistry({
+      workspaceRoot,
+      emitEvent: (event) => events.push(event),
+    });
+
+    const verifier = await registry.execute('verifier.run', {
+      taskId: 'task_auto_verifier',
+      changedFiles: ['src/harness-sidecar/server.js'],
+      maxVerifiers: 1,
+    });
+
+    assert.equal(verifier.selection.length, 1);
+    assert.equal(verifier.selection[0].name, 'release-smoke');
+    assert.equal(verifier.results[0].passed, true);
+    assert.equal(events.some((event) => event.type === 'verifier.registry_loaded'), true);
+    assert.equal(events.some((event) => event.type === 'verifier.selection_created'), true);
+    assert.equal(events.some((event) => event.type === 'verifier.run_completed'), true);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

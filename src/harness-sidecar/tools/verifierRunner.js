@@ -55,5 +55,13 @@ export async function runVerifiers({
     });
   }
 
+  await emitEvent({
+    type: 'verifier.run_completed',
+    taskId,
+    verifierCount: results.length,
+    passedCount: results.filter((result) => result.passed).length,
+    failedCount: results.filter((result) => !result.passed).length,
+  });
+
   return results;
 }

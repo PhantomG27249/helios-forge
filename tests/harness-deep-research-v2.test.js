@@ -6,7 +6,15 @@ import { test } from 'node:test';
 
 import { extractClaims } from '../src/harness-sidecar/research/claimExtractor.js';
 import { verifyEvidence } from '../src/harness-sidecar/research/evidenceVerifier.js';
+import { createDeepResearchV2Artifacts } from '../src/harness-sidecar/research/deepResearchManager.js';
+import { extractFigureCandidates } from '../src/harness-sidecar/research/figureExtractor.js';
+import { assessNoveltyAndRisk } from '../src/harness-sidecar/research/noveltyControls.js';
 import { createResearchRunStore } from '../src/harness-sidecar/research/researchRunStore.js';
+import {
+  RESEARCH_SPECIALIST_ROLES,
+  createResearchSubagentPlan,
+  runResearchSubagents,
+} from '../src/harness-sidecar/research/researchSubagents.js';
 import { fetchSources } from '../src/harness-sidecar/research/sourceFetchers.js';
 
 async function withTempWorkspace(fn) {
@@ -245,5 +253,180 @@ test('research run store rejects run ids that escape the run directory', async (
       .then(() => true)
       .catch(() => false);
     assert.equal(escapedPathExists, false);
+  });
+});
+
+test('research subagents expose deterministic specialist roles and execution order', async () => {
+  const plan = createResearchSubagentPlan({
+    question: 'How should we deepen research?',
+    sources: [{ sourceId: 'plan', title: 'Plan' }],
+  });
+
+  assert.deepEqual(RESEARCH_SPECIALIST_ROLES, [
+    'source_finder',
+    'paper_reader',
+    'figure_analyst',
+    'citation_auditor',
+    'contradiction_reviewer',
+    'implementation_planner',
+  ]);
+  assert.deepEqual(
+    plan.workers.map((worker) => worker.role),
+    RESEARCH_SPECIALIST_ROLES,
+  );
+
+  const run = await runResearchSubagents({
+    plan,
+    context: { question: 'How should we deepen research?' },
+    workers: {
+      source_finder: async ({ task }) => ({ found: task.inputs.sourceIds }),
+      paper_reader: async () => ({ claimsRead: 2 }),
+      figure_analyst: async () => ({ figuresReviewed: 1 }),
+      citation_auditor: async () => ({ unsupportedClaims: 0 }),
+      contradiction_reviewer: async () => ({ contradictions: 0 }),
+      implementation_planner: async () => ({ recommendations: 3 }),
+    },
+  });
+
+  assert.deepEqual(
+    run.results.map((result) => [result.role, result.status]),
+    RESEARCH_SPECIALIST_ROLES.map((role) => [role, 'completed']),
+  );
+  assert.deepEqual(run.results[0].output, { found: ['plan'] });
+});
+
+test('figure extractor returns PDF page metadata and deterministic figure candidates', () => {
+  const extracted = extractFigureCandidates({
+    sources: [
+      {
+        sourceId: 'paper',
+        title: 'Harness Paper',
+        type: 'pdf',
+        pdfPages: [
+          {
+            pageNumber: 1,
+            width: 612,
+            height: 792,
+            text: 'Figure 1: Sidecar architecture improves traceability.',
+            figures: [{ label: 'Figure 1', caption: 'Sidecar architecture', bbox: [72, 120, 300, 260] }],
+          },
+          {
+            pageNumber: 2,
+            width: 612,
+            height: 792,
+            text: 'No figures on this page.',
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(extracted.pageMetadata, [
+    { sourceId: 'paper', pageNumber: 1, width: 612, height: 792, textLength: 53 },
+    { sourceId: 'paper', pageNumber: 2, width: 612, height: 792, textLength: 24 },
+  ]);
+  assert.deepEqual(extracted.figureCandidates, [
+    {
+      figureId: 'paper_p1_fig1',
+      sourceId: 'paper',
+      pageNumber: 1,
+      label: 'Figure 1',
+      caption: 'Sidecar architecture',
+      bbox: [72, 120, 300, 260],
+      confidence: 0.9,
+    },
+  ]);
+});
+
+test('novelty controls flag unsupported novelty, contradictions, and figure-only evidence risk', () => {
+  const controls = assessNoveltyAndRisk({
+    claims: [
+      { claimId: 'supported', claim: 'Known supported claim.', status: 'supported', evidence: [{ sourceId: 'paper' }] },
+      { claimId: 'novel', claim: 'Novel unsupported claim.', novelty: 'high', evidence: [] },
+      { claimId: 'figure_only', claim: 'Result only appears in a figure.', evidence: [{ figureId: 'paper_p1_fig1' }] },
+    ],
+    contradictions: [{ contradictionId: 'contra_1', claimIds: ['supported', 'novel'] }],
+    figureCandidates: [{ figureId: 'paper_p1_fig1', caption: 'Result chart' }],
+  });
+
+  assert.deepEqual(
+    controls.flags.map((flag) => [flag.kind, flag.claimId || flag.contradictionId]),
+    [
+      ['unsupported_high_novelty', 'novel'],
+      ['contradiction_requires_review', 'contra_1'],
+      ['figure_only_evidence', 'figure_only'],
+    ],
+  );
+  assert.equal(controls.riskLevel, 'high');
+});
+
+test('deep research v2 manager writes production artifacts without external web', async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await createDeepResearchV2Artifacts({
+      workspaceRoot,
+      runId: 'run_v2_artifacts',
+      question: 'What should production research include?',
+      sources: [
+        {
+          sourceId: 'paper',
+          title: 'Local paper',
+          type: 'pdf',
+          locator: 'docs/paper.pdf',
+          content: 'Deep research needs grounded citations. Novel claims require review.',
+          claims: [
+            {
+              claimId: 'c1',
+              sourceId: 'paper',
+              claim: 'Deep research needs grounded citations.',
+              evidence: [{ sourceId: 'paper', quote: 'Deep research needs grounded citations.' }],
+              status: 'supported',
+            },
+            {
+              claimId: 'c2',
+              sourceId: 'paper',
+              claim: 'Novel claims require review.',
+              novelty: 'high',
+              evidence: [],
+            },
+          ],
+          pdfPages: [
+            {
+              pageNumber: 3,
+              width: 612,
+              height: 792,
+              text: 'Figure 2: Evidence graph.',
+              figures: [{ label: 'Figure 2', caption: 'Evidence graph', bbox: [10, 20, 200, 220] }],
+            },
+          ],
+        },
+      ],
+      contradictions: [{ contradictionId: 'contra_1', claimIds: ['c1', 'c2'], values: ['yes', 'no'] }],
+    });
+
+    assert.deepEqual(result.artifacts.map((artifact) => artifact.name), [
+      'source_map.json',
+      'claim_evidence_graph.json',
+      'figure_notes.md',
+      'contradictions.md',
+      'implementation_recommendations.md',
+      'final_report.md',
+    ]);
+
+    const sourceMap = JSON.parse(await readFile(path.join(result.artifactDir, 'source_map.json'), 'utf8'));
+    const graph = JSON.parse(await readFile(path.join(result.artifactDir, 'claim_evidence_graph.json'), 'utf8'));
+    const figureNotes = await readFile(path.join(result.artifactDir, 'figure_notes.md'), 'utf8');
+    const contradictions = await readFile(path.join(result.artifactDir, 'contradictions.md'), 'utf8');
+    const recommendations = await readFile(path.join(result.artifactDir, 'implementation_recommendations.md'), 'utf8');
+    const finalReport = await readFile(path.join(result.artifactDir, 'final_report.md'), 'utf8');
+
+    assert.equal(sourceMap.sources[0].sourceId, 'paper');
+    assert.equal(sourceMap.sources[0].pages[0].pageNumber, 3);
+    assert.equal(graph.claims.length, 2);
+    assert.equal(graph.riskFlags[0].kind, 'unsupported_high_novelty');
+    assert.match(figureNotes, /Figure 2/);
+    assert.match(contradictions, /contra_1/);
+    assert.match(recommendations, /Resolve unsupported high novelty claim c2/);
+    assert.match(finalReport, /## Specialist Workers/);
+    assert.match(finalReport, /## Production Artifacts/);
   });
 });

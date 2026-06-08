@@ -1,4 +1,5 @@
 import { parseToolCalls } from '../model/toolCallParser.js';
+import { createToolCallRecovery } from '../reliability/toolCallRecovery.js';
 
 function toolContracts(toolRegistry) {
   if (!toolRegistry?.list) return [];
@@ -49,11 +50,21 @@ async function executeToolCall({ call, toolRegistry }) {
   }
 
   try {
+    const result = await toolRegistry.execute(call.name, call.args);
+    if (['blocked', 'approval_required'].includes(result?.status)) {
+      return {
+        id: call.id,
+        name: call.name,
+        status: result.status,
+        reason: result.reason,
+        result,
+      };
+    }
     return {
       id: call.id,
       name: call.name,
       status: 'completed',
-      result: await toolRegistry.execute(call.name, call.args),
+      result,
     };
   } catch (error) {
     return {
@@ -74,6 +85,7 @@ export async function runToolLoop({
   modelGateway,
   toolRegistry,
   maxIterations = 5,
+  recovery,
 } = {}) {
   if (!modelGateway?.call) {
     throw new Error('Tool loop requires a modelGateway with call()');
@@ -82,6 +94,22 @@ export async function runToolLoop({
   let currentMessages = [...messages];
   const toolResults = [];
   let finalText = '';
+  const recoveryManager = recovery?.enabled
+    ? createToolCallRecovery({
+      taskId,
+      toolRegistry,
+      emitEvent: recovery.emitEvent,
+      noProgressThreshold: recovery.noProgressThreshold,
+    })
+    : null;
+
+  function resultPayload(payload) {
+    if (!recoveryManager) return payload;
+    return {
+      ...payload,
+      recoveryEvents: [...recoveryManager.events],
+    };
+  }
 
   for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
     const response = await modelGateway.call({
@@ -91,36 +119,49 @@ export async function runToolLoop({
       messages: currentMessages,
       tools: toolContracts(toolRegistry),
     });
-    const calls = parseToolCalls({
-      text: response.text,
-      toolCalls: response.toolCalls ?? response.tool_calls,
-    });
+    let calls;
+    if (recoveryManager) {
+      const recovered = recoveryManager.recoverCalls({
+        text: response.text,
+        toolCalls: response.toolCalls,
+        tool_calls: response.tool_calls,
+      });
+      calls = recovered.calls;
+    } else {
+      calls = parseToolCalls({
+        text: response.text,
+        toolCalls: response.toolCalls ?? response.tool_calls,
+      });
+    }
 
     if (calls.length === 0) {
       finalText = response.text || '';
-      return {
+      return resultPayload({
         status: 'completed',
         finalText,
         iterations: iteration,
         toolResults,
-      };
+      });
     }
 
     const iterationResults = [];
     for (const call of calls) {
-      const result = await executeToolCall({ call, toolRegistry });
+      let result = await executeToolCall({ call, toolRegistry });
+      if (recoveryManager) {
+        result = recoveryManager.annotateToolResult(result);
+      }
       iterationResults.push(result);
       toolResults.push(result);
     }
 
     const blockedStatus = terminalStatus(iterationResults);
     if (blockedStatus) {
-      return {
+      return resultPayload({
         status: blockedStatus,
         finalText,
         iterations: iteration,
         toolResults,
-      };
+      });
     }
 
     currentMessages = [
@@ -141,10 +182,10 @@ export async function runToolLoop({
     ];
   }
 
-  return {
+  return resultPayload({
     status: 'max_iterations',
     finalText,
     iterations: maxIterations,
     toolResults,
-  };
+  });
 }

@@ -9,6 +9,11 @@ import {
   buildGatewayRequest,
   chooseAgentRoute,
 } from '../src/harness-sidecar/interop/agentRouter.js';
+import {
+  createDelegatedCapabilityToken,
+  verifyDelegatedCapabilityToken,
+} from '../src/harness-sidecar/interop/delegatedCapabilityTokens.js';
+import { ExternalAgentGateway } from '../src/harness-sidecar/interop/externalAgentGateway.js';
 
 test('agent card normalization validates core identity, protocol, and redacts credentials', () => {
   const card = normalizeAgentCard({
@@ -315,4 +320,208 @@ test('agent router treats invalid token estimates as over-budget instead of bypa
 
   assert.equal(decision.status, 'no_route');
   assert.equal(decision.rejections[0].reason, 'cost_above_limit');
+});
+
+test('delegated capability tokens bind task, agent, capability, mode, and expiry', () => {
+  const token = createDelegatedCapabilityToken({
+    taskId: 'task-delegate',
+    agentId: 'agent.writer',
+    capabilities: ['repo.read', 'patch.apply'],
+    mode: 'mutation',
+    issuedBy: 'owner',
+    now: 10_000,
+    ttlMs: 1_000,
+  });
+
+  assert.equal(token.taskId, 'task-delegate');
+  assert.equal(token.agentId, 'agent.writer');
+  assert.equal(token.secret, undefined);
+  assert.equal(JSON.stringify(token).includes('live-secret'), false);
+  assert.equal(
+    verifyDelegatedCapabilityToken(token, {
+      taskId: 'task-delegate',
+      agentId: 'agent.writer',
+      capability: 'patch.apply',
+      mode: 'mutation',
+      now: 10_500,
+    }).valid,
+    true,
+  );
+  assert.deepEqual(
+    verifyDelegatedCapabilityToken(token, {
+      taskId: 'task-delegate',
+      agentId: 'agent.writer',
+      capability: 'shell.exec',
+      mode: 'mutation',
+      now: 10_500,
+    }).reasons,
+    ['capability_not_delegated'],
+  );
+  assert.deepEqual(
+    verifyDelegatedCapabilityToken(token, {
+      taskId: 'task-delegate',
+      agentId: 'agent.writer',
+      capability: 'patch.apply',
+      mode: 'mutation',
+      now: 11_001,
+    }).reasons,
+    ['expired'],
+  );
+  assert.deepEqual(
+    verifyDelegatedCapabilityToken({
+      ...token,
+      tokenId: 'dct_forged',
+      signature: 'forged',
+      expiresAt: 99_999,
+    }, {
+      taskId: 'task-delegate',
+      agentId: 'agent.writer',
+      capability: 'patch.apply',
+      mode: 'mutation',
+      now: 10_500,
+    }).reasons,
+    ['invalid_signature'],
+  );
+});
+
+test('external agent gateway exposes redacted agent cards and read-only scoped envelopes by default', async () => {
+  const dispatched = [];
+  const gateway = new ExternalAgentGateway({
+    agents: [{
+      id: 'agent.reader',
+      name: 'Reader',
+      protocol: 'a2a',
+      endpoint: {
+        url: 'https://reader.example.test/a2a',
+        headers: { Authorization: 'Bearer secret-token' },
+      },
+      capabilities: ['repo.read', 'code.review'],
+      trustLevel: 'verified',
+    }],
+    dispatch: async (envelope) => {
+      dispatched.push(envelope);
+      return { ok: true, envelope };
+    },
+  });
+
+  const cards = gateway.listAgentCards();
+  const result = await gateway.dispatchTask({
+    agentId: 'agent.reader',
+    task: {
+      id: 'task-read',
+      requiredCapabilities: ['repo.read'],
+      prompt: 'Summarize this repository. token=ghp_should_not_leave',
+      context: {
+        'repo.read': { files: ['README.md'], apiKey: 'sk-should-not-leave' },
+        'patch.apply': { diff: 'ignored' },
+      },
+    },
+  });
+
+  assert.equal(cards[0].endpoint.headers.Authorization, '[redacted]');
+  assert.equal(result.status, 'dispatched');
+  assert.equal(dispatched[0].mode, 'read');
+  assert.deepEqual(dispatched[0].capabilities, ['repo.read']);
+  assert.equal(JSON.stringify(dispatched[0]).includes('ghp_should_not_leave'), false);
+  assert.equal(JSON.stringify(dispatched[0]).includes('sk-should-not-leave'), false);
+});
+
+test('external agent gateway blocks mutation unless approval and delegated token are present', async () => {
+  const token = createDelegatedCapabilityToken({
+    taskId: 'task-write',
+    agentId: 'agent.writer',
+    capabilities: ['patch.apply'],
+    mode: 'mutation',
+    issuedBy: 'owner',
+    now: 5_000,
+    ttlMs: 5_000,
+  });
+  const gateway = new ExternalAgentGateway({
+    now: () => 5_500,
+    agents: [{
+      id: 'agent.writer',
+      name: 'Writer',
+      protocol: 'acp',
+      endpoint: { url: 'https://writer.example.test/acp' },
+      capabilities: ['repo.read', 'patch.apply'],
+      trustLevel: 'internal',
+    }],
+    dispatch: async () => ({ ok: true }),
+  });
+
+  const noApproval = await gateway.dispatchTask({
+    agentId: 'agent.writer',
+    task: {
+      id: 'task-write',
+      requiredCapabilities: ['patch.apply'],
+      prompt: 'Apply this patch.',
+      mutation: true,
+    },
+  });
+  const noToken = await gateway.dispatchTask({
+    agentId: 'agent.writer',
+    approval: { approved: true, approvedBy: 'owner' },
+    task: {
+      id: 'task-write',
+      requiredCapabilities: ['patch.apply'],
+      prompt: 'Apply this patch.',
+      mutation: true,
+    },
+  });
+  const dispatched = await gateway.dispatchTask({
+    agentId: 'agent.writer',
+    approval: { approved: true, approvedBy: 'owner' },
+    capabilityToken: token,
+    task: {
+      id: 'task-write',
+      requiredCapabilities: ['patch.apply'],
+      prompt: 'Apply this patch.',
+      mutation: true,
+    },
+  });
+
+  assert.equal(noApproval.status, 'blocked');
+  assert.equal(noApproval.reason, 'mutation_requires_approval');
+  assert.equal(noToken.status, 'blocked');
+  assert.equal(noToken.reason, 'delegated_capability_token_invalid');
+  assert.equal(dispatched.status, 'dispatched');
+});
+
+test('external agent gateway requires mutation token coverage for every requested capability', async () => {
+  const readOnlyToken = createDelegatedCapabilityToken({
+    taskId: 'task-mixed',
+    agentId: 'agent.mixed',
+    capabilities: ['repo.read'],
+    mode: 'mutation',
+    issuedBy: 'owner',
+    now: 1_000,
+    ttlMs: 5_000,
+  });
+  const gateway = new ExternalAgentGateway({
+    now: () => 1_500,
+    agents: [{
+      id: 'agent.mixed',
+      name: 'Mixed Agent',
+      protocol: 'http',
+      endpoint: { url: 'https://mixed.example.test/dispatch' },
+      capabilities: ['repo.read', 'patch.apply'],
+      trustLevel: 'internal',
+    }],
+  });
+
+  const result = await gateway.dispatchTask({
+    agentId: 'agent.mixed',
+    approval: { approved: true, approvedBy: 'owner' },
+    capabilityToken: readOnlyToken,
+    task: {
+      id: 'task-mixed',
+      requiredCapabilities: ['repo.read', 'patch.apply'],
+      prompt: 'Read context and apply a patch.',
+      mutation: true,
+    },
+  });
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason, 'delegated_capability_token_invalid');
+  assert.deepEqual(result.tokenReasons, ['patch.apply:capability_not_delegated']);
 });
