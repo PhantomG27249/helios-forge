@@ -32,6 +32,21 @@ function normalizeScope(context = {}) {
   };
 }
 
+function profileLines(profile) {
+  if (!profile) return [];
+  return [
+    `Profile: ${profile.id}`,
+    `Profile mission: ${profile.mission}`,
+    `Tool caps: allowed ${listLines(profile.toolCaps?.allowed || [])}`,
+    `Denied tools:\n${listLines(profile.toolCaps?.denied || [])}`,
+    `Dangerous tools: ${profile.toolCaps?.dangerousToolsAllowed ? 'allowed' : 'denied'}`,
+    `VLM access: ${profile.vlm?.allowed ? 'allowed' : 'denied'}`,
+    `Visual artifacts: ${profile.visualArtifacts?.allowed ? 'allowed' : 'denied'}`,
+    `Workspace mutation: ${profile.workspace?.mutationAllowed ? 'allowed' : 'denied'}`,
+    `Worktree required: ${profile.worktree?.required ? 'yes' : 'no'}`,
+  ];
+}
+
 export function buildRolePrompt({
   role,
   task = {},
@@ -39,17 +54,20 @@ export function buildRolePrompt({
   context = {},
   budget = {},
   outputContract = {},
+  profile,
 }) {
   const registryEntry = ROLE_REGISTRY[role];
   if (!registryEntry) {
     throw new Error(`Unknown swarm role: ${role}`);
   }
 
+  const activeProfile = profile || attempt.profile || null;
   const scope = normalizeScope(context);
-  const requiredFields = outputContract.requiredFields || [];
+  const requiredFields = outputContract.requiredFields || activeProfile?.outputContract?.requiredFields || [];
   const text = [
     `Role: ${registryEntry.title}`,
     `Mission: ${registryEntry.mission}`,
+    ...profileLines(activeProfile),
     `Task: ${task.goal || task.description || task.taskId || 'unspecified'}`,
     `Attempt: ${attempt.attemptId || 'attempt'} (${attempt.strategy || 'default'})`,
     `Allowed files:\n${listLines(scope.allowedFiles)}`,

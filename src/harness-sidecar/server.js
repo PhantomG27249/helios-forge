@@ -1423,6 +1423,12 @@ export function createHarnessSidecar({
       planner: {
         enabled: true,
         strategy: 'tooltree',
+        evolutionPlanner: {
+          enabled: true,
+          bidirectionalBes: runtimeBidirectionalBes,
+          evolutionArchive: runtimeEvolution.archive,
+          rhoCoreset,
+        },
         task: task.task,
         rootState: {
           taskId: task.taskId,

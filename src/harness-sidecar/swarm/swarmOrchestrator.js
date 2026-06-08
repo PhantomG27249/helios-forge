@@ -1,8 +1,11 @@
 import { scheduleAttempts } from './attemptScheduler.js';
+import { loadDefaultAgentProfiles, selectAgentProfileForAttempt } from './agentProfiles.js';
 import { chooseChampion } from './championSelector.js';
+import { allocateEvolutionSwarmBudgets } from './evolutionBudgetAllocator.js';
 import { runModelDrivenAttempt } from './modelDrivenWorker.js';
 import { recombineApprovedOutputs } from './recombiner.js';
 import { reviewAttempt } from './reviewer.js';
+import { runSwarmAttemptsBounded } from './swarmExecutor.js';
 import { runSubagentAttempt } from './subagentRunner.js';
 import { runWorktreeAttempt } from './worktreeAttemptRunner.js';
 
@@ -255,6 +258,10 @@ export async function orchestrateSwarm({
   provider,
   modelProfileName,
   planner,
+  evolutionPlanner,
+  evolutionBudget,
+  swarmExecution,
+  agentProfiles,
   runMode,
   riskPolicy = {},
   onAttemptEvent,
@@ -268,38 +275,95 @@ export async function orchestrateSwarm({
   }));
   const hasWorktreeWorker = Boolean(commandAdapter && (workspaceRoot || worktreeManager));
   const mode = runMode || (hasModelWorker ? 'model-driven' : (commandAdapter ? 'real' : 'dry-run'));
-  const scheduledAttempts = scheduleAttempts({ taskId, taskType, maxAttempts, planner });
-  const attempts = [];
+  const profiles = agentProfiles || loadDefaultAgentProfiles();
+  const scheduledBaseAttempts = scheduleAttempts({
+    taskId,
+    taskType,
+    maxAttempts,
+    planner,
+    evolutionPlanner: evolutionPlanner || planner?.evolutionPlanner,
+  });
+  const profiledAttempts = scheduledBaseAttempts.map((attempt) => ({
+    ...attempt,
+    profile: attempt.profile || selectAgentProfileForAttempt({
+      profiles,
+      attempt,
+      task: { ...task, taskType },
+      goalTree: (evolutionPlanner || planner?.evolutionPlanner)?.bidirectionalBes?.goalTree,
+    }),
+  }));
+  const scheduledAttempts = evolutionBudget?.enabled
+    ? allocateEvolutionSwarmBudgets({
+      attempts: profiledAttempts,
+      budgetState: evolutionBudget.budgetState || budget,
+      maxOutputChars: evolutionBudget.maxOutputChars || budget.maxOutputChars || 1200,
+      visualBudget: evolutionBudget.visualBudget || {},
+    })
+    : profiledAttempts;
+  const concurrency = swarmExecution?.concurrency || 1;
+  const attempts = await runSwarmAttemptsBounded({
+    attempts: scheduledAttempts,
+    concurrency,
+    onAttemptEvent: onAttemptEvent ? async (event) => {
+      const scheduledAttempt = event.attempt;
+      if (event.type === 'started') {
+        const requestId = hasModelWorker
+          ? modelWorkerRequestId({ taskId, attemptId: scheduledAttempt.attemptId })
+          : null;
 
-  for (const scheduledAttempt of scheduledAttempts) {
-    const requestId = hasModelWorker
-      ? modelWorkerRequestId({ taskId, attemptId: scheduledAttempt.attemptId })
-      : null;
+        await onAttemptEvent?.({
+          type: 'swarm.subagent_started',
+          taskId,
+          attemptId: scheduledAttempt.attemptId,
+          role: scheduledAttempt.profile?.role || 'implementer',
+          profile: scheduledAttempt.profile,
+          strategy: scheduledAttempt.strategy,
+          planning: scheduledAttempt.planning,
+          budget: scheduledAttempt.budget,
+          budgetRationale: scheduledAttempt.budgetRationale,
+          worker: {
+            kind: hasModelWorker
+              ? 'model_driven'
+              : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')),
+            requestId,
+          },
+          model: hasModelWorker ? { requestId, profileName: modelProfileName || scheduledAttempt.profile?.modelProfile || 'critic_low_temp' } : undefined,
+          status: 'running',
+          summary: `${scheduledAttempt.attemptId} running ${scheduledAttempt.strategy}`,
+        });
+        return;
+      }
 
-    await onAttemptEvent?.({
-      type: 'swarm.subagent_started',
-      taskId,
-      attemptId: scheduledAttempt.attemptId,
-      role: 'implementer',
-      strategy: scheduledAttempt.strategy,
-      planning: scheduledAttempt.planning,
-      worker: {
-        kind: hasModelWorker
-          ? 'model_driven'
-          : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')),
-        requestId,
-      },
-      model: hasModelWorker ? { requestId, profileName: modelProfileName || 'critic_low_temp' } : undefined,
-      status: 'running',
-      summary: `${scheduledAttempt.attemptId} running ${scheduledAttempt.strategy}`,
-    });
-
+      const attemptRecord = event.attempt;
+      await onAttemptEvent?.({
+        type: 'swarm.subagent_completed',
+        taskId,
+        attemptId: attemptRecord.attemptId,
+        role: attemptRecord.role,
+        profile: attemptRecord.profile,
+        strategy: attemptRecord.strategy,
+        planning: attemptRecord.planning,
+        budget: attemptRecord.budget,
+        budgetRationale: attemptRecord.budgetRationale,
+        worker: attemptRecord.worker,
+        model: attemptRecord.model,
+        status: attemptRecord.status,
+        summary: attemptRecord.output?.summary || `${attemptRecord.attemptId} ${attemptRecord.status}`,
+        score: attemptRecord.score,
+        verifierPassed: attemptRecord.verifierPassed,
+        patchStats: attemptRecord.patchStats,
+        failure: attemptRecord.failure,
+        startedAt: attemptRecord.startedAt,
+        completedAt: attemptRecord.completedAt,
+      });
+    } : undefined,
+    runAttempt: async ({ attempt: scheduledAttempt }) => {
     const attemptRecord = await runScheduledAttempt({
       task: { ...task, taskId },
       scheduledAttempt,
-      role: 'implementer',
+      role: scheduledAttempt.profile?.role || 'implementer',
       context,
-      budget,
+      budget: { ...budget, ...(scheduledAttempt.budget || {}) },
       outputContract,
       commandAdapter,
       verifierAdapter,
@@ -312,30 +376,12 @@ export async function orchestrateSwarm({
       modelProvider,
       modelExecutor,
       provider,
-      modelProfileName,
+      modelProfileName: modelProfileName || scheduledAttempt.profile?.modelProfile,
     });
 
-    attempts.push(attemptRecord);
-
-    await onAttemptEvent?.({
-      type: 'swarm.subagent_completed',
-      taskId,
-      attemptId: attemptRecord.attemptId,
-      role: attemptRecord.role,
-      strategy: attemptRecord.strategy,
-      planning: attemptRecord.planning,
-      worker: attemptRecord.worker,
-      model: attemptRecord.model,
-      status: attemptRecord.status,
-      summary: attemptRecord.output?.summary || `${attemptRecord.attemptId} ${attemptRecord.status}`,
-      score: attemptRecord.score,
-      verifierPassed: attemptRecord.verifierPassed,
-      patchStats: attemptRecord.patchStats,
-      failure: attemptRecord.failure,
-      startedAt: attemptRecord.startedAt,
-      completedAt: attemptRecord.completedAt,
-    });
-  }
+    return attemptRecord;
+    },
+  });
 
   const reviews = attempts.map((attempt) => reviewAttempt({
     attempt,

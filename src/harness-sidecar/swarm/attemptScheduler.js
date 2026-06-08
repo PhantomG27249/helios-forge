@@ -1,5 +1,6 @@
 import { seedAttemptStrategies } from '../bes/strategySeeder.js';
 import { planToolTree } from '../bes/toolTreePlanner.js';
+import { planEvolutionSwarmAttempts } from './evolutionSwarmPlanner.js';
 
 function isToolTreePlannerEnabled(planner = {}) {
   return planner?.enabled === true && planner.strategy === 'tooltree';
@@ -80,10 +81,31 @@ export function scheduleAttempts({
   taskType = 'general',
   maxAttempts = 4,
   planner = {},
+  evolutionPlanner,
 } = {}) {
+  const activeEvolutionPlanner = evolutionPlanner || planner?.evolutionPlanner;
+  const seeded = fallbackAttempts({ taskId, taskType, maxAttempts });
+  const hasEvolutionInputs = activeEvolutionPlanner?.enabled === true && (
+    (Array.isArray(activeEvolutionPlanner.evolutionArchive) && activeEvolutionPlanner.evolutionArchive.length > 0)
+    || (Array.isArray(activeEvolutionPlanner.evolutionArchive?.archive) && activeEvolutionPlanner.evolutionArchive.archive.length > 0)
+    || (Array.isArray(activeEvolutionPlanner.bidirectionalBes?.frontier) && activeEvolutionPlanner.bidirectionalBes.frontier.length > 0)
+  );
+
+  if (hasEvolutionInputs) {
+    return planEvolutionSwarmAttempts({
+      taskId,
+      taskType,
+      maxAttempts,
+      bidirectionalBes: activeEvolutionPlanner.bidirectionalBes,
+      evolutionArchive: activeEvolutionPlanner.evolutionArchive,
+      rhoCoreset: activeEvolutionPlanner.rhoCoreset,
+      fallbackAttempts: seeded,
+    });
+  }
+
   if (isToolTreePlannerEnabled(planner)) {
     return scheduledToolTreeAttempts({ taskId, taskType, maxAttempts, planner });
   }
 
-  return fallbackAttempts({ taskId, taskType, maxAttempts });
+  return seeded;
 }
