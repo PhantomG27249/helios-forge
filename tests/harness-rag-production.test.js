@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -94,6 +94,44 @@ test('workspace indexer emits chunk-level text items while preserving path exclu
   }
 });
 
+test('workspace indexer persists metadata and reuses unchanged file chunks incrementally', async () => {
+  const workspaceRoot = await makeWorkspace();
+  const indexStorePath = path.join(workspaceRoot, '.harness', 'storage', 'rag', 'workspace-index.json');
+  try {
+    await mkdir(path.join(workspaceRoot, 'docs'), { recursive: true });
+    await writeFile(path.join(workspaceRoot, 'docs', 'runbook.md'), 'billing escalation runbook\nrefund escalation runbook\n');
+
+    const firstIndex = await indexWorkspace({
+      workspaceRoot,
+      indexStorePath,
+      maxLinesPerChunk: 2,
+    });
+    const firstBillingChunks = firstIndex.items.filter((item) => item.path === 'src/features/billingRoutes.js');
+
+    await writeFile(path.join(workspaceRoot, 'docs', 'runbook.md'), 'billing escalation runbook\nupdated refund escalation runbook\n');
+
+    const secondIndex = await indexWorkspace({
+      workspaceRoot,
+      indexStorePath,
+      maxLinesPerChunk: 2,
+    });
+    const secondBillingChunks = secondIndex.items.filter((item) => item.path === 'src/features/billingRoutes.js');
+    const persisted = JSON.parse(await readFile(indexStorePath, 'utf8'));
+
+    assert.equal(firstIndex.metadata.version, 1);
+    assert.equal(firstIndex.metadata.fileCount >= 2, true);
+    assert.equal(secondIndex.metadata.reusedFileCount >= 1, true);
+    assert.equal(secondIndex.metadata.changedFileCount >= 1, true);
+    assert.deepEqual(secondBillingChunks, firstBillingChunks);
+    assert.equal(persisted.version, 1);
+    assert.equal(persisted.workspaceRoot, workspaceRoot);
+    assert.equal(persisted.files['src/features/billingRoutes.js'].chunks.length, firstBillingChunks.length);
+    assert.match(persisted.files['src/features/billingRoutes.js'].contentHash, /^[a-f0-9]{64}$/);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('retriever scores chunk content with path and file-name boosts', () => {
   const index = {
     items: [
@@ -130,6 +168,118 @@ test('retriever scores chunk content with path and file-name boosts', () => {
   assert.equal(results[0].matched.includes('invoices'), true);
   assert.equal(results[0].score > results[1].score, true);
   assert.match(results[0].reason, /path/i);
+});
+
+test('retriever applies lexical frequency scoring while preserving source diversity', () => {
+  const index = {
+    items: [
+      {
+        type: 'file_chunk',
+        chunkId: 'src/search/alpha.js:1-2:aaa',
+        path: 'src/search/alpha.js',
+        lineStart: 1,
+        lineEnd: 2,
+        snippet: 'needle needle needle needle indexing cache query',
+        tokensEstimated: 10,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/search/alpha.js:3-4:bbb',
+        path: 'src/search/alpha.js',
+        lineStart: 3,
+        lineEnd: 4,
+        snippet: 'needle needle needle ranking cache',
+        tokensEstimated: 10,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/search/alpha.js:5-6:ccc',
+        path: 'src/search/alpha.js',
+        lineStart: 5,
+        lineEnd: 6,
+        snippet: 'needle needle scoring',
+        tokensEstimated: 10,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/docs/beta.md:1-2:ddd',
+        path: 'src/docs/beta.md',
+        lineStart: 1,
+        lineEnd: 2,
+        snippet: 'needle retrieval docs',
+        tokensEstimated: 10,
+      },
+    ],
+  };
+
+  const results = retrieveWorkspaceContext({
+    index,
+    query: 'needle retrieval cache',
+    maxItems: 3,
+  });
+
+  assert.equal(results.length, 3);
+  assert.equal(results[0].chunkId, 'src/search/alpha.js:1-2:aaa');
+  assert.equal(results[1].path, 'src/docs/beta.md');
+  assert.equal(results[0].score > results[2].score, true);
+  assert.match(results[0].reason, /bm25/i);
+  assert.equal(new Set(results.map((item) => item.path)).size >= 2, true);
+});
+
+test('context pack interleaves sources before filling additional chunks from the same path', () => {
+  const contextPack = buildContextPack({
+    taskId: 'task_source_diversity',
+    items: [
+      {
+        type: 'file_chunk',
+        chunkId: 'src/a.js:1-2:aaa',
+        path: 'src/a.js',
+        lineStart: 1,
+        lineEnd: 2,
+        snippet: 'alpha first',
+        tokensEstimated: 5,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/a.js:3-4:bbb',
+        path: 'src/a.js',
+        lineStart: 3,
+        lineEnd: 4,
+        snippet: 'alpha second',
+        tokensEstimated: 5,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/a.js:5-6:ccc',
+        path: 'src/a.js',
+        lineStart: 5,
+        lineEnd: 6,
+        snippet: 'alpha third',
+        tokensEstimated: 5,
+      },
+      {
+        type: 'file_chunk',
+        chunkId: 'src/b.js:1-2:ddd',
+        path: 'src/b.js',
+        lineStart: 1,
+        lineEnd: 2,
+        snippet: 'beta first',
+        tokensEstimated: 5,
+      },
+    ],
+    maxTokens: 20,
+  });
+
+  assert.deepEqual(
+    contextPack.items.map((item) => item.chunkId),
+    [
+      'src/a.js:1-2:aaa',
+      'src/b.js:1-2:ddd',
+      'src/a.js:3-4:bbb',
+      'src/a.js:5-6:ccc',
+    ],
+  );
+  assert.deepEqual(contextPack.sourcePaths, ['src/a.js', 'src/b.js']);
 });
 
 test('context pack preserves chunk provenance and budget exclusions by chunk id and path', () => {
