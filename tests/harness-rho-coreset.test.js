@@ -153,3 +153,47 @@ test('selects visual verifier cases from outcomes tags artifacts and tool names 
   );
   assert.deepEqual(coreset.items.map((item) => item.score), [3, 2, 2, 2]);
 });
+
+test('selects MemGraphRAG construction failures as hard cases', () => {
+  const coreset = buildRhoCoreset({
+    traces: [
+      {
+        taskId: 'theme',
+        memgraphFailure: { type: 'thematic_irrelevance', affectedNodes: ['schema_a'] },
+      },
+      {
+        taskId: 'logical',
+        graphConstructionFailures: [{ type: 'logical_conflict', factIds: ['fact_a', 'fact_b'] }],
+      },
+      {
+        taskId: 'temporal',
+        events: [{ type: 'memgraph.temporal_conflict', factIds: ['fact_old', 'fact_new'] }],
+      },
+      {
+        taskId: 'granularity',
+        memoryGraph: { granularityConflict: true },
+      },
+      {
+        taskId: 'fragmented',
+        memgraph: { fragmentationScore: 0.91 },
+      },
+      {
+        taskId: 'activation-stall',
+        memgraph: { pendingActivationStall: true },
+      },
+    ],
+    limit: 10,
+  });
+
+  assert.deepEqual(
+    coreset.items.map((item) => item.reasons.find((reason) => reason.startsWith('memgraph_'))),
+    [
+      'memgraph_logical_conflict',
+      'memgraph_temporal_conflict',
+      'memgraph_granularity_conflict',
+      'memgraph_fragmentation',
+      'memgraph_pending_activation_stall',
+      'memgraph_thematic_irrelevance',
+    ],
+  );
+});

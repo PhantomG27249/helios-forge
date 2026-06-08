@@ -1,6 +1,6 @@
 import { buildContextPack } from './contextPackBuilder.js';
 
-const SOURCE_ORDER = ['workspace_rag', 'promoted_memory', 'graph_memory', 'knowledge_graph'];
+const SOURCE_ORDER = ['workspace_rag', 'promoted_memory', 'graph_memory', 'memory_graph', 'knowledge_graph'];
 
 function normalizeList(value) {
   if (!value) return [];
@@ -34,6 +34,7 @@ function sourceLabelFor(source, item) {
   if (source === 'workspace_rag') return `workspace:${item.path || item.chunkId || item.id || 'unknown'}`;
   if (source === 'promoted_memory') return `memory:${item.memoryId || item.id || 'unknown'}`;
   if (source === 'graph_memory') return `graph-memory:${item.memoryId || item.id || 'unknown'}`;
+  if (source === 'memory_graph') return item.sourceLabel || `memgraph:${item.id || item.label || 'unknown'}`;
   if (source === 'knowledge_graph') return `graph:${item.id || item.label || 'unknown'}`;
   return `${source}:${item.id || item.memoryId || item.path || item.type || 'unknown'}`;
 }
@@ -99,6 +100,24 @@ function normalizeKnowledgeGraphItem(item) {
   };
 }
 
+function normalizeMemoryAwareGraphItem(item) {
+  return {
+    ...item,
+    source: 'memory_graph',
+    sourceLabel: sourceLabelFor('memory_graph', item),
+    reasons: normalizeReasons(item.reasons || item.reason),
+    provenance: normalizeList(item.provenance),
+    tokensEstimated: item.tokensEstimated || estimateTokensFromText([
+      item.type,
+      item.label,
+      item.summary,
+      item.path,
+      item.value,
+      item.reason,
+    ]),
+  };
+}
+
 function dedupeUnifiedItems(items) {
   const seen = new Set();
   return items.filter((item) => {
@@ -152,6 +171,7 @@ export function composeUnifiedContext({
   workspaceItems = [],
   memoryItems = [],
   graphMemoryItems = [],
+  memoryGraphItems = [],
   graphItems = [],
   maxTokens = 6000,
   sourceDiversity = true,
@@ -160,6 +180,7 @@ export function composeUnifiedContext({
     ...normalizeList(workspaceItems).map(normalizeWorkspaceItem),
     ...normalizeList(memoryItems).map(normalizeMemoryItem),
     ...normalizeList(graphMemoryItems).map(normalizeGraphMemoryItem),
+    ...normalizeList(memoryGraphItems).map(normalizeMemoryAwareGraphItem),
     ...normalizeList(graphItems).map(normalizeKnowledgeGraphItem),
   ]);
   const orderedItems = sourceDiversity ? diversifyBySource(normalized) : orderWithinSource(normalized);

@@ -357,6 +357,8 @@ export async function maintainGraphMemorySnapshot({
   traceSummaries = [],
   feedback = [],
   evalSets = [],
+  globalMemory,
+  memoryGuidedGraph,
   store,
 } = {}) {
   const graphStore = store || createGraphMemoryStore({ workspaceRoot });
@@ -386,6 +388,8 @@ export async function maintainGraphMemorySnapshot({
     staleReviewItems: buildStaleReviewItems(records),
     conflictReviewItems: buildConflictReviewItems(records),
     evalSummaries: summarizeEvalSets(normalizeList(evalSets)),
+    ...(globalMemory ? { globalMemory } : {}),
+    ...(memoryGuidedGraph ? { memoryGuidedGraph } : {}),
   });
 
   return {

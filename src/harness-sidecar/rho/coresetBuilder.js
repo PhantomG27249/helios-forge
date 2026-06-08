@@ -73,6 +73,71 @@ function hasMetaDecisionEvidence(trace) {
   );
 }
 
+function eventTypeIncludes(trace, value) {
+  return getEvents(trace).some((event) => stableString(event?.type).toLowerCase().includes(value));
+}
+
+function graphFailureTypes(trace) {
+  return [
+    trace?.memgraphFailure?.type,
+    trace?.memgraph?.failureType,
+    ...(
+      Array.isArray(trace?.graphConstructionFailures)
+        ? trace.graphConstructionFailures.map((failure) => failure?.type)
+        : []
+    ),
+  ].map((value) => stableString(value).toLowerCase()).filter(Boolean);
+}
+
+function scoreMemGraphEvidence(trace) {
+  const reasons = [];
+  let score = 0;
+  const failureTypes = graphFailureTypes(trace);
+
+  if (failureTypes.includes('logical_conflict') || eventTypeIncludes(trace, 'memgraph.logical_conflict')) {
+    score += 6;
+    reasons.push('memgraph_logical_conflict');
+  }
+  if (failureTypes.includes('temporal_conflict') || eventTypeIncludes(trace, 'memgraph.temporal_conflict')) {
+    score += 5;
+    reasons.push('memgraph_temporal_conflict');
+  }
+  if (
+    failureTypes.includes('granularity_conflict') ||
+    trace?.memoryGraph?.granularityConflict === true ||
+    eventTypeIncludes(trace, 'memgraph.granularity_conflict')
+  ) {
+    score += 4;
+    reasons.push('memgraph_granularity_conflict');
+  }
+  if (
+    failureTypes.includes('fragmentation') ||
+    numberOrNull(trace?.memgraph?.fragmentationScore) >= 0.8 ||
+    eventTypeIncludes(trace, 'memgraph.fragmentation')
+  ) {
+    score += 3;
+    reasons.push('memgraph_fragmentation');
+  }
+  if (
+    failureTypes.includes('pending_activation_stall') ||
+    trace?.memgraph?.pendingActivationStall === true ||
+    eventTypeIncludes(trace, 'memgraph.pending_activation_stall')
+  ) {
+    score += 2.5;
+    reasons.push('memgraph_pending_activation_stall');
+  }
+  if (
+    failureTypes.includes('thematic_irrelevance') ||
+    trace?.memgraph?.thematicIrrelevance === true ||
+    eventTypeIncludes(trace, 'memgraph.thematic_irrelevance')
+  ) {
+    score += 2;
+    reasons.push('memgraph_thematic_irrelevance');
+  }
+
+  return { score, reasons };
+}
+
 function scoreTrace(trace) {
   const reasons = [];
   let score = 0;
@@ -93,6 +158,9 @@ function scoreTrace(trace) {
     score += 1;
     reasons.push('meta_decision_evidence');
   }
+  const memGraph = scoreMemGraphEvidence(trace);
+  score += memGraph.score;
+  reasons.push(...memGraph.reasons);
 
   return { score, reasons };
 }
