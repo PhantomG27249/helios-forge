@@ -87,6 +87,32 @@ test('RHO selects swarm outcome hard cases with explicit reasons', () => {
   assert.equal(coreset.items[0].reasons.includes('swarm_missing_verifier_evidence'), true);
 });
 
+test('swarm outcome recorder turns rejected low-quality handoffs into hard cases', () => {
+  const summary = summarizeSwarmOutcome({
+    taskId: 'task_swarm_handoff_quality',
+    attempts: [{
+      attemptId: 'attempt_low_handoff',
+      status: 'completed',
+      verifierPassed: false,
+      verifierEvidence: ['node --test focused'],
+      handoffQuality: {
+        score: 45,
+        findings: ['missing_files_changed', 'missing_source_pointers'],
+      },
+    }],
+    reviews: [{ attemptId: 'attempt_low_handoff', approved: false, reasons: ['handoff_quality_low'] }],
+  });
+
+  assert.equal(summary.hardCases.length, 1);
+  assert.equal(summary.hardCases[0].failureModes[0], 'swarm_low_quality_handoff');
+  assert.equal(summary.hardCases[0].swarm.handoffQuality.score, 45);
+  assert.deepEqual(summary.hardCases[0].swarm.handoffQuality.findings, [
+    'missing_files_changed',
+    'missing_source_pointers',
+  ]);
+  assert.deepEqual(summary.failureModes, ['swarm_low_quality_handoff']);
+});
+
 test('BES meta optimizer consumes swarm hard-case reasons from RHO items', () => {
   const optimizer = new BesMetaOptimizer({
     now: () => new Date('2026-06-08T15:00:00.000Z'),

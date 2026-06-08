@@ -29,6 +29,101 @@ function inferPatchStats(output = {}) {
   return { changedLines };
 }
 
+function asArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function normalizedList(value) {
+  return asArray(value)
+    .flatMap((item) => {
+      if (typeof item === 'string') return item.split('\n');
+      return [item];
+    })
+    .map((item) => (typeof item === 'string' ? item.trim() : item))
+    .filter((item) => {
+      if (typeof item === 'string') return item.length > 0;
+      return item !== undefined && item !== null;
+    });
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+function nullableString(value) {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function extractChangedFilesFromPatch(patch) {
+  if (typeof patch !== 'string') return [];
+  return normalizedList(
+    patch.split('\n')
+      .map((line) => {
+        const match = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+        return match?.[2];
+      }),
+  );
+}
+
+export function normalizeCompactHandoff(output = {}) {
+  const handoff = output?.compactHandoff || output?.handoff || {};
+  const filesChanged = normalizedList(
+    handoff.filesChanged
+      ?? handoff.changedFiles
+      ?? output.filesChanged
+      ?? output.changedFiles
+      ?? extractChangedFilesFromPatch(output.patch),
+  );
+  return {
+    summary: firstString(handoff.summary, output.summary),
+    filesInspected: normalizedList(handoff.filesInspected ?? handoff.inspectedFiles ?? output.filesInspected ?? output.inspectedFiles),
+    filesChanged,
+    commandsRun: normalizedList(handoff.commandsRun ?? handoff.commands ?? output.commandsRun ?? output.commands),
+    testsRun: normalizedList(handoff.testsRun ?? handoff.testCommands ?? output.testsRun ?? output.testCommands ?? output.verifierCommands ?? output.verifierEvidence),
+    blocker: nullableString(handoff.blocker ?? output.blocker),
+    nextAction: nullableString(handoff.nextAction ?? handoff.nextStep ?? output.nextAction ?? output.nextStep),
+    sourcePointers: normalizedList(handoff.sourcePointers ?? handoff.sources ?? output.sourcePointers ?? output.sources),
+    uncertainty: normalizedList(handoff.uncertainty ?? handoff.uncertainties ?? handoff.uncertaintyFlags ?? output.uncertainty ?? output.uncertainties ?? output.uncertaintyFlags),
+    risks: normalizedList(handoff.risks ?? output.risks),
+  };
+}
+
+export function scoreCompactHandoff(compactHandoff = {}) {
+  const findings = [];
+  let score = 0;
+
+  if (compactHandoff.summary) score += 20;
+  else findings.push('missing_summary');
+
+  if (compactHandoff.filesInspected?.length) score += 10;
+  else findings.push('missing_files_inspected');
+
+  if (compactHandoff.filesChanged?.length) score += 10;
+  else findings.push('missing_files_changed');
+
+  if (compactHandoff.commandsRun?.length || compactHandoff.testsRun?.length) score += 20;
+  else findings.push('missing_commands_or_tests');
+
+  if (compactHandoff.blocker || compactHandoff.nextAction) score += 15;
+  else findings.push('missing_blocker_or_next_action');
+
+  if (compactHandoff.sourcePointers?.length) score += 10;
+  else findings.push('missing_source_pointers');
+
+  if (compactHandoff.uncertainty?.length || compactHandoff.risks?.length) score += 15;
+  else findings.push('missing_uncertainty_or_risk_flags');
+
+  return {
+    score,
+    findings,
+    status: score >= 70 ? 'acceptable' : 'low_quality',
+  };
+}
+
 async function dryRunAdapter() {
   return {
     summary: 'Dry run completed without invoking an external agent.',
@@ -64,6 +159,8 @@ export async function runSubagentAttempt({
     const missingFields = missingRequiredFields(output, requiredFields);
     const { truncatedOutput, exceeded } = truncateOutput(output, budget.maxOutputChars);
     const verifierEvidence = output?.verifierEvidence || [];
+    const compactHandoff = normalizeCompactHandoff(output);
+    const handoffQuality = scoreCompactHandoff(compactHandoff);
 
     return {
       attemptId: attempt.attemptId,
@@ -71,6 +168,8 @@ export async function runSubagentAttempt({
       role,
       status: missingFields.length ? 'contract_failed' : 'completed',
       output,
+      compactHandoff,
+      handoffQuality,
       prompt,
       verifierEvidence,
       score: output?.score || 0,

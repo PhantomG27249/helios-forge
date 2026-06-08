@@ -77,6 +77,42 @@ test('subagent runner marks attempts with missing output contract fields', async
   assert.deepEqual(result.contract.missingFields, ['verifierEvidence']);
 });
 
+test('subagent runner normalizes compact handoff and scores handoff quality deterministically', async () => {
+  const result = await runSubagentAttempt({
+    task: { taskId: 'task_runner_handoff', goal: 'Produce compact handoff.' },
+    attempt: { attemptId: 'attempt_handoff', strategy: 'handoff_first' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'verifierEvidence'] },
+    commandAdapter: async () => ({
+      summary: 'Added compact handoff scoring for swarm attempts.',
+      filesInspected: 'src/harness-sidecar/swarm/subagentRunner.js',
+      filesChanged: ['src/harness-sidecar/swarm/subagentRunner.js'],
+      verifierEvidence: ['node --test tests/harness-swarm-runtime.test.js'],
+      testsRun: 'node --test tests/harness-swarm-runtime.test.js',
+      blocker: '',
+      nextAction: 'Run the focused swarm tests and commit the scoped change.',
+      sourcePointers: ['subagentRunner.js:runSubagentAttempt'],
+      risks: ['Scoring weights should stay deterministic.'],
+    }),
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.compactHandoff, {
+    summary: 'Added compact handoff scoring for swarm attempts.',
+    filesInspected: ['src/harness-sidecar/swarm/subagentRunner.js'],
+    filesChanged: ['src/harness-sidecar/swarm/subagentRunner.js'],
+    commandsRun: [],
+    testsRun: ['node --test tests/harness-swarm-runtime.test.js'],
+    blocker: null,
+    nextAction: 'Run the focused swarm tests and commit the scoped change.',
+    sourcePointers: ['subagentRunner.js:runSubagentAttempt'],
+    uncertainty: [],
+    risks: ['Scoring weights should stay deterministic.'],
+  });
+  assert.equal(result.handoffQuality.score, 100);
+  assert.deepEqual(result.handoffQuality.findings, []);
+});
+
 test('reviewer rejects risky attempts and attempts missing verifier evidence', () => {
   const missingVerifier = reviewAttempt({
     attempt: {

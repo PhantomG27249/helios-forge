@@ -56,6 +56,24 @@ test('model-driven worker calls injected gateway with structured role prompt and
   assert.equal(result.score, 91);
   assert.deepEqual(result.artifacts, [{ path: 'artifact.txt', type: 'text' }]);
   assert.deepEqual(result.risks, ['Needs orchestrator wiring later.']);
+  assert.deepEqual(result.compactHandoff, {
+    summary: 'Adds the model-driven worker adapter.',
+    filesInspected: [],
+    filesChanged: ['src/harness-sidecar/swarm/modelDrivenWorker.js'],
+    commandsRun: [],
+    testsRun: ['node --test tests/harness-swarm-model-worker.test.js'],
+    blocker: null,
+    nextAction: null,
+    sourcePointers: [],
+    uncertainty: [],
+    risks: ['Needs orchestrator wiring later.'],
+  });
+  assert.equal(result.handoffQuality.score, 65);
+  assert.deepEqual(result.handoffQuality.findings, [
+    'missing_files_inspected',
+    'missing_blocker_or_next_action',
+    'missing_source_pointers',
+  ]);
   assert.deepEqual(result.model, {
     callId: 'model_call_1',
     profileName: 'critic_low_temp',

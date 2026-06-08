@@ -34,6 +34,13 @@ function hasVisualSignal(attempt = {}, review = {}) {
 function hardCaseReason({ attempt = {}, review = {} } = {}) {
   const reviewReasons = asArray(review.reasons);
   if (
+    reviewReasons.includes('handoff_quality_low') ||
+    attempt.handoffQuality?.status === 'low_quality' ||
+    Number(attempt.handoffQuality?.score) < 70
+  ) {
+    return 'swarm_low_quality_handoff';
+  }
+  if (
     reviewReasons.includes('unsafe_patch') ||
     reviewReasons.includes('forbidden_path_touched') ||
     reviewReasons.includes('patch_too_large') ||
@@ -70,6 +77,7 @@ function hardCaseFromAttempt({ taskId, attempt, review }) {
       reviewReasons: asArray(review.reasons),
       failure: attempt.failure,
       verifierEvidenceCount: asArray(attempt.verifierEvidence).length,
+      handoffQuality: attempt.handoffQuality || null,
     },
     visual: reason === 'swarm_visual_failure',
   };

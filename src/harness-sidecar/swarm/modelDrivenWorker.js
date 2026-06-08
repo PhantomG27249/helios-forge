@@ -1,5 +1,6 @@
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { buildRolePrompt } from './rolePrompts.js';
+import { normalizeCompactHandoff, scoreCompactHandoff } from './subagentRunner.js';
 
 const MODEL_WORKER_REQUIRED_FIELDS = ['summary', 'patch or verifierEvidence'];
 
@@ -92,6 +93,14 @@ export function normalizeModelWorkerOutput({
   if (!hasNonEmptyString(output.patch) && !hasVerifierEvidence(output.verifierEvidence)) {
     throw new Error('Malformed model worker output: expected patch or verifierEvidence');
   }
+  const normalizedOutput = {
+    ...output,
+    verifierEvidence: asArray(output.verifierEvidence),
+    verifierCommands: asArray(output.verifierCommands),
+    artifacts: asArray(output.artifacts),
+    risks: asArray(output.risks),
+  };
+  const compactHandoff = normalizeCompactHandoff(normalizedOutput);
 
   return {
     attemptId: attempt.attemptId,
@@ -99,11 +108,13 @@ export function normalizeModelWorkerOutput({
     strategy: attempt.strategy,
     summary: output.summary,
     patch: hasNonEmptyString(output.patch) ? output.patch : '',
-    verifierEvidence: asArray(output.verifierEvidence),
-    verifierCommands: asArray(output.verifierCommands),
+    verifierEvidence: normalizedOutput.verifierEvidence,
+    verifierCommands: normalizedOutput.verifierCommands,
     score: normalizeScore(output.score),
-    artifacts: asArray(output.artifacts),
-    risks: asArray(output.risks),
+    artifacts: normalizedOutput.artifacts,
+    risks: normalizedOutput.risks,
+    compactHandoff,
+    handoffQuality: scoreCompactHandoff(compactHandoff),
     status: 'completed',
     model: modelMetadata(response, profileName, requestId),
   };
