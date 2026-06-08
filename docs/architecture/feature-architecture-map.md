@@ -31,10 +31,10 @@ flowchart TD
   Server --> Graph["Code / evidence / visual graph"]
   Server --> Memory["Memory + graph memory"]
   Server --> Research["Deep research"]
-  Server --> Swarm["Swarm / subagents"]
+  Server --> Swarm["Evolution-aware swarm / subagents"]
   Server --> VLM["Visual + VLM subsystem"]
   Server --> Verifiers["Verifier registry / runner"]
-  Server --> Meta["BES / RHO / meta optimizer"]
+  Server --> Meta["BES / RHO / policy evolution"]
   Server --> Approvals["Approval resume store"]
 
   Tools --> MCP["MCP runtimes and policy"]
@@ -47,7 +47,9 @@ flowchart TD
   Context --> Memory
   Graph --> Context
   Memory --> Context
+  Memory --> Graph
   Research --> Artifacts
+  Swarm --> Meta
   Swarm --> Approvals
   Meta --> Approvals
   Approvals --> SafeApply["Safe apply / verifier config apply"]
@@ -76,15 +78,18 @@ flowchart TD
 | Context pressure and working memory | Tracks context window pressure, compresses or drops lower-priority items, preserves important facts. | `src/harness-sidecar/context/*` |
 | Code and evidence graph | Builds code graph, import/call heuristics, claim/evidence graph, experiment graph, visual graph, and impact analysis. | `src/harness-sidecar/graph/*` |
 | Memory and graph memory | Writes memory candidates, scores corpus, promotes useful memory, stores graph snapshots and retrieves promoted context. | `src/harness-sidecar/memory/*` |
+| MemGraphRAG-style global memory | Maintains schema/fact/passage layers, pending-to-active fact promotion, evidence-backed conflict adjudication, graph bridging, and memory-aware retrieval. | `src/harness-sidecar/memory/globalMemoryLayers.js`, `memoryGraphConstructor.js`, `memoryConflictAdjudicator.js`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js` |
 | Deep Research v2 | Builds research briefs, discovers/ingests sources, extracts claims, checks citations/contradictions, writes reports and handoff artifacts. | `src/harness-sidecar/research/*` |
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
 | Bidirectional BES and population evolution | Builds backward goal trees, scores dense goal satisfaction, alternates forward candidates with backward refinement, recombines partial progress, and runs Shinka-style population/island/archive evolution. | `src/harness-sidecar/bes/*` |
-| RHO coreset | Selects high-signal traces and verifier cases for optimization: failures, ambiguity, cost, flakiness, false positives/negatives. | `src/harness-sidecar/rho/coresetBuilder.js` |
+| RHO coreset | Selects high-signal traces, verifier cases, MemGraphRAG construction failures, and swarm hard cases for optimization. | `src/harness-sidecar/rho/coresetBuilder.js` |
 | Meta optimizer | Generates approval-ready policy candidates using BES/RHO evidence and promotion gates. | `src/harness-sidecar/meta/*` |
+| Shadow policy evolution | Proposes and evaluates shadow-only context, tool-loop, budget, visual/VLM, memory, MCP trust, and research policies without self-applying them. | `src/harness-sidecar/meta/*PolicyEvolution.js` |
 | Verifier evolution | Evolves verifier policies through genomes, held-out cases, BES/RHO candidate generation, archive, and human-gated promotion. | `src/harness-sidecar/meta/verifier*.js`, `src/harness-sidecar/tools/verifierConfigApply.js` |
-| Swarm and subagents | Schedules attempts, runs dry-run or model/worktree attempts, reviews, recombines, chooses champion, proposes safe apply. | `src/harness-sidecar/swarm/*` |
+| Swarm and subagents | Schedules seeded, ToolTree, or evolution-archive attempts; assigns named profiles; allocates budgets; runs bounded attempts; reviews, recombines, chooses champion, proposes safe apply. | `src/harness-sidecar/swarm/*` |
+| Swarm outcome feedback | Converts champion success, rejected attempts, unsafe patches, missing verifier evidence, and visual failures into RHO/BES/meta feedback. | `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`, `src/harness-sidecar/server.js` |
 | Collaboration and safe merge | Tracks locks, leases, roles, task claims, duplicate tasks, annotations, conflicts, merge manager. | `src/harness-sidecar/collaboration/*` |
-| Approvals and safe apply | Stores pending actions, resumes approved actions exactly once, applies champion/change/verifier config only after approval. | `src/harness-sidecar/core/approvalResume.js`, `tools/gitApplyAdapter.js`, `tools/verifierConfigApply.js` |
+| Approvals and safe apply | Stores pending actions, resumes approved actions exactly once, applies champion/change/verifier config only after approval, and reports auto-approval eligibility metadata without bypassing gates. | `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/meta/autoApprovalPolicy.js`, `tools/gitApplyAdapter.js`, `tools/verifierConfigApply.js` |
 | Reliability and recovery | Categorizes failures, repairs malformed tool calls, detects no-progress loops, records degraded modes. | `src/harness-sidecar/reliability/*` |
 | Budgeting | Tracks tool/verifier/artifact budgets, hierarchy, dashboards, gates, and cost-aware allocation. | `src/harness-sidecar/budget/*` |
 | Traces, resume, replay | Writes event JSONL, summarizes/compacts traces, reconstructs resumable state, exposes trace replay. | `src/harness-sidecar/core/trace*.js`, `taskResume.js` |
@@ -132,6 +137,8 @@ These four systems form the agent's knowledge layer.
 - Context packs bound retrieved material to a budgeted prompt profile.
 - Graph modules turn code, imports, calls, claims, experiments, visuals, and impact signals into structured relations.
 - Memory stores durable lessons and promoted context that can be reused across later tasks.
+- Global memory layers keep schemas, facts, and passages separate so graph construction can reuse stable knowledge and keep uncertain facts pending.
+- Memory-aware graph retrieval uses active facts, provenance passages, type bridges, and similarity bridges as context evidence.
 
 Relationship:
 
@@ -142,6 +149,8 @@ flowchart LR
   ContextPack --> Graph["Code/evidence graph"]
   Graph --> GraphRAG["GraphRAG context"]
   Memory["Promoted memory"] --> Unified["Unified context"]
+  GlobalMemory["Schema/fact/passage global memory"] --> MemoryGraph["Memory-guided graph"]
+  MemoryGraph --> GraphRAG
   GraphRAG --> Unified
   ContextPack --> Unified
   Unified --> Agent["Agent/tool loop and swarm"]
@@ -185,9 +194,11 @@ flowchart TD
 These systems make the harness improve itself without allowing direct self-application.
 
 - RHO picks high-signal cases from traces, verifier outcomes, and visual/VLM verifier evidence.
+- RHO also scores MemGraphRAG failures and swarm hard cases such as missing verifier evidence, unsafe patches, visual failures, and champion regressions.
 - Bidirectional BES uses those cases to build backward goal trees, score partial progress densely, and generate/recombine forward candidates.
 - The population runner applies Shinka-style generations, islands, correctness gates, visual/VLM case propagation, and archives.
 - Meta promotion policy evaluates whether a candidate is safe and useful.
+- Shadow policy evolvers propose subsystem-specific candidates for context, tool-loop, budget, visual, memory, MCP trust, and research behavior.
 - Human approval gates are mandatory for applying risky changes.
 - Verifier evolution follows the same pattern, but its output is verifier config candidates.
 
@@ -196,6 +207,8 @@ Relationship:
 ```mermaid
 flowchart TD
   TraceEvidence["Trace + verifier + visual evidence"] --> RHO["RHO coreset"]
+  SwarmOutcome["Swarm outcome feedback"] --> RHO
+  MemGraphFailures["Memory graph failures"] --> RHO
   RHO --> Backward["Backward goal tree"]
   Backward --> Forward["Forward candidate evolution"]
   Forward --> DenseScore["Dense goal satisfaction"]
@@ -204,6 +217,7 @@ flowchart TD
   Candidate --> Runner["Candidate runner"]
   Runner --> Metrics["Held-out metrics"]
   Metrics --> Promotion["Promotion policy"]
+  Promotion --> ShadowPolicy["Shadow policy metadata"]
   Promotion --> Proposal["Approval-required proposal"]
   Proposal --> Human["Human approval"]
   Human --> Apply["Safe apply / verifier config apply"]
@@ -215,7 +229,12 @@ flowchart TD
 Swarm attempts produce candidate solutions. Collaboration and safe apply decide whether any candidate can mutate the workspace.
 
 - Attempts can be dry-run, model-driven, or worktree-backed depending on feature flags and injected adapters.
+- Attempt scheduling can use seeded strategies, ToolTree planning, or BES/evolution archive/frontier evidence.
+- Named profiles make role, VLM access, tool caps, mutation permissions, and output contracts explicit.
+- Fitness-aware budgets allocate more effort to strong candidates while preserving exploration and visual/VLM artifact budget.
+- Bounded execution can run attempts concurrently when enabled while preserving deterministic result ordering.
 - Review and recombination can produce a champion.
+- Outcome feedback records champion success and hard cases back into RHO/BES/meta loops.
 - Champion apply is proposed, not automatically applied.
 - Approval resume ensures approved actions run once.
 
@@ -224,9 +243,13 @@ Relationship:
 ```mermaid
 flowchart LR
   Task["Task"] --> Swarm["Swarm orchestrator"]
-  Swarm --> Attempts["Attempts"]
+  EvolutionArchive["BES/evolution archive"] --> Swarm
+  Swarm --> Profiles["Named profiles + budget allocation"]
+  Profiles --> Attempts["Bounded attempts"]
   Attempts --> Reviews["Reviews"]
   Reviews --> Champion["Champion selected"]
+  Reviews --> Outcome["Outcome recorder"]
+  Outcome --> RHO["RHO swarm cases"]
   Champion --> Plan["Safe apply plan"]
   Plan --> Approval["approval.required"]
   Approval --> GitApply["Git apply adapter"]
@@ -244,6 +267,9 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Safe apply | `.harness/config.yaml` `features.safeApply: true` or `HELIOS_SAFE_APPLY=1` |
 | Production visual artifacts | `.harness/config.yaml` `features.visualArtifacts: true`, preview URL config, or `HELIOS_WEB_PREVIEW_URL` |
 | Verifier evolution | `.harness/config.yaml` `features.verifierEvolution: true` or `HELIOS_VERIFIER_EVOLUTION=1` |
+| Bounded swarm concurrency | Optional `swarmExecution.concurrency` input; default remains sequential |
+| Policy evolution candidates | Shadow-only by default; promotion and mutation still require existing gates |
+| Auto-approval eligibility | Metadata only unless a future approved policy explicitly enables a narrow local tier |
 
 ## Data And Artifact Locations
 
@@ -282,6 +308,9 @@ Start here for common questions:
 - "How are verifiers selected?" Read `src/harness-sidecar/tools/verifierSelector.js`.
 - "How does visual verification work?" Read `src/harness-sidecar/vlm/visualVerifier.js`.
 - "How does verifier evolution work?" Read `src/harness-sidecar/meta/verifierEvolutionLoop.js`.
+- "How does memory-guided graph construction work?" Read `src/harness-sidecar/memory/globalMemoryLayers.js` and `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`.
+- "How do swarm outcomes feed evolution?" Read `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`.
+- "Which policies can evolve in shadow mode?" Read `src/harness-sidecar/meta/*PolicyEvolution.js`.
 - "How should swarm use meta evolution?" Read `docs/architecture/swarm-evolution-integration-plan.md`.
 - "Where else should RHO/BES/evolution expand?" Read `docs/architecture/rho-bes-evolution-expansion-roadmap.md`.
 - "What are the subagent implementation plans?" Read `docs/superpowers/plans/2026-06-08-evolution-aware-swarm-and-rho-bes-expansion-subagent-plans.md`.
@@ -296,4 +325,4 @@ These are known follow-up areas rather than blockers for local testing:
 - Stable delegated-token issuer secret injection for multi-process or restart-persistent external-agent delegation.
 - Broader MCP quarantine coverage for future model-visible fields beyond current returned-content scanning.
 - Rename or clarify code-impact events that use context-pack paths as seed files, so they are not mistaken for actual diff changed files.
-- Expand the operator dashboard from data events into a fuller dedicated browser panel for context pressure, recovery, verifier evolution, and budget alerts.
+- Expand the operator dashboard from compact data events into a fuller dedicated browser panel for context pressure, recovery, policy evolution, memory graph health, verifier evolution, and budget alerts.
