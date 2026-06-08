@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
 import { createHarnessSidecar } from '../src/harness-sidecar/server.js';
 
-async function withSidecar(testFn) {
+async function withSidecar(testFn, options = {}) {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-harness-test-'));
-  const sidecar = createHarnessSidecar({ workspaceRoot, port: 0 });
+  await options.beforeStart?.({ workspaceRoot });
+  const sidecar = createHarnessSidecar({ workspaceRoot, port: 0, ...(options.sidecarOptions || {}) });
   await sidecar.start();
 
   try {
@@ -243,6 +244,91 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
 
     unsubscribe();
   });
+});
+
+test('full runtime invokes VLM observation when configured model supports vision', async () => {
+  const modelCalls = [];
+  const modelProviderFactory = () => async (callInput) => {
+    modelCalls.push(callInput);
+    if (callInput.purpose === 'vlm_observation') {
+      return {
+        text: JSON.stringify({
+          observations: [{ text: 'Runtime preview image is visible.' }],
+          risks: [{ description: 'No visual regression detected.', severity: 'low' }],
+          score: 0.86,
+        }),
+        usage: { inputTokens: 120, outputTokens: 30 },
+      };
+    }
+
+    return {
+      text: JSON.stringify({
+        summary: 'Model worker completed a dry-run analysis.',
+        verifierEvidence: ['dry-run verifier evidence'],
+        score: 0.8,
+      }),
+      usage: { inputTokens: 80, outputTokens: 20 },
+    };
+  };
+
+  await withSidecar(
+    async ({ sidecar, workspaceRoot }) => {
+      await writeFile(
+        path.join(workspaceRoot, 'sample.js'),
+        'export function sampleHarnessTarget() { return true; }\n',
+      );
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'exercise model vision in full runtime',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const vlmEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'vlm.model_observation_created',
+      );
+
+      const vlmCall = modelCalls.find((call) => call.purpose === 'vlm_observation');
+      assert.equal(Boolean(vlmCall), true);
+      assert.equal(vlmCall.visionInputs.length >= 1, true);
+      assert.equal(vlmCall.visionInputs.every((input) => input.dataUrl?.startsWith('data:image/png;base64,')), true);
+      assert.equal(vlmEvent.observationCount, 1);
+      assert.equal(vlmEvent.score, 0.86);
+      assert.equal(vlmEvent.risks.length, 1);
+      assert.equal(vlmEvent.model.model, 'local-test-vlm');
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: { modelProviderFactory },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  modelDrivenSwarm: true',
+            'models:',
+            '  swarmBaseUrl: http://model.test/v1',
+            '  swarmModelId: local-test-vlm',
+            '  swarmSupportsVision: true',
+            '',
+          ].join('\n'),
+        );
+      },
+    },
+  );
 });
 
 test('task endpoint preserves prompt launch source metadata', async () => {

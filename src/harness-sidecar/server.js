@@ -68,9 +68,11 @@ import { interpretDiagram } from './vlm/diagramInterpreter.js';
 import { createFigureCropArtifact } from './vlm/figureCropper.js';
 import { createPdfPageArtifacts } from './vlm/pdfRenderer.js';
 import { analyzePlot } from './vlm/plotAnalyzer.js';
+import { writeRuntimePreviewImage } from './vlm/runtimePreviewImage.js';
 import { createScreenshotArtifact } from './vlm/screenshotTool.js';
 import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
+import { runVisualModelObservation } from './vlm/visualModelRunner.js';
 
 const VERSION = '0.1.0';
 const CAPABILITY_STORE_MODULE = './capabilities/capabilityStore.js';
@@ -166,7 +168,11 @@ async function loadCapabilityStore() {
   return import(CAPABILITY_STORE_MODULE);
 }
 
-export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 49321 } = {}) {
+export function createHarnessSidecar({
+  workspaceRoot = process.cwd(),
+  port = 49321,
+  modelProviderFactory = createOpenAICompatibleProvider,
+} = {}) {
   const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
   const subscribers = new Set();
   const traceWriter = new TraceWriter({ workspaceRoot: resolvedWorkspaceRoot });
@@ -267,6 +273,9 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       const profileName = process.env.HELIOS_SWARM_MODEL_PROFILE
         || harnessConfig?.defaults?.swarmModelProfile
         || 'alphahelion_ebft5';
+      const vlmProfileName = process.env.HELIOS_VLM_MODEL_PROFILE
+        || harnessConfig?.defaults?.vlmModelProfile
+        || 'qwen36_vlm_fast';
       let profile;
       try {
         profile = getModelProfile(profileName);
@@ -286,6 +295,9 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       const modelId = process.env.HELIOS_SWARM_MODEL_ID
         || harnessConfig?.models?.swarmModelId
         || profile.model;
+      const supportsVision = process.env.HELIOS_SWARM_MODEL_SUPPORTS_VISION === '1'
+        || harnessConfig?.models?.swarmSupportsVision === true
+        || profile.supportsVision;
       if (!baseUrl) {
         await emitEvent({
           type: 'swarm.model_gateway_unavailable',
@@ -296,24 +308,26 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
         return null;
       }
 
-      const provider = createOpenAICompatibleProvider({
+      const provider = modelProviderFactory({
         baseUrl,
         apiKey: process.env.HELIOS_SWARM_MODEL_API_KEY || harnessConfig?.models?.swarmApiKey || 'dummy',
       });
+      const configuredModelOverride = {
+        model: modelId,
+        baseUrl,
+        supportsVision,
+      };
 
       return {
         profileName,
+        vlmProfileName,
+        supportsVision,
         gateway: new ModelGateway({
           provider,
           emitEvent,
           profileOverrides: {
-            [profileName]: {
-              model: modelId,
-              baseUrl,
-              supportsVision: process.env.HELIOS_SWARM_MODEL_SUPPORTS_VISION === '1'
-                || harnessConfig?.models?.swarmSupportsVision === true
-                || profile.supportsVision,
-            },
+            [profileName]: configuredModelOverride,
+            [vlmProfileName]: configuredModelOverride,
           },
         }),
       };
@@ -884,9 +898,18 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       diffPath: metaArtifact.path,
       summary: 'Runtime placeholder visual diff links key harness artifacts.',
     });
+    const runtimePreviewPath = await writeRuntimePreviewImage({
+      workspaceRoot: resolvedWorkspaceRoot,
+      taskId: task.taskId,
+      metrics: {
+        quality: candidateRun.metrics.quality,
+        cost: finishedRun.metrics.cost,
+        confidence: rhoPreference.winner?.preferenceScore,
+      },
+    });
     const screenshotArtifact = createScreenshotArtifact({
       taskId: task.taskId,
-      imagePath: visualDiff.diffPath,
+      imagePath: runtimePreviewPath,
       viewport: { width: 1280, height: 720 },
       source: { type: 'runtime_visual_diff', artifactId: visualDiff.artifactId },
     });
@@ -900,7 +923,7 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       taskId: task.taskId,
       sourceArtifactId: screenshotArtifact.artifactId,
       sourcePath: screenshotArtifact.artifacts.image,
-      targetPath: `${visualDiff.diffPath}.crop.png`,
+      targetPath: `${runtimePreviewPath}.crop.png`,
       bounds: { x: 0, y: 0, width: 640, height: 360 },
       sourceDimensions: { width: 1280, height: 720 },
       label: 'Runtime visual summary',
@@ -1072,6 +1095,42 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       ],
       evidence: [plotAnalysis.evidence, diagramInterpretation.evidence],
     });
+    if (runtimeSwarmModel?.gateway && runtimeSwarmModel.supportsVision) {
+      try {
+        const visualObservation = await runVisualModelObservation({
+          taskId: task.taskId,
+          prompt: [
+            `Inspect the Helios Forge runtime preview for task ${task.taskId}.`,
+            'Summarize visible state, note any visual risks, and score confidence that the harness run looks coherent.',
+          ].join('\n'),
+          imagePaths: [runtimePreviewPath],
+          workspaceRoot: resolvedWorkspaceRoot,
+          artifactRoots: [path.dirname(runtimePreviewPath)],
+          profileName: runtimeSwarmModel.vlmProfileName,
+          modelGateway: runtimeSwarmModel.gateway,
+        });
+        await emitEvent({
+          type: 'vlm.model_observation_created',
+          taskId: task.taskId,
+          sourceArtifactIds: [screenshotArtifact.artifactId],
+          observationCount: visualObservation.observations.length,
+          observations: visualObservation.observations,
+          ocrText: visualObservation.ocrText,
+          risks: visualObservation.risks,
+          score: visualObservation.score,
+          artifacts: visualObservation.artifacts,
+          model: visualObservation.model,
+          usage: visualObservation.usage,
+        });
+      } catch (error) {
+        await emitEvent({
+          type: 'vlm.model_observation_failed',
+          taskId: task.taskId,
+          reason: error.message,
+          sourceArtifactIds: [screenshotArtifact.artifactId],
+        });
+      }
+    }
     const resumeState = await resumeTaskFromTrace({
       traceDir: traceWriter.getTaskTraceDir(task.taskId),
     });
