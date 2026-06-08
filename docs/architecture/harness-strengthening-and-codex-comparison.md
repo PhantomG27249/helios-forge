@@ -1,6 +1,6 @@
-# Harness Strengthening And Codex Comparison
+# Harness Strengthening And Agent Comparison
 
-This document lists deeper machinery that could make Helios Forge stronger, then compares those ideas with Codex as a reference design. It is not a claim that Helios should clone Codex. Codex is a mature coding-agent product surface; Helios Forge is a local Pi-centered research and meta-harness. The useful question is what Helios should borrow, what it already has that is distinctive, and what it can add to become more trustworthy as it gets more autonomous.
+This document lists deeper machinery that could make Helios Forge stronger, then compares those ideas with Codex and Claude Code as reference designs. It is not a claim that Helios should clone either product. Codex and Claude Code are mature coding-agent environments; Helios Forge is a local Pi-centered research and meta-harness. The useful question is what Helios should borrow, what it already has that is distinctive, and what it can add to become more trustworthy as it gets more autonomous.
 
 Source baseline for the Codex comparison:
 
@@ -14,6 +14,20 @@ Source baseline for the Codex comparison:
   - `https://developers.openai.com/codex/hooks`
   - `https://developers.openai.com/codex/memories`
   - `https://developers.openai.com/codex/concepts/subagents`
+
+Source baseline for the Claude Code comparison:
+
+- Official Claude Code docs checked on 2026-06-08.
+- Anthropic docs referenced:
+  - `https://code.claude.com/docs/en/overview`
+  - `https://code.claude.com/docs/en/settings`
+  - `https://code.claude.com/docs/en/permissions`
+  - `https://code.claude.com/docs/en/sub-agents`
+  - `https://code.claude.com/docs/en/mcp`
+  - `https://code.claude.com/docs/en/hooks`
+  - `https://code.claude.com/docs/en/memory`
+  - `https://code.claude.com/docs/en/plugins`
+  - `https://code.claude.com/docs/en/agent-sdk/overview`
 
 ## Core Strengthening Ideas
 
@@ -73,6 +87,47 @@ This gives every future meta-harness improvement a way to prove itself before it
 | Give operators clear surfaces. | Add dashboard panels for context pressure, recovery, verifier evolution, visual findings, and budget alerts. |
 | Review automation should be high-signal. | Report only important harness risks by default, with drill-down available for noisy traces. |
 
+## Claude Code Comparison
+
+| Axis | Claude Code pattern | Current Helios pattern | Gap or opportunity for Helios |
+| --- | --- | --- | --- |
+| Product scope | Claude Code is an agentic coding tool across terminal, IDE, desktop app, browser, CI/CD, Slack, Chrome, and Agent SDK workflows. | Helios is local-first and Pi-centered, with sidecar orchestration, VLM, research, graph, memory, BES/RHO/meta, verifiers, swarm, and safe apply. | Helios should not compete on every surface. It should compete on harness evaluation, local-model specialization, and research/meta instrumentation. |
+| Settings scopes | Claude Code has managed, user, project, and local scopes, with clear precedence and separate sharing expectations. | Helios has workspace `.harness` config plus feature flags and installer-managed capabilities. | Add explicit config scope semantics: bundled, workspace, local override, managed/admin, runtime/session. |
+| Project instructions | Claude Code uses `CLAUDE.md` for project memory and instructions loaded at session start. | Helios has docs, capabilities, slash commands, templates, and memory, but no single first-class project instruction file equivalent. | Add or document a Helios project contract file for durable repo rules, verifier expectations, and harness operating limits. |
+| Permissions | Claude Code has allow/ask/deny permission rules, modes such as plan/auto/dontAsk, and fine-grained tool specifiers. | Helios has scoped shell, approval resume, MCP policy, feature gates, and safe apply. | Add a human-readable permission matrix for shell, MCP, visual capture, research fetch, patch apply, verifier config, and external agents. |
+| Sandbox | Claude Code documents how permissions interact with sandboxing and supports extra working directories with clear boundaries. | Helios enforces workspace-scoped paths in multiple subsystems but does not expose a unified sandbox model. | Add a single boundary model: workspace root, extra read roots, artifact roots, network roots, and mutation roots. |
+| Subagents | Claude Code has built-in and custom subagents with their own context, tools, permissions, model, memory, background mode, and worktree isolation. | Helios has swarm attempts, model-driven workers, worktree attempts, reviewer/recombiner/champion selection, and subagent activity UI. | Add named agent profiles with per-agent tool caps, model/profile choices, memory scopes, worktree isolation, and summary quality checks. |
+| Agent teams | Claude Code supports multiple agents working simultaneously, with a lead agent coordinating and merging results. | Helios has swarm orchestration and recombination, but the coordination model is more internal than operator-facing. | Surface team topology: roles, current task, artifact outputs, conflicts, champion rationale, and merge readiness. |
+| MCP | Claude Code can connect to many MCP servers, supports `.mcp.json`, environment expansion, OAuth for remote MCP, and can serve Claude Code itself as an MCP server. | Helios can start MCP from installed capability records and has MCP client/runtime/policy/quarantine modules. | Add `.harness/mcp.json` style environment expansion, server health, auth status, scoped tools, and optional "Helios as MCP server" mode. |
+| Hooks | Claude Code exposes hooks around lifecycle and tool events; hooks can block or force prompts. | Helios has internal event traces and approval gates but no user-extensible hook bus. | Add a trusted hook bus for pre-tool, post-tool, approval, verifier, memory, trace, visual, and final-audit events. |
+| Memory | Claude Code uses project/user memory files and auto memory; subagents can also have persistent memory scopes. | Helios has scored memory candidates, promotion/review queues, graph memory, and retrieval. | Helios should add Claude-like inspectability plus stronger decay, contradiction, and outcome scoring. |
+| Plugins and skills | Claude Code supports plugins and skills; plugins can package reusable agents, commands, hooks, MCP, and workflow assets. | Helios uses bundled Pi package capabilities, skills, templates, slash commands, Pi extensions, and capability records. | Add plugin-style packaging metadata for Helios capabilities: version, owner, trust tier, compatibility, hooks, MCP, and verifier requirements. |
+| Automation | Claude Code supports scheduled routines, desktop scheduled tasks, `/loop`, remote control, channels, and CI/CD workflows. | Helios has task events, traces, experiments, and local sidecar runtime, but less scheduling/trigger infrastructure. | Add scheduled harness evaluations and trigger-based follow-up runs against traces, failures, and changed capability records. |
+| CLI composability | Claude Code is strongly CLI-composable: pipe input, run noninteractive prompts, resume sessions, and automate from CI. | Helios has installer/dev scripts and sidecar HTTP APIs, but the primary operator surface is browser/local app. | Add a thin `helios` CLI for eval replay, trace summarize, verifier score, capability audit, and safe-apply dry run. |
+| SDK / custom agents | Claude Code exposes an Agent SDK for custom agent workflows using Claude Code tools and permissions. | Helios has internal sidecar modules but no stable external harness SDK. | Define a small local SDK/API around traces, tools, verifiers, artifacts, memory, and approvals. |
+| Model routing | Claude Code supports model choices for subagents and third-party/provider setups through settings. | Helios preserves Pi model kwargs and can target a local VLM/model gateway. | Add per-subsystem model profiles: planner, tool-loop, visual judge, verifier-evolver, researcher, reviewer. |
+
+## What Helios Should Borrow From Claude Code
+
+| Claude Code design lesson | Helios adaptation |
+| --- | --- |
+| Make scopes explicit. | Separate managed, workspace, local, and session settings so operators know what is shared and what is private. |
+| Put permissions in user-readable rules. | Expose allow/ask/deny style rules for tools, MCP, shell, visual capture, research fetch, and safe apply. |
+| Use named subagent profiles. | Convert swarm roles into configurable agents with tool caps, model profiles, memory scopes, and worktree isolation. |
+| Let hooks enforce policy at runtime. | Add trusted pre/post hooks for tool calls, approval requests, verifier runs, memory promotion, and final audit. |
+| Make MCP configuration portable but secret-safe. | Support environment expansion and auth-status reporting without writing secrets into capability records. |
+| Keep project instructions simple. | Add a single Helios project instruction contract, while keeping generated memories separate from required rules. |
+| Support CLI automation. | Add noninteractive commands for trace replay, verifier evolution dry runs, capability audit, and eval corpus runs. |
+| Show running agent teams. | Promote swarm/subagent activity from raw events into a first-class operator view. |
+
+## Codex vs Claude Code vs Helios
+
+| System | Strongest pattern | What Helios should copy | What Helios should avoid |
+| --- | --- | --- | --- |
+| Codex | Polished multi-surface development workflow with strong sandbox/approval/worktree/Git/app integration. | Operator clarity, worktree-first isolation, maturity labels, high-signal review posture, product-grade artifact surfaces. | Chasing every Codex surface instead of strengthening the research/meta harness core. |
+| Claude Code | Highly configurable terminal-first agent with explicit settings scopes, permissions, hooks, subagents, MCP, memory, and automation. | Scope model, permission rules, hook bus, named subagents, portable MCP config, CLI composability. | Letting hook/plugin/config flexibility bypass the harness's verifier and approval spine. |
+| Helios Forge | Local Pi-centered meta-harness with research, VLM, graph memory, verifiers, BES/RHO/meta optimization, swarm, and approval-gated safe apply. | Keep the self-improving harness distinctive while borrowing operator controls from both systems. | Self-improvement without adversarial evals, shadow replay, rollback, and causal trace diagnosis. |
+
 ## Where Helios Can Exceed Codex
 
 | Area | Why Helios can go further |
@@ -83,6 +138,17 @@ This gives every future meta-harness improvement a way to prove itself before it
 | BES/RHO optimization | Helios can use evolutionary search and high-signal trace selection to improve harness policy over time. |
 | Graph memory | Helios can link code, claims, visual artifacts, experiments, traces, and memories into one evidence graph. |
 | Local model specialization | Helios can optimize around the configured local Pi/VLM stack and preserve model-specific kwargs. |
+
+## Where Helios Can Exceed Claude Code
+
+| Area | Why Helios can go further |
+| --- | --- |
+| Meta-harness evolution | Claude Code exposes rich configurability; Helios can evaluate and evolve its own verifier/meta policies against traces. |
+| Verifier-grade VLM evidence | Claude Code can use visual/browser workflows; Helios can turn visual artifacts into scored verifier signals. |
+| RHO/BES optimization | Helios can use high-signal trace selection and evolutionary search as first-class runtime subsystems. |
+| Evidence graph | Helios can unify code, claims, experiments, visual artifacts, memory, and trace outcomes into one graph. |
+| Local model/Pi integration | Helios can optimize around local Pi model configuration and model-specific kwargs. |
+| Research-to-implementation loop | Helios can couple deep research, contradiction checks, figure/PDF extraction, implementation handoff, and verifier gates. |
 
 ## Design Risks
 
@@ -115,6 +181,8 @@ Make mutation safer and easier to reverse.
 - Add before/after config snapshots for verifier/meta/capability changes.
 - Add rollback records and rollback command hints.
 - Add approval UI fields for boundary, persistence, and rollback availability.
+- Add explicit managed/workspace/local/session config scopes.
+- Add allow/ask/deny-style permission rules for high-risk harness tools.
 
 ### Wave C: Causal Trace Intelligence
 
@@ -134,6 +202,15 @@ Make long-term context safer.
 - Add confidence budget state across context, memory, verifier, visual, and final audit.
 - Escalate low-confidence runs to extra verification.
 
+### Wave E: Agent And Hook Surface
+
+Turn internal orchestration into configurable, inspectable machinery.
+
+- Add named agent profiles for swarm roles.
+- Add per-agent model/tool/memory/worktree settings.
+- Add trusted lifecycle hooks for tool, verifier, approval, trace, memory, and final-audit events.
+- Add a small CLI for trace replay, verifier score, capability audit, and eval corpus runs.
+
 ## Priority Ranking
 
 | Rank | Work | Effort | Impact | Why now |
@@ -146,11 +223,16 @@ Make long-term context safer.
 | 6 | Causal trace profiler | Medium/large | High | Converts traces into prioritization and learning. |
 | 7 | Memory decay and contradiction pressure | Medium | Medium/high | Prevents durable context from becoming stale authority. |
 | 8 | Confidence budgeting | Medium | Medium/high | Gives the harness a principled reason to verify more. |
+| 9 | Named agent profiles | Medium | Medium/high | Makes swarm behavior configurable and inspectable. |
+| 10 | Hook bus | Medium | Medium/high | Lets local policy enforce itself without burying logic in the sidecar. |
+| 11 | Helios CLI | Small/medium | Medium | Makes eval, trace, and verifier workflows scriptable. |
 
 ## Bottom Line
 
 Codex is strongest as a polished, multi-surface coding-agent environment with mature workflow controls: sandboxing, approvals, worktrees, skills, plugins, MCP, hooks, memories, browser tools, automations, and Git workflows.
 
-Helios Forge should not try to become a second Codex UI. Its stronger path is to become a **self-measuring, self-improving local harness** around Pi: trace-rich, verifier-driven, VLM-aware, graph-grounded, and meta-optimized, with Codex-like operator controls wrapped around the risky parts.
+Claude Code is strongest as a highly configurable coding-agent environment: explicit settings scopes, permissions, project instructions, hooks, MCP, named subagents, memory, terminal composability, CI/CD, and custom-agent paths.
+
+Helios Forge should not try to become a second Codex UI or a second Claude Code terminal. Its stronger path is to become a **self-measuring, self-improving local harness** around Pi: trace-rich, verifier-driven, VLM-aware, graph-grounded, and meta-optimized, with Codex-like operator clarity and Claude-Code-like configurability wrapped around the risky parts.
 
 The next serious unlock is not "more features." It is an evaluation spine that lets Helios prove whether each new feature makes the harness safer, smarter, and more reliable.
