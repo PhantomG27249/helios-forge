@@ -525,6 +525,7 @@ function handleHarnessEvent(event) {
 
   updateHarnessSubagent(event);
   updateHarnessVerifierEvolution(event);
+  updateHarnessPolicyEvolution(event);
 
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
@@ -540,6 +541,20 @@ function handleHarnessEvent(event) {
   }
 
   renderHarnessPanel();
+}
+
+function updateHarnessPolicyEvolution(event) {
+  if (event.type === 'swarm.evolution_planning_created') {
+    event.summary = `evolution planning ${event.strategy || 'created'} | ${event.attemptCount || 0} attempts`;
+  }
+  if (event.type === 'swarm.outcome_recorded') {
+    event.summary = `${event.hardCaseCount || 0} hard cases | ${event.positiveSignalCount || 0} positive signals`;
+  }
+  if (event.type === 'policy_evolution.summary') {
+    const autoApprovalEligibility = event.autoApprovalEligibility;
+    const eligibility = autoApprovalEligibility?.status ? ` | auto approval ${autoApprovalEligibility.status}` : '';
+    event.summary = `shadow policy feedback${eligibility}`;
+  }
 }
 
 function isVerifierPromotionApproval(event) {

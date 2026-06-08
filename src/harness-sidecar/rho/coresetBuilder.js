@@ -138,6 +138,38 @@ function scoreMemGraphEvidence(trace) {
   return { score, reasons };
 }
 
+function scoreSwarmEvidence(trace) {
+  const reasons = [];
+  let score = 0;
+  const failureModes = Array.isArray(trace?.failureModes)
+    ? trace.failureModes.map((mode) => stableString(mode))
+    : [];
+
+  const hasMode = (mode) => failureModes.includes(mode);
+  if (hasMode('swarm_unsafe_patch')) {
+    score += 5;
+    reasons.push('swarm_unsafe_patch');
+  }
+  if (hasMode('swarm_missing_verifier_evidence')) {
+    score += 4;
+    reasons.push('swarm_missing_verifier_evidence');
+  }
+  if (hasMode('swarm_visual_failure')) {
+    score += 4;
+    reasons.push('swarm_visual_failure');
+  }
+  if (hasMode('swarm_champion_regression')) {
+    score += 4;
+    reasons.push('swarm_champion_regression');
+  }
+  if (hasMode('swarm_recombination_win')) {
+    score += 2;
+    reasons.push('swarm_recombination_win');
+  }
+
+  return { score, reasons };
+}
+
 function scoreTrace(trace) {
   const reasons = [];
   let score = 0;
@@ -161,6 +193,9 @@ function scoreTrace(trace) {
   const memGraph = scoreMemGraphEvidence(trace);
   score += memGraph.score;
   reasons.push(...memGraph.reasons);
+  const swarm = scoreSwarmEvidence(trace);
+  score += swarm.score;
+  reasons.push(...swarm.reasons);
 
   return { score, reasons };
 }

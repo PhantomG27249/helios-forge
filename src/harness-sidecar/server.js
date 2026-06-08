@@ -76,6 +76,7 @@ import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
+import { summarizeSwarmOutcome } from './swarm/swarmOutcomeRecorder.js';
 import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
 import { createGitApplyAdapter } from './tools/gitApplyAdapter.js';
 import { loadVerifierRegistry } from './tools/verifierRegistry.js';
@@ -1509,6 +1510,14 @@ export function createHarnessSidecar({
     }
     const archivedChampion = selectBestChampion(championArchive);
     await emitEvent({
+      type: 'swarm.evolution_planning_created',
+      taskId: task.taskId,
+      strategy: swarmRun.planning.strategy,
+      attemptCount: swarmRun.planning.attempts.length,
+      archiveSize: runtimeEvolution.archive.length,
+      frontierSize: runtimeBidirectionalBes.frontier.length,
+    });
+    await emitEvent({
       type: 'swarm.attempts_scheduled',
       taskId: task.taskId,
       attempts,
@@ -1526,6 +1535,53 @@ export function createHarnessSidecar({
       recombination: swarmRun.recombination,
       planning: swarmRun.planning,
       archivedChampion,
+    });
+    const swarmOutcome = summarizeSwarmOutcome({
+      taskId: task.taskId,
+      attempts,
+      reviews: swarmRun.reviews,
+      champion,
+      recombination: swarmRun.recombination,
+    });
+    const swarmRhoCoreset = buildRhoCoreset({
+      traces: [...swarmOutcome.hardCases, ...swarmOutcome.metaCandidates],
+      limit: 4,
+      diversityKey: (trace) => trace.failureModes?.[0] || trace.taskId,
+    });
+    await emitEvent({
+      type: 'swarm.outcome_recorded',
+      taskId: task.taskId,
+      positiveSignalCount: swarmOutcome.positiveSignals.length,
+      hardCaseCount: swarmOutcome.hardCases.length,
+      visualCaseCount: swarmOutcome.visualCases.length,
+      failureModes: swarmOutcome.failureModes,
+    });
+    if (swarmRhoCoreset.selectedCount > 0) {
+      await emitEvent({
+        type: 'rho.swarm_cases_selected',
+        taskId: task.taskId,
+        selectedCount: swarmRhoCoreset.selectedCount,
+        totalCandidates: swarmRhoCoreset.totalCandidates,
+        items: swarmRhoCoreset.items.map((item) => ({
+          taskId: item.taskId,
+          score: item.score,
+          reasons: item.reasons,
+          diversityKey: item.diversityKey,
+        })),
+      });
+    }
+    await emitEvent({
+      type: 'policy_evolution.summary',
+      taskId: task.taskId,
+      swarm: {
+        positiveSignalCount: swarmOutcome.positiveSignals.length,
+        hardCaseCount: swarmOutcome.hardCases.length,
+        selectedHardCases: swarmRhoCoreset.selectedCount,
+      },
+      autoApprovalEligibility: {
+        status: 'metadata_only',
+        reason: 'Evolution feedback is recorded in shadow mode; mutation still requires promotion gates.',
+      },
     });
     const championApplyPayload = champion
       ? {

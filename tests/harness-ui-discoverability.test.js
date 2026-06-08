@@ -60,6 +60,16 @@ test('harness panel exposes live subagent activity', async () => {
   assert.match(appJs, /renderHarnessSubagents/);
 });
 
+test('harness panel recognizes evolution-aware swarm feedback events', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(appJs, /swarm\.evolution_planning_created/);
+  assert.match(appJs, /swarm\.outcome_recorded/);
+  assert.match(appJs, /policy_evolution\.summary/);
+  assert.match(appJs, /autoApprovalEligibility/);
+  assert.doesNotMatch(appJs, /autoApprovalEligibility\.status === 'auto_approved'.*apply/s);
+});
+
 test('harness panel exposes verifier evolution operator visibility', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');

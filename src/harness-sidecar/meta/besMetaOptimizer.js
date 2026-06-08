@@ -78,6 +78,7 @@ function collectCoresetItems(coreset) {
 function collectFailureModes(traceSummary = {}, coreset) {
   const failureModes = [...(traceSummary.failureModes || [])];
   for (const item of collectCoresetItems(coreset)) {
+    failureModes.push(...(item.reasons || []));
     failureModes.push(...(item.failureModes || []));
     if (item.failureMode) failureModes.push(item.failureMode);
     failureModes.push(...(item.trace?.failureModes || []));
