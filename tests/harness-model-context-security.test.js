@@ -63,6 +63,33 @@ test('model gateway records profile, token accounting, and structured repair eve
   assert.equal(events.some((event) => event.type === 'model_call.completed' && event.totalTokens === 20), true);
 });
 
+test('model gateway applies local profile overrides without changing baked profiles', async () => {
+  const gateway = new ModelGateway({
+    profileOverrides: {
+      alphahelion_ebft5: {
+        model: 'local/private-model',
+        supportsVision: true,
+      },
+    },
+    provider: async ({ profile }) => ({
+      text: profile.model,
+      usage: { inputTokens: 1, outputTokens: 1 },
+    }),
+  });
+
+  const result = await gateway.call({
+    taskId: 'task_model_override',
+    purpose: 'local_override',
+    profileName: 'alphahelion_ebft5',
+    messages: [{ role: 'user', content: 'ping' }],
+    visionInputs: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }],
+  });
+
+  assert.equal(result.profile.model, 'local/private-model');
+  assert.equal(result.profile.supportsVision, true);
+  assert.equal(getModelProfile('alphahelion_ebft5').model, 'example/ebft-model');
+});
+
 test('OpenAI-compatible provider posts chat completions and extracts visible content', async () => {
   const requests = [];
   const provider = createOpenAICompatibleProvider({

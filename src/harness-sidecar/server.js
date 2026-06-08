@@ -283,6 +283,9 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
       const baseUrl = process.env.HELIOS_SWARM_MODEL_BASE_URL
         || harnessConfig?.models?.swarmBaseUrl
         || profile.baseUrl;
+      const modelId = process.env.HELIOS_SWARM_MODEL_ID
+        || harnessConfig?.models?.swarmModelId
+        || profile.model;
       if (!baseUrl) {
         await emitEvent({
           type: 'swarm.model_gateway_unavailable',
@@ -300,7 +303,19 @@ export function createHarnessSidecar({ workspaceRoot = process.cwd(), port = 493
 
       return {
         profileName,
-        gateway: new ModelGateway({ provider, emitEvent }),
+        gateway: new ModelGateway({
+          provider,
+          emitEvent,
+          profileOverrides: {
+            [profileName]: {
+              model: modelId,
+              baseUrl,
+              supportsVision: process.env.HELIOS_SWARM_MODEL_SUPPORTS_VISION === '1'
+                || harnessConfig?.models?.swarmSupportsVision === true
+                || profile.supportsVision,
+            },
+          },
+        }),
       };
     }
 

@@ -23,14 +23,18 @@ function normalizeUsage({ usage, messages, text }) {
 }
 
 export class ModelGateway {
-  constructor({ provider, emitEvent = () => {} } = {}) {
+  constructor({ provider, emitEvent = () => {}, profileOverrides = {} } = {}) {
     this.provider = provider || (async () => ({ text: '', usage: { inputTokens: 0, outputTokens: 0 } }));
     this.emitEvent = emitEvent;
+    this.profileOverrides = profileOverrides;
   }
 
   async call({ taskId, purpose, profileName, messages, structuredOutput = false, visionInputs = [] }) {
     const callId = makeModelCallId();
-    const profile = getModelProfile(profileName);
+    const profile = {
+      ...getModelProfile(profileName),
+      ...(this.profileOverrides[profileName] || {}),
+    };
     if (visionInputs.length > 0 && !profile.supportsVision) {
       throw new Error(`Model profile does not support vision inputs: ${profileName}`);
     }
