@@ -10,10 +10,11 @@ The core pattern is:
 
 1. A task enters the sidecar.
 2. The sidecar mounts workspace capabilities and builds context.
-3. The agent/tool loop, verifiers, research, graph, memory, and swarm subsystems generate evidence.
-4. Meta/BES/RHO components propose improvements.
-5. Human approval gates decide whether anything risky is applied.
-6. Traces and artifacts preserve enough state for resume, review, and future optimization.
+3. Adaptive search decides where to spend the next unit of work: wider search, deeper refinement, worker/profile switching, evidence gathering, or stopping.
+4. The agent/tool loop, verifiers, research, graph, memory, visual/VLM, and swarm subsystems generate evidence.
+5. Meta/BES/RHO components mine that evidence and propose improvements.
+6. Human approval gates decide whether anything risky is applied.
+7. Traces and artifacts preserve enough state for resume, review, replay, and future optimization.
 
 ## High-Level Architecture
 
@@ -34,7 +35,9 @@ flowchart TD
   Server --> Swarm["Evolution-aware swarm / subagents"]
   Server --> VLM["Visual + VLM subsystem"]
   Server --> Verifiers["Verifier registry / runner"]
+  Server --> Adaptive["AB-MCTS adaptive search"]
   Server --> Meta["BES / RHO / policy evolution"]
+  Server --> Skills["Self-authored skill candidates"]
   Server --> Approvals["Approval resume store"]
 
   Tools --> MCP["MCP runtimes and policy"]
@@ -49,8 +52,15 @@ flowchart TD
   Memory --> Context
   Memory --> Graph
   Research --> Artifacts
+  Adaptive --> Swarm
+  Adaptive --> Meta
+  Adaptive --> Research
+  Adaptive --> Verifiers
+  Adaptive --> Context
   Swarm --> Meta
   Swarm --> Approvals
+  Skills --> Meta
+  Skills --> Approvals
   Meta --> Approvals
   Approvals --> SafeApply["Safe apply / verifier config apply"]
 
@@ -81,6 +91,7 @@ flowchart TD
 | MemGraphRAG-style global memory | Maintains schema/fact/passage layers, pending-to-active fact promotion, evidence-backed conflict adjudication, graph bridging, and memory-aware retrieval. | `src/harness-sidecar/memory/globalMemoryLayers.js`, `memoryGraphConstructor.js`, `memoryConflictAdjudicator.js`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js` |
 | Deep Research v2 | Builds research briefs, discovers/ingests sources, extracts claims, checks citations/contradictions, writes reports and handoff artifacts. | `src/harness-sidecar/research/*` |
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
+| AB-MCTS adaptive search | Allocates online budget between going wider, going deeper, switching worker/profile, gathering evidence, and stopping/promoting. It is advisory by default and replayable from traces. | `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, `adaptiveSearchApi.js` |
 | Bidirectional BES and population evolution | Builds backward goal trees, scores dense goal satisfaction, alternates forward candidates with backward refinement, recombines partial progress, and runs Shinka-style population/island/archive evolution. | `src/harness-sidecar/bes/*` |
 | RHO coreset | Selects high-signal traces, verifier cases, MemGraphRAG construction failures, and swarm hard cases for optimization. | `src/harness-sidecar/rho/coresetBuilder.js` |
 | Meta optimizer | Generates approval-ready policy candidates using BES/RHO evidence and promotion gates. | `src/harness-sidecar/meta/*` |
@@ -88,12 +99,13 @@ flowchart TD
 | Verifier evolution | Evolves verifier policies through genomes, held-out cases, BES/RHO candidate generation, archive, and human-gated promotion. | `src/harness-sidecar/meta/verifier*.js`, `src/harness-sidecar/tools/verifierConfigApply.js` |
 | Swarm and subagents | Schedules seeded, ToolTree, or evolution-archive attempts; assigns named profiles; allocates budgets; runs bounded attempts; reviews, recombines, chooses champion, proposes safe apply. | `src/harness-sidecar/swarm/*` |
 | Swarm outcome feedback | Converts champion success, rejected attempts, unsafe patches, missing verifier evidence, and visual failures into RHO/BES/meta feedback. | `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`, `src/harness-sidecar/server.js` |
+| Self-authored skill evolution | Mines repeated hard cases, snapshots source skills, generates shadow `SKILL.md` candidates, evaluates them, and approval-installs winners as workspace-local generated skills. | `src/harness-sidecar/skills/*` |
 | Collaboration and safe merge | Tracks locks, leases, roles, task claims, duplicate tasks, annotations, conflicts, merge manager. | `src/harness-sidecar/collaboration/*` |
 | Approvals and safe apply | Stores pending actions, resumes approved actions exactly once, applies champion/change/verifier config only after approval, and reports auto-approval eligibility metadata without bypassing gates. | `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/meta/autoApprovalPolicy.js`, `tools/gitApplyAdapter.js`, `tools/verifierConfigApply.js` |
 | Reliability and recovery | Categorizes failures, repairs malformed tool calls, detects no-progress loops, records degraded modes. | `src/harness-sidecar/reliability/*` |
 | Budgeting | Tracks tool/verifier/artifact budgets, hierarchy, dashboards, gates, and cost-aware allocation. | `src/harness-sidecar/budget/*` |
 | Traces, resume, replay | Writes event JSONL, summarizes/compacts traces, reconstructs resumable state, exposes trace replay. | `src/harness-sidecar/core/trace*.js`, `taskResume.js` |
-| UI operator surface | Displays harness controls, capabilities, traces, memory/RAG/graph, visual artifacts, subagents, verifier evolution status. | `public/index.html`, `public/app.js` |
+| UI operator surface | Displays harness controls, capabilities, traces, memory/RAG/graph, visual artifacts, subagents, verifier evolution status, adaptive-search state, skill candidate review, and replay results. | `public/index.html`, `public/app.js` |
 | External agent interop | Normalizes agent cards, routes agents, redacts credentials, issues delegated capability tokens, gates mutation. | `src/harness-sidecar/interop/*` |
 
 ## Runtime Flow
@@ -107,6 +119,7 @@ sequenceDiagram
   participant Context
   participant Tools
   participant Verifiers
+  participant Adaptive
   participant Meta
   participant Approvals
   participant Trace
@@ -116,16 +129,58 @@ sequenceDiagram
   Sidecar->>Capabilities: Mount enabled workspace capabilities
   Sidecar->>Context: Index workspace and build context pack
   Sidecar->>Trace: Emit task/context events
+  Sidecar->>Adaptive: Select advisory budget/search action
   Sidecar->>Tools: Optional model-driven tool loop
   Tools->>Verifiers: Run selected command/tool verifiers
   Verifiers->>Trace: Emit verifier evidence
-  Sidecar->>Meta: Run BES/RHO/meta flows
+  Sidecar->>Meta: Run BES/RHO/meta flows with adaptive-search context
   Meta->>Approvals: Create approval-required proposals
   Approvals->>Trace: Record pending approvals
   UI->>Approvals: Human approves/rejects
   Approvals->>Sidecar: Resume approved action
   Sidecar->>Trace: Persist result and resume state
 ```
+
+## The Adaptive Meta-Harness Spine
+
+Helios now has three related optimization layers. They are intentionally separate so the harness can learn without letting a single subsystem mutate everything at once.
+
+| Layer | Role | Runtime effect | Promotion power |
+| --- | --- | --- | --- |
+| RHO | Retrospective hard-case selection. It finds traces, swarm failures, verifier misses, memory/RAG misses, and repeated skill needs worth learning from. | Chooses what evidence should guide optimization. | None directly. |
+| BES / evolution | Candidate generation and dense scoring. It decomposes hard cases into goals, mutates policies/genomes/skills/verifiers, and archives useful or informative candidates. | Produces candidate plans, policies, skills, and verifier configs. | None directly. |
+| AB-MCTS adaptive search | Online allocation. It chooses whether the next step should go wider, go deeper, switch worker/profile, gather evidence, or stop/promote. | Advises live runtime lanes and records outcomes for replay. | None directly. |
+
+The important boundary is that optimization can recommend and rank candidates, but `promotionPolicy.js`, approval records, and safe apply modules decide whether anything becomes durable.
+
+```mermaid
+flowchart TD
+  Trace["Trace events, artifacts, verifier results"] --> RHO["RHO hard-case mining"]
+  RHO --> BES["BES goal tree + candidate evolution"]
+  BES --> Candidates["Policy / verifier / skill / context candidates"]
+  Trace --> Adaptive["AB-MCTS adaptive search"]
+  BES --> Adaptive
+  Adaptive --> Runtime["Runtime lane decision"]
+  Runtime --> Evidence["New evidence and outcome reward"]
+  Evidence --> Adaptive
+  Evidence --> Trace
+  Candidates --> Promotion["Promotion policy"]
+  Promotion --> Approval["Human approval"]
+  Approval --> Apply["Workspace-local safe apply"]
+```
+
+### What AB-MCTS Controls
+
+AB-MCTS does not replace the meta harness. It allocates live effort across it.
+
+- In the swarm, it annotates attempts with a selected arm and records champion/verifier rewards after the attempts finish.
+- In the meta optimizer, it adds routing metadata when RHO/BES candidates are being generated from hard cases.
+- In verifier selection, it can recommend normal verification, visual verification, extra evidence, or cheaper/stricter paths.
+- In deep research, it can bias toward more sources, contradiction passes, synthesis refinement, or figure/visual evidence.
+- In context/RAG, it can bias toward broader retrieval, graph-neighborhood deepening, memory review, or compaction.
+- In skill evolution, it helps decide whether to generate more variants, refine a current candidate, gather replay evidence, or queue promotion.
+
+The UI surfaces this through adaptive-search status, replay, and arm summaries. The API exposes the same through `/v1/adaptive-search/status` and `/v1/adaptive-search/replay`.
 
 ## How The Major Systems Relate
 
@@ -228,8 +283,8 @@ flowchart TD
 
 Swarm attempts produce candidate solutions. Collaboration and safe apply decide whether any candidate can mutate the workspace.
 
-- Attempts can be dry-run, model-driven, or worktree-backed depending on feature flags and injected adapters.
-- Attempt scheduling can use seeded strategies, ToolTree planning, or BES/evolution archive/frontier evidence.
+- Attempts can be dry-run, model-driven, Pi-native, or worktree-backed depending on feature flags and injected adapters.
+- Attempt scheduling can use seeded strategies, ToolTree planning, BES/evolution archive/frontier evidence, and AB-MCTS adaptive-search actions.
 - Named profiles make role, VLM access, tool caps, mutation permissions, and output contracts explicit.
 - Fitness-aware budgets allocate more effort to strong candidates while preserving exploration and visual/VLM artifact budget.
 - Bounded execution can run attempts concurrently when enabled while preserving deterministic result ordering.
@@ -241,19 +296,84 @@ Swarm attempts produce candidate solutions. Collaboration and safe apply decide 
 Relationship:
 
 ```mermaid
-flowchart LR
+flowchart TD
   Task["Task"] --> Swarm["Swarm orchestrator"]
-  EvolutionArchive["BES/evolution archive"] --> Swarm
+  RHO["RHO hard cases"] --> BES["BES goals + evolution archive"]
+  BES --> Adaptive["AB-MCTS: wider/deeper/switch/evidence/stop"]
+  EvolutionArchive["BES/evolution archive"] --> Adaptive
+  Adaptive --> Swarm
   Swarm --> Profiles["Named profiles + budget allocation"]
   Profiles --> Attempts["Bounded attempts"]
   Attempts --> Reviews["Reviews"]
   Reviews --> Champion["Champion selected"]
   Reviews --> Outcome["Outcome recorder"]
-  Outcome --> RHO["RHO swarm cases"]
+  Outcome --> Reward["Adaptive-search reward"]
+  Reward --> Adaptive
+  Outcome --> RHO
   Champion --> Plan["Safe apply plan"]
   Plan --> Approval["approval.required"]
   Approval --> GitApply["Git apply adapter"]
 ```
+
+### Swarm Loop And Meta Harness Feedback
+
+The swarm loop is one of the clearest places where the meta harness becomes useful at runtime:
+
+1. **Pre-swarm meta context.** Earlier task phases build RHO cases, BES goal trees, evolution archives, context packs, memory/graph signals, and verifier/VLM evidence.
+2. **Adaptive planning.** `attemptScheduler.js` chooses seeded, ToolTree, or evolution-aware attempts, then AB-MCTS annotates the plan with the selected arm.
+3. **Profile and budget assignment.** `swarmOrchestrator.js` assigns agent profiles and optional evolution budgets so attempts have roles, tool permissions, model profiles, VLM access, and cost caps.
+4. **Attempt execution.** Attempts run through deterministic dry-run, model-driven worker, Pi-native worker, command subagent, or worktree command lanes.
+5. **Review and champion selection.** The reviewer scores safety, verifier evidence, patch shape, and contract completeness; recombination can merge approved outputs; champion selection chooses the strongest attempt.
+6. **Outcome recording.** `swarmOutcomeRecorder.js` converts champion score, failed attempts, missing verifier evidence, unsafe patches, visual failures, and handoff quality into hard-case feedback.
+7. **Reward and trace.** AB-MCTS receives outcome reward, while trace events preserve the decision, attempt timeline, and scheduler summary.
+8. **Next optimization wave.** RHO mines those traces; BES/evolution generate better policies, profiles, verifier configs, or skills; promotion gates decide whether any candidate can become durable.
+
+In short: the swarm explores possible solutions, the meta harness learns from that exploration, and AB-MCTS decides how aggressively to spend the next search step.
+
+```mermaid
+sequenceDiagram
+  participant Sidecar
+  participant Meta as RHO/BES/Archive
+  participant MCTS as AB-MCTS
+  participant Swarm
+  participant Worker as Subagent/Worker
+  participant Verifier
+  participant Trace
+
+  Sidecar->>Meta: Build hard cases, goals, archive
+  Meta->>MCTS: Provide context and candidate signals
+  MCTS->>Swarm: Select action arm and planning metadata
+  Swarm->>Worker: Run bounded attempts with profiles/budgets
+  Worker->>Verifier: Produce patch/output and verifier evidence
+  Verifier->>Swarm: Score evidence
+  Swarm->>Swarm: Review, recombine, choose champion
+  Swarm->>MCTS: Record reward from champion/verifiers/cost
+  Swarm->>Trace: Emit subagent, outcome, and scheduler events
+  Trace->>Meta: Future RHO mining and replay
+```
+
+### Self-Authored Skill Flow
+
+Skill evolution uses the same spine as swarm evolution, but its durable output is a workspace-local capability instead of a patch.
+
+```mermaid
+flowchart TD
+  Failures["Repeated failures / RHO cases"] --> Need["Skill need miner"]
+  Need --> Snapshot["Optional source skill snapshot"]
+  Snapshot --> Generator["BES skill candidate generator"]
+  Need --> Generator
+  Generator --> Candidate["Shadow SKILL.md candidate"]
+  Candidate --> Evaluator["Static + replay evaluator"]
+  Evaluator --> SkillMCTS["AB-MCTS skill evolution scheduler"]
+  SkillMCTS --> Candidate
+  Evaluator --> Promotion["Skill promotion policy"]
+  Promotion --> Review["Operator skill review UI/API"]
+  Review --> Apply["Apply approved generated skill"]
+  Apply --> Package[".harness/packages/generated-skills"]
+  Package --> Capability["Workspace capability registry"]
+```
+
+The original source skill is not overwritten. Candidate skills stay under `.harness/meta/skill-candidates` until approval applies them into `.harness/packages/generated-skills`.
 
 ## Feature Gates And Runtime Flags
 
@@ -267,6 +387,7 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Safe apply | `.harness/config.yaml` `features.safeApply: true` or `HELIOS_SAFE_APPLY=1` |
 | Production visual artifacts | `.harness/config.yaml` `features.visualArtifacts: true`, preview URL config, or `HELIOS_WEB_PREVIEW_URL` |
 | Verifier evolution | `.harness/config.yaml` `features.verifierEvolution: true` or `HELIOS_VERIFIER_EVOLUTION=1` |
+| Adaptive search | `.harness/config.yaml` `features.adaptiveSearch: true`; default mode remains `advisory` |
 | Bounded swarm concurrency | Optional `swarmExecution.concurrency` input; default remains sequential |
 | Policy evolution candidates | Shadow-only by default; promotion and mutation still require existing gates |
 | Auto-approval eligibility | Metadata only unless a future approved policy explicitly enables a narrow local tier |
@@ -283,6 +404,9 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | `.harness/memory/` | Memory candidates, promoted records, graph snapshots |
 | `.harness/visual/<task-id>/` | Visual screenshots, diffs, OCR/PDF outputs |
 | `.harness/meta/verifier-candidates/` | Archived verifier-evolution candidates |
+| `.harness/meta/skill-candidates/` | Shadow self-authored or adapted skill candidates |
+| `.harness/meta/skill-snapshots/` | Immutable source-skill snapshots for local evaluation/adaptation |
+| `.harness/packages/generated-skills/` | Approved generated skill package output |
 | `.harness/verifiers.json` | Workspace verifier configuration, when verifier candidates are approved |
 
 ## Security And Control Boundaries
@@ -298,6 +422,8 @@ Important controls:
 - Visual verifier events avoid binary image payloads; private URL components and OCR text are not written into default artifact metadata.
 - VLM pass/fail cannot self-certify: score and confidence thresholds decide visual verifier status.
 - Verifier evolution proposes candidates and archives evidence; it does not directly promote or apply without human approval.
+- AB-MCTS can recommend `stop_or_promote`, but it cannot promote or apply; promotion remains a policy plus approval decision.
+- Self-authored skills cannot write to global Codex, Claude, Pi, or home skill folders. Approved candidates install only into workspace-local `.harness/packages`.
 
 ## Operator Reading Map
 
@@ -308,8 +434,11 @@ Start here for common questions:
 - "How are verifiers selected?" Read `src/harness-sidecar/tools/verifierSelector.js`.
 - "How does visual verification work?" Read `src/harness-sidecar/vlm/visualVerifier.js`.
 - "How does verifier evolution work?" Read `src/harness-sidecar/meta/verifierEvolutionLoop.js`.
+- "How does adaptive search allocate runtime effort?" Read `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, and `adaptiveSearchApi.js`.
 - "How does memory-guided graph construction work?" Read `src/harness-sidecar/memory/globalMemoryLayers.js` and `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`.
 - "How do swarm outcomes feed evolution?" Read `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`.
+- "How does the swarm use adaptive search?" Read `src/harness-sidecar/swarm/attemptScheduler.js` and `src/harness-sidecar/swarm/swarmOrchestrator.js`.
+- "How do self-authored skills work?" Read `src/harness-sidecar/skills/skillNeedMiner.js`, `skillEvolution.js`, `skillCandidateEvaluator.js`, `skillCandidateApply.js`, and `skillCandidateReview.js`.
 - "Which policies can evolve in shadow mode?" Read `src/harness-sidecar/meta/*PolicyEvolution.js`.
 - "How should swarm use meta evolution?" Read `docs/architecture/swarm-evolution-integration-plan.md`.
 - "How should subagents and swarm traces appear in the UI?" Read `docs/architecture/subagent-swarm-ui-and-tracing-plan.md`.
@@ -327,4 +456,4 @@ These are known follow-up areas rather than blockers for local testing:
 - Broader MCP quarantine coverage for future model-visible fields beyond current returned-content scanning.
 - Rename or clarify code-impact events that use context-pack paths as seed files, so they are not mistaken for actual diff changed files.
 - Expand the operator dashboard from compact data events into a fuller dedicated browser panel for context pressure, recovery, policy evolution, memory graph health, verifier evolution, and budget alerts.
-- Add a disabled-by-default Pi-native swarm mode that supervises independent Pi Agent worker sessions as `pi_native_subagent` attempts, while preserving sidecar-owned tracing, review, RHO/BES feedback, and approval-gated apply.
+- Continue hardening Pi-native swarm mode so independent Pi Agent worker sessions can act as `pi_native_subagent` attempts while preserving sidecar-owned tracing, review, RHO/BES feedback, and approval-gated apply.
