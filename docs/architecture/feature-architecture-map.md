@@ -88,7 +88,7 @@ flowchart TD
 | Context pressure and working memory | Tracks context window pressure, compresses or drops lower-priority items, preserves important facts. | `src/harness-sidecar/context/*` |
 | Code and evidence graph | Builds code graph, import/call heuristics, claim/evidence graph, experiment graph, visual graph, and impact analysis. | `src/harness-sidecar/graph/*` |
 | Memory and graph memory | Writes memory candidates, scores corpus, promotes useful memory, stores graph snapshots and retrieves promoted context. | `src/harness-sidecar/memory/*` |
-| MemGraphRAG-style global memory | Maintains schema/fact/passage layers, pending-to-active fact promotion, evidence-backed conflict adjudication, graph bridging, and memory-aware retrieval. | `src/harness-sidecar/memory/globalMemoryLayers.js`, `memoryGraphConstructor.js`, `memoryConflictAdjudicator.js`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js` |
+| MemGraphRAG-style global memory | Maintains schema/fact/passage layers, pending-to-active fact promotion, evidence-backed conflict adjudication, graph bridging, runtime snapshots, and memory-aware retrieval. | `src/harness-sidecar/memory/globalMemoryLayers.js`, `memoryGraphConstructor.js`, `memoryConflictAdjudicator.js`, `memoryGraphRuntime.js`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` |
 | Deep Research v2 | Builds research briefs, discovers/ingests sources, extracts claims, checks citations/contradictions, writes reports and handoff artifacts. | `src/harness-sidecar/research/*` |
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
 | AB-MCTS adaptive search | Allocates online budget between going wider, going deeper, switching worker/profile, gathering evidence, and stopping/promoting. It is advisory by default and replayable from traces. | `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, `adaptiveSearchApi.js` |
@@ -98,10 +98,15 @@ flowchart TD
 | Shadow policy evolution | Proposes and evaluates shadow-only context, tool-loop, budget, visual/VLM, memory, MCP trust, and research policies without self-applying them. | `src/harness-sidecar/meta/*PolicyEvolution.js` |
 | Verifier evolution | Evolves verifier policies through genomes, held-out cases, BES/RHO candidate generation, archive, and human-gated promotion. | `src/harness-sidecar/meta/verifier*.js`, `src/harness-sidecar/tools/verifierConfigApply.js` |
 | Swarm and subagents | Schedules seeded, ToolTree, or evolution-archive attempts; assigns named profiles; allocates budgets; runs bounded attempts; reviews, recombines, chooses champion, proposes safe apply. | `src/harness-sidecar/swarm/*` |
+| SwarmCell contracts and local meta | Normalizes task/evolution output, defines SwarmCell roles, runs local meta feedback, archives local candidates, blocks durable self-approval, and emits local meta/memory events. | `src/harness-sidecar/swarm/swarmCellContracts.js`, `swarmCellRegistry.js`, `swarmCellRuntime.js`, `src/harness-sidecar/meta/local*.js` |
 | Swarm outcome feedback | Converts champion success, rejected attempts, unsafe patches, missing verifier evidence, and visual failures into RHO/BES/meta feedback. | `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`, `src/harness-sidecar/server.js` |
+| RHO replay and self-preference | Runs grouped baseline/candidate replays and scores self-validation, self-consistency, and pairwise preference as promotion evidence. | `src/harness-sidecar/rho/replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` |
+| BES lane contracts and lineage | Declares candidate/verifier units per lane, applies trajectory operators, scores dense subgoals, and records ancestry across evolved candidates. | `src/harness-sidecar/bes/laneContracts.js`, `trajectoryOperators.js`, `denseSubgoalVerifier.js`, `globalLineageTracker.js` |
+| Global harness experiments | Writes Meta-Harness-style run directories, compares baseline/candidate metrics, and updates the global frontier without self-applying changes. | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js` |
 | Self-authored skill evolution | Mines repeated hard cases, snapshots source skills, generates shadow `SKILL.md` candidates, evaluates them, and approval-installs winners as workspace-local generated skills. | `src/harness-sidecar/skills/*` |
 | Collaboration and safe merge | Tracks locks, leases, roles, task claims, duplicate tasks, annotations, conflicts, merge manager. | `src/harness-sidecar/collaboration/*` |
 | Approvals and safe apply | Stores pending actions, resumes approved actions exactly once, applies champion/change/verifier config only after approval, and reports auto-approval eligibility metadata without bypassing gates. | `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/meta/autoApprovalPolicy.js`, `tools/gitApplyAdapter.js`, `tools/verifierConfigApply.js` |
+| Trust-kernel boundary | Rejects unsafe optimizer proposals before durable apply, including path escapes, verifier-floor weakening, audit/secret-redaction disablement, missing patch paths, and source patches without approval. | `src/harness-sidecar/core/trustKernelBoundary.js` |
 | Reliability and recovery | Categorizes failures, repairs malformed tool calls, detects no-progress loops, records degraded modes. | `src/harness-sidecar/reliability/*` |
 | Budgeting | Tracks tool/verifier/artifact budgets, hierarchy, dashboards, gates, and cost-aware allocation. | `src/harness-sidecar/budget/*` |
 | Traces, resume, replay | Writes event JSONL, summarizes/compacts traces, reconstructs resumable state, exposes trace replay. | `src/harness-sidecar/core/trace*.js`, `taskResume.js` |
@@ -330,6 +335,13 @@ The swarm loop is one of the clearest places where the meta harness becomes usef
 
 In short: the swarm explores possible solutions, the meta harness learns from that exploration, and AB-MCTS decides how aggressively to spend the next search step.
 
+The hierarchical pass adds two operator-visible events to this loop:
+
+- `local_meta.completed`: emitted after an attempt when local meta feedback is enabled. It reports the SwarmCell, attempt id, candidate count, archived candidates, and local mutation proposals.
+- `local_memory.proposed`: emitted whenever local memory hierarchy feedback is enabled. It is independent of local meta feedback and forwards attempt-level `evolutionOutput.memoryProposals` plus deduped local-meta candidate memory proposals for global review.
+
+These are review signals, not apply signals. They make local learning visible in the trace and UI without granting local agents durable authority.
+
 ```mermaid
 sequenceDiagram
   participant Sidecar
@@ -348,9 +360,28 @@ sequenceDiagram
   Verifier->>Swarm: Score evidence
   Swarm->>Swarm: Review, recombine, choose champion
   Swarm->>MCTS: Record reward from champion/verifiers/cost
+  Swarm->>Trace: Emit local_meta.completed and local_memory.proposed
   Swarm->>Trace: Emit subagent, outcome, and scheduler events
   Trace->>Meta: Future RHO mining and replay
 ```
+
+### Evolutionary Loop Map
+
+The main evolutionary loops are layered so each can be tested and stopped independently.
+
+| Loop | Input | Output | Durable authority |
+| --- | --- | --- | --- |
+| SwarmCell attempt | task, role profile, context, budget | `taskOutput`, `evolutionOutput`, verifier evidence | no |
+| Local meta-harness | attempt output, hard-case tags, verifier evidence | local candidates, `local_meta.completed` | no |
+| Local memory hierarchy | local observations and memory proposals | pending local/global memory proposals, `local_memory.proposed` | no |
+| Global MemGraphRAG | pending passages/schemas/facts and provenance | active global memory layers and graph snapshots | memory only through runtime policy |
+| RHO replay | trace hard cases and candidate/baseline runners | validation, consistency, preference evidence | no |
+| BES lane evolution | goals, candidates, evidence | mutated/recombined candidate families with lineage | no |
+| Global harness experiment | candidate, baseline, metrics, rollback data | run directory, frontier update, promotion evidence | no |
+| AB-MCTS adaptive search | live state and reward history | next action arm and scheduler summary | no |
+| Trust kernel | candidate, risk metadata, approval record | reject, require approval, or safe apply | yes, by policy |
+
+The key design rule is that loops may produce evidence and proposals, but only the trust-kernel path can make a risky change durable.
 
 ### Self-Authored Skill Flow
 
@@ -387,6 +418,8 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Safe apply | `.harness/config.yaml` `features.safeApply: true` or `HELIOS_SAFE_APPLY=1` |
 | Production visual artifacts | `.harness/config.yaml` `features.visualArtifacts: true`, preview URL config, or `HELIOS_WEB_PREVIEW_URL` |
 | Verifier evolution | `.harness/config.yaml` `features.verifierEvolution: true` or `HELIOS_VERIFIER_EVOLUTION=1` |
+| Local meta feedback | `.harness/config.yaml` `features.localMetaHarness: false` disables it; full runtime defaults to enabled |
+| Local memory hierarchy feedback | `.harness/config.yaml` `features.localMemoryGraph: false` disables it; full runtime defaults to enabled |
 | Adaptive search | `.harness/config.yaml` `features.adaptiveSearch: true`; default mode remains `advisory` |
 | Bounded swarm concurrency | Optional `swarmExecution.concurrency` input; default remains sequential |
 | Policy evolution candidates | Shadow-only by default; promotion and mutation still require existing gates |
@@ -402,7 +435,10 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | `.harness/traces/<task-id>/events.jsonl` | Event trace for task replay/resume |
 | `.harness/artifacts/` | Text and runtime artifacts |
 | `.harness/memory/` | Memory candidates, promoted records, graph snapshots |
+| `.harness/memory/graph-snapshot.json` | Persisted global memory graph runtime snapshot |
 | `.harness/visual/<task-id>/` | Visual screenshots, diffs, OCR/PDF outputs |
+| `.harness/meta/local-candidates/<cell-id>/` | Local meta-harness candidate records scoped by SwarmCell |
+| `.harness/meta/harness-runs/<run-id>/` | Global Meta-Harness experiment records: candidate, patches, evals, promotion, rollback, and memory proposals |
 | `.harness/meta/verifier-candidates/` | Archived verifier-evolution candidates |
 | `.harness/meta/skill-candidates/` | Shadow self-authored or adapted skill candidates |
 | `.harness/meta/skill-snapshots/` | Immutable source-skill snapshots for local evaluation/adaptation |
@@ -436,6 +472,10 @@ Start here for common questions:
 - "How does verifier evolution work?" Read `src/harness-sidecar/meta/verifierEvolutionLoop.js`.
 - "How does adaptive search allocate runtime effort?" Read `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, and `adaptiveSearchApi.js`.
 - "How does memory-guided graph construction work?" Read `src/harness-sidecar/memory/globalMemoryLayers.js` and `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`.
+- "How do local/global memory loops work?" Read `src/harness-sidecar/memory/localMemoryGraph.js`, `swarmCellMemoryGraph.js`, `memoryGraphRuntime.js`, and `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`.
+- "How does local meta feedback work?" Read `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, and `localPromotionBlocker.js`.
+- "Where are global harness experiments stored?" Read `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, and `harnessFrontier.js`.
+- "What stops optimizers from self-authorizing?" Read `src/harness-sidecar/core/trustKernelBoundary.js`.
 - "How do swarm outcomes feed evolution?" Read `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`.
 - "How does the swarm use adaptive search?" Read `src/harness-sidecar/swarm/attemptScheduler.js` and `src/harness-sidecar/swarm/swarmOrchestrator.js`.
 - "How do self-authored skills work?" Read `src/harness-sidecar/skills/skillNeedMiner.js`, `skillEvolution.js`, `skillCandidateEvaluator.js`, `skillCandidateApply.js`, and `skillCandidateReview.js`.
