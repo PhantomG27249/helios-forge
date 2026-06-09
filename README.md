@@ -79,6 +79,10 @@ Configure Pi with the private OpenAI-compatible base URL and model id you want t
 
 Keep credentials and provider details in Pi's normal config. Helios Forge only mounts workspace-local harness capabilities unless you explicitly install the optional global Pi kwargs extension.
 
+## License
+
+Helios Forge is licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE).
+
 ## Development
 
 ```powershell
