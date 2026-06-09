@@ -55,6 +55,7 @@ function outputFromModelWorker(result = {}) {
     score: result.score,
     artifacts: result.artifacts,
     risks: result.risks,
+    evolutionOutput: result.evolutionOutput,
   };
 }
 
@@ -213,7 +214,9 @@ async function runScheduledAttempt({
         patchStats: inferPatchStats(output),
         worker,
         model: modelResult.model,
-        contract: {
+        taskOutput: modelResult.taskOutput,
+        evolutionOutput: modelResult.evolutionOutput,
+        contract: modelResult.contract || {
           requiredFields: outputContract.requiredFields || [],
           missingFields: [],
           valid: true,

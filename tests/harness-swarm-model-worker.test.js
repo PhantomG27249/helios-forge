@@ -110,6 +110,26 @@ test('model-driven worker accepts provider JSON string output and verifier-only 
   assert.deepEqual(result.artifacts, []);
 });
 
+test('model-driven worker fails forbidden local durable approval contracts', async () => {
+  const result = await runModelDrivenAttempt({
+    task: { taskId: 'task_model_worker_local_approval', goal: 'Reject local approval.' },
+    attempt: { attemptId: 'attempt_model_local_approval', strategy: 'guardrails' },
+    provider: async () => ({
+      summary: 'Proposed a local durable approval.',
+      verifierEvidence: ['node --test tests/harness-swarm-model-worker.test.js'],
+      evolutionOutput: {
+        durableApplyApproved: true,
+        suggestedCodeChange: { path: 'src/harness-sidecar/server.js' },
+      },
+    }),
+  });
+
+  assert.equal(result.status, 'contract_failed');
+  assert.equal(result.contract.valid, false);
+  assert.equal(result.contract.reasons.includes('local_durable_approval_forbidden'), true);
+  assert.equal(result.evolutionOutput.durableApplyApproved, false);
+});
+
 test('model-driven worker rejects malformed model output with clear contract error', async () => {
   await assert.rejects(
     runModelDrivenAttempt({

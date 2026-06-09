@@ -114,6 +114,8 @@ export function normalizeModelWorkerOutput({
     evolutionOutput: output.evolutionOutput || output.evolution || {},
   });
 
+  const contractValid = swarmCellContract.valid;
+
   return {
     attemptId: attempt.attemptId,
     role,
@@ -129,7 +131,7 @@ export function normalizeModelWorkerOutput({
     evolutionOutput: swarmCellOutput.evolutionOutput,
     compactHandoff,
     handoffQuality: scoreCompactHandoff(compactHandoff),
-    status: 'completed',
+    status: contractValid ? 'completed' : 'contract_failed',
     contract: {
       requiredFields: MODEL_WORKER_REQUIRED_FIELDS,
       missingFields: [],

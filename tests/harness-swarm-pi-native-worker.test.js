@@ -161,6 +161,35 @@ test('pi native worker recovers structured handoff from Pi messages after prompt
   assert.equal(result.score, 77);
 });
 
+test('pi native worker fails forbidden local durable approval contracts', async () => {
+  const result = await runPiNativeAttempt({
+    task: { taskId: 'task_pi_local_approval', task: 'Reject local Pi approval.' },
+    attempt: { attemptId: 'attempt_pi_local_approval', strategy: 'guardrails' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'verifierEvidence'] },
+    piWorkerFactory: async () => ({
+      start: async () => {},
+      sendCommand: async () => ({
+        success: true,
+        data: {
+          summary: 'Pi worker proposed local durable approval.',
+          verifierEvidence: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+          evolutionOutput: {
+            durableApplyApproved: true,
+            suggestedCodeChange: { path: 'src/harness-sidecar/server.js' },
+          },
+        },
+      }),
+      stop: async () => {},
+    }),
+  });
+
+  assert.equal(result.status, 'contract_failed');
+  assert.equal(result.contract.valid, false);
+  assert.equal(result.contract.reasons.includes('local_durable_approval_forbidden'), true);
+  assert.equal(result.evolutionOutput.durableApplyApproved, false);
+});
+
 test('pi native worker waits for delayed structured handoff after prompt ack', async () => {
   let messagePolls = 0;
   const result = await runPiNativeAttempt({

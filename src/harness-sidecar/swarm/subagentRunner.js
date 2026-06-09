@@ -180,7 +180,7 @@ export async function runSubagentAttempt({
       attemptId: attempt.attemptId,
       strategy: attempt.strategy,
       role,
-      status: missingFields.length ? 'contract_failed' : 'completed',
+      status: contractValid ? 'completed' : 'contract_failed',
       output,
       taskOutput: swarmCellOutput.taskOutput,
       evolutionOutput: swarmCellOutput.evolutionOutput,
