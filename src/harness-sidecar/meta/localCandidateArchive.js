@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 
 const CANDIDATE_RECORD_FILE = 'candidate.json';
@@ -57,6 +57,26 @@ function stableLocalRecord({
   };
 }
 
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function resolveAvailableCandidateId({ workspaceRoot, cellId, candidateId }) {
+  let nextId = candidateId;
+  let suffix = 1;
+  while (await pathExists(getLocalCandidateRecordPath({ workspaceRoot, cellId, candidateId: nextId }))) {
+    suffix += 1;
+    nextId = `${candidateId}_${suffix}`;
+  }
+  return nextId;
+}
+
 export async function archiveLocalCandidate({
   workspaceRoot,
   cellId,
@@ -66,15 +86,20 @@ export async function archiveLocalCandidate({
   assertWorkspaceRoot(workspaceRoot);
   const safeCellId = assertSafeId(cellId, 'cell id');
   const safeCandidateId = assertSafeId(candidate.candidateId, 'candidate id');
-  const recordPath = getLocalCandidateRecordPath({
+  const archiveCandidateId = await resolveAvailableCandidateId({
     workspaceRoot,
     cellId: safeCellId,
     candidateId: safeCandidateId,
   });
+  const recordPath = getLocalCandidateRecordPath({
+    workspaceRoot,
+    cellId: safeCellId,
+    candidateId: archiveCandidateId,
+  });
   const recordDir = path.dirname(recordPath);
   const record = stableLocalRecord({
     cellId: safeCellId,
-    candidateId: safeCandidateId,
+    candidateId: archiveCandidateId,
     archivedAt: candidate.archivedAt || new Date().toISOString(),
     candidate,
     evidence,

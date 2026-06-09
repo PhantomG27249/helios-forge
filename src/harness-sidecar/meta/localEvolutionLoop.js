@@ -15,6 +15,10 @@ function normalizedStringList(value) {
     });
 }
 
+function normalizedList(value) {
+  return asArray(value).filter((item) => item !== undefined && item !== null);
+}
+
 function safeIdPart(value, fallback) {
   const normalized = String(value || fallback || 'cell').replace(/[^A-Za-z0-9_-]/g, '_');
   return normalized.length > 0 ? normalized : fallback;
@@ -24,6 +28,7 @@ function inferMutationType(evolutionOutput = {}) {
   if (evolutionOutput.suggestedCodeChange) return 'code_change_suggestion';
   if (evolutionOutput.suggestedVerifierChange) return 'verifier_adjustment';
   if (evolutionOutput.suggestedMemoryPolicyChange || evolutionOutput.suggestedMemoryChange) return 'memory_policy_adjustment';
+  if (normalizedList(evolutionOutput.memoryProposals).length) return 'memory_proposal';
   if (evolutionOutput.suggestedPolicyChange) return 'policy_adjustment';
   if (evolutionOutput.suggestedProfileChange) return 'profile_adjustment';
   return 'hard_case_profile_update';
@@ -33,6 +38,7 @@ function inferTarget(evolutionOutput = {}) {
   if (evolutionOutput.suggestedCodeChange) return 'code';
   if (evolutionOutput.suggestedVerifierChange) return 'verifier';
   if (evolutionOutput.suggestedMemoryPolicyChange || evolutionOutput.suggestedMemoryChange) return 'memory_policy';
+  if (normalizedList(evolutionOutput.memoryProposals).length) return 'memory';
   if (evolutionOutput.suggestedPolicyChange) return 'policy';
   if (evolutionOutput.suggestedProfileChange) return 'profile';
   return 'local_profile';
@@ -52,6 +58,7 @@ function buildCandidate({ cellId, attempt = {}, evolutionOutput = {}, hardCaseTa
     suggestedVerifierChange: evolutionOutput.suggestedVerifierChange ?? null,
     suggestedMemoryPolicyChange: evolutionOutput.suggestedMemoryPolicyChange ?? null,
     suggestedMemoryChange: evolutionOutput.suggestedMemoryChange ?? null,
+    memoryProposals: normalizedList(evolutionOutput.memoryProposals),
     suggestedPolicyChange: evolutionOutput.suggestedPolicyChange ?? null,
     durableApplyRequested: Boolean(evolutionOutput.durableApplyRequested),
     durableApplyApproved: false,
@@ -68,7 +75,10 @@ function buildCandidate({ cellId, attempt = {}, evolutionOutput = {}, hardCaseTa
 export function runLocalEvolutionLoop({ cellId, attempt = {} } = {}) {
   const evolutionOutput = attempt.evolutionOutput || {};
   const hardCaseTags = normalizedStringList(evolutionOutput.hardCaseTags);
-  const candidates = hardCaseTags.map((hardCaseTag, index) => buildCandidate({
+  const candidateTags = hardCaseTags.length
+    ? hardCaseTags
+    : (normalizedList(evolutionOutput.memoryProposals).length ? ['memory_proposal'] : []);
+  const candidates = candidateTags.map((hardCaseTag, index) => buildCandidate({
     cellId,
     attempt,
     evolutionOutput,

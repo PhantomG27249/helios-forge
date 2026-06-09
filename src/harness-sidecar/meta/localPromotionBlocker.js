@@ -11,6 +11,7 @@ function hasDurableChange(candidate = {}) {
     || candidate.suggestedMemoryPolicyChange
     || candidate.memoryPolicyChange
     || candidate.suggestedMemoryChange
+    || (Array.isArray(candidate.memoryProposals) && candidate.memoryProposals.length > 0)
     || candidate.suggestedPolicyChange
     || candidate.policyChange,
   );

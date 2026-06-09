@@ -66,6 +66,26 @@ test('local evolution loop turns hard cases into local scoped candidates', () =>
   assert.equal(result.candidates[0].durableApplyApproved, false);
 });
 
+test('local evolution loop preserves memory proposals for global review', () => {
+  const result = runLocalEvolutionLoop({
+    cellId: 'memory_rag',
+    attempt: {
+      attemptId: 'a_memory',
+      status: 'completed',
+      evolutionOutput: {
+        memoryProposals: [{ factId: 'fact_1', subject: 'A', relation: 'requires', object: 'B' }],
+      },
+    },
+  });
+
+  assert.equal(result.candidates.length, 1);
+  assert.deepEqual(result.candidates[0].memoryProposals, [
+    { factId: 'fact_1', subject: 'A', relation: 'requires', object: 'B' },
+  ]);
+  assert.equal(result.candidates[0].forwardToGlobal, true);
+  assert.equal(result.candidates[0].reasons.includes('local_meta_harness_cannot_self_authorize'), true);
+});
+
 test('local meta harness archives candidates without approving durable apply', async () => {
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'helios-local-meta-'));
   try {
@@ -90,6 +110,38 @@ test('local meta harness archives candidates without approving durable apply', a
     assert.equal(result.candidates[0].forwardToGlobal, true);
     assert.equal(result.archiveRecords.length, 1);
     assert.equal(result.auditEvents.some((event) => event.type === 'local_meta.candidates_archived'), true);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('local meta harness archives repeated local candidates without overwriting evidence', async () => {
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), 'helios-local-meta-'));
+  try {
+    const first = await runLocalMetaHarness({
+      workspaceRoot,
+      cell: { cellId: 'code' },
+      attempt: {
+        attemptId: 'a1',
+        status: 'completed',
+        evolutionOutput: { hardCaseTags: ['missing_context'] },
+      },
+    });
+    const second = await runLocalMetaHarness({
+      workspaceRoot,
+      cell: { cellId: 'code' },
+      attempt: {
+        attemptId: 'a2',
+        status: 'completed',
+        evolutionOutput: { hardCaseTags: ['missing_context'] },
+      },
+    });
+
+    assert.notEqual(first.archiveRecords[0].recordPath, second.archiveRecords[0].recordPath);
+    const firstSaved = JSON.parse(await readFile(first.archiveRecords[0].recordPath, 'utf8'));
+    const secondSaved = JSON.parse(await readFile(second.archiveRecords[0].recordPath, 'utf8'));
+    assert.equal(firstSaved.evidence.attemptId, 'a1');
+    assert.equal(secondSaved.evidence.attemptId, 'a2');
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
