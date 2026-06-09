@@ -548,6 +548,8 @@ export function createHarnessSidecar({
       mode: task.mode,
       enabledSubsystems,
       modelDrivenSwarm: Boolean(runtimeSwarmModel),
+      piNativeSwarm: harnessConfig?.features?.piNativeSwarm === true
+        || process.env.HELIOS_PI_NATIVE_SWARM === '1',
     });
 
     const strategies = seedAttemptStrategies({ taskType: 'coding_bugfix', maxAttempts: 4 });
@@ -1413,6 +1415,8 @@ export function createHarnessSidecar({
     });
     const worktreeOptIn = harnessConfig?.features?.worktreeSwarm === true
       || process.env.HELIOS_SWARM_WORKTREE === '1';
+    const piNativeSwarmEnabled = harnessConfig?.features?.piNativeSwarm === true
+      || process.env.HELIOS_PI_NATIVE_SWARM === '1';
     const injectedSafeWorktree = Boolean(swarmWorktreeManager && swarmCommandAdapter);
     const useWorktreeOptions = !runtimeSwarmModel && (worktreeOptIn || injectedSafeWorktree);
     const swarmCommandRunner = swarmCommandAdapter || defaultSwarmCommandAdapter;
@@ -1473,6 +1477,10 @@ export function createHarnessSidecar({
       budget: { maxOutputChars: 1200 },
       modelGateway: runtimeSwarmModel?.gateway,
       modelProfileName: runtimeSwarmModel?.profileName,
+      swarmExecution: {
+        piNative: piNativeSwarmEnabled,
+        concurrency: Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
+      },
       onAttemptEvent: emitEvent,
       commandAdapter: swarmCommandRunner,
       verifierAdapter: useWorktreeOptions ? swarmVerifierAdapter : undefined,

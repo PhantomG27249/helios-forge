@@ -46,6 +46,11 @@ let harnessState = {
     pendingVerifierPromotions: 0,
     visualVerifierArtifacts: [],
   },
+  swarm: {
+    selectedAttemptId: null,
+    selectedEventKey: null,
+    timelines: new Map(),
+  },
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -59,6 +64,7 @@ let activeHarnessTab = 'run';
 let harnessCapabilitiesLoaded = false;
 let harnessCapabilities = [];
 let harnessCapabilitiesRequestTimer = null;
+let harnessSmitheryResults = [];
 let harnessTraceState = {
   traces: [],
   selectedTaskId: null,
@@ -169,12 +175,26 @@ const harnessDeepToolCalls = $('#harness-deep-tool-calls');
 const harnessDeepMinutes = $('#harness-deep-minutes');
 const harnessCapabilityStatus = $('#harness-capability-status');
 const harnessCapabilityForm = $('#harness-capability-form');
+const capabilityInstallQuery = $('#capability-install-query');
+const capabilitySmitheryKey = $('#capability-smithery-key');
+const capabilitySmitheryResults = $('#capability-smithery-results');
 const harnessTraceStatus = $('#harness-trace-status');
 const harnessTraceList = $('#harness-trace-list');
 const harnessTraceEvents = $('#harness-trace-events');
 const harnessTraceEventCount = $('#harness-trace-event-count');
 const harnessTraceCostCount = $('#harness-trace-cost-count');
 const harnessTraceContextCount = $('#harness-trace-context-count');
+const harnessSwarmStatus = $('#harness-swarm-status');
+const harnessSwarmActiveCount = $('#harness-swarm-active-count');
+const harnessSwarmAttempts = $('#harness-swarm-attempts');
+const harnessSwarmAttemptDetail = $('#harness-swarm-attempt-detail');
+const harnessSwarmDetailSummary = $('#harness-swarm-detail-summary');
+const harnessSwarmInspectorMetadata = $('#harness-swarm-inspector-metadata');
+const harnessSwarmTimeline = $('#harness-swarm-timeline');
+const harnessSwarmThinking = $('#harness-swarm-thinking');
+const harnessSwarmActions = $('#harness-swarm-actions');
+const harnessSwarmHandoff = $('#harness-swarm-handoff');
+const harnessSwarmEventInspector = $('#harness-swarm-event-inspector');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -460,6 +480,10 @@ function handleMessage(msg) {
     handleHarnessCapabilityDeleted(msg.data || msg);
     return;
   }
+  if (msg.type === 'harness_smithery_results') {
+    handleHarnessSmitheryResults(msg.data || msg);
+    return;
+  }
   if (msg.type === 'harness_traces') {
     handleHarnessTraces(msg.data || msg);
     return;
@@ -653,6 +677,33 @@ function updateHarnessVerifierEvolution(event) {
   }
 }
 
+function swarmTimelineEntry(event) {
+  return {
+    type: event.type || 'event',
+    phase: event.phase || event.status || event.type || 'event',
+    severity: event.severity || (event.failure ? 'error' : 'info'),
+    summary: event.summary || event.reason || event.intent || event.result || event.failure?.message || '',
+    timestamp: event.timestamp || event.completedAt || event.startedAt || new Date().toISOString(),
+    details: event.details || null,
+  };
+}
+
+function recordSwarmTimeline(event) {
+  if (!event?.attemptId) return;
+  const current = harnessState.swarm.timelines.get(event.attemptId) || [];
+  harnessState.swarm.timelines.set(event.attemptId, [
+    swarmTimelineEntry(event),
+    ...current,
+  ].slice(0, 80));
+}
+
+function selectSwarmAttempt(attemptId) {
+  if (!attemptId) return;
+  if (!harnessState.swarm.selectedAttemptId || !harnessState.subagents.has(harnessState.swarm.selectedAttemptId)) {
+    harnessState.swarm.selectedAttemptId = attemptId;
+  }
+}
+
 function updateHarnessSubagent(event) {
   if (event.type === 'swarm.attempts_scheduled') {
     for (const attempt of event.attempts || []) {
@@ -668,9 +719,30 @@ function updateHarnessSubagent(event) {
         score: attempt.score ?? existing.score,
         verifierPassed: attempt.verifierPassed ?? existing.verifierPassed,
         patchStats: attempt.patchStats || existing.patchStats,
+        planning: attempt.planning || existing.planning,
+        budget: attempt.budget || existing.budget,
+        budgetRationale: attempt.budgetRationale || existing.budgetRationale,
+        worker: attempt.worker || existing.worker,
+        profile: attempt.profile || existing.profile,
         updatedAt: attempt.completedAt || attempt.startedAt || existing.updatedAt || new Date().toISOString(),
       });
+      selectSwarmAttempt(attempt.attemptId);
     }
+    return;
+  }
+
+  if (event.type === 'swarm.subagent_trace' && event.attemptId) {
+    recordSwarmTimeline(event);
+    const existing = harnessState.subagents.get(event.attemptId) || {};
+    harnessState.subagents.set(event.attemptId, {
+      ...existing,
+      taskId: event.taskId || existing.taskId,
+      attemptId: event.attemptId,
+      status: existing.status || 'running',
+      summary: event.summary || existing.summary,
+      updatedAt: event.timestamp || new Date().toISOString(),
+    });
+    selectSwarmAttempt(event.attemptId);
     return;
   }
 
@@ -678,6 +750,7 @@ function updateHarnessSubagent(event) {
     return;
   }
 
+  recordSwarmTimeline(event);
   const existing = harnessState.subagents.get(event.attemptId) || {};
   harnessState.subagents.set(event.attemptId, {
     ...existing,
@@ -690,8 +763,19 @@ function updateHarnessSubagent(event) {
     score: event.score ?? existing.score,
     verifierPassed: event.verifierPassed ?? existing.verifierPassed,
     patchStats: event.patchStats || existing.patchStats,
+    worker: event.worker || existing.worker,
+    model: event.model || existing.model,
+    planning: event.planning || existing.planning,
+    budget: event.budget || existing.budget,
+    budgetRationale: event.budgetRationale || existing.budgetRationale,
+    profile: event.profile || existing.profile,
+    thinkingSummary: event.thinkingSummary || existing.thinkingSummary,
+    compactHandoff: event.compactHandoff || existing.compactHandoff,
+    handoffQuality: event.handoffQuality ?? existing.handoffQuality,
+    failure: event.failure || existing.failure,
     updatedAt: event.completedAt || event.startedAt || new Date().toISOString(),
   });
+  selectSwarmAttempt(event.attemptId);
 }
 
 function pruneHarnessSubagents() {
@@ -712,7 +796,11 @@ function pruneHarnessSubagents() {
   for (const attemptId of harnessState.subagents.keys()) {
     if (!keep.has(attemptId)) {
       harnessState.subagents.delete(attemptId);
+      harnessState.swarm.timelines.delete(attemptId);
     }
+  }
+  if (harnessState.swarm.selectedAttemptId && !keep.has(harnessState.swarm.selectedAttemptId)) {
+    harnessState.swarm.selectedAttemptId = records[0]?.attemptId || null;
   }
 }
 
@@ -747,6 +835,219 @@ function renderHarnessSubagents() {
   }).join('') || '<div class="harness-empty compact">No subagents running</div>';
 }
 
+function workerLabel(worker = {}) {
+  if (worker?.kind === 'pi_native_subagent') return worker.protocol === 'a2a' ? 'Pi Agent A2A' : 'Pi Agent';
+  if (worker?.kind === 'model_driven') return 'Sidecar model';
+  if (worker?.kind === 'worktree_command') return 'Worktree';
+  if (worker?.kind === 'command_subagent') return 'Command';
+  if (worker?.kind === 'deterministic_subagent') return 'Deterministic';
+  return worker?.kind ? String(worker.kind).replace(/_/g, ' ') : '';
+}
+
+function compactText(value, fallback = '') {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return fallback;
+  return value.summary || value.title || value.id || fallback;
+}
+
+function swarmEventKey(event, index) {
+  return [
+    event?.timestamp || 'no-time',
+    event?.type || 'event',
+    event?.phase || 'phase',
+    index,
+  ].map(value => String(value).replace(/\s+/g, '_')).join('::');
+}
+
+function valueList(value) {
+  if (Array.isArray(value)) return value.filter(item => item !== undefined && item !== null && String(item).trim());
+  if (value === undefined || value === null || value === '') return [];
+  return [value];
+}
+
+function renderInspectorList(items, emptyText = 'None recorded') {
+  const values = valueList(items);
+  if (!values.length) return `<div class="harness-empty compact">${esc(emptyText)}</div>`;
+  return values.map(item => `<div class="harness-swarm-inspector-line">${esc(compactText(item, JSON.stringify(item)))}</div>`).join('');
+}
+
+function renderInspectorObject(value, emptyText = 'None recorded') {
+  if (!value || typeof value !== 'object') return `<div class="harness-empty compact">${esc(emptyText)}</div>`;
+  const rows = Object.entries(value)
+    .filter(([, rowValue]) => rowValue !== undefined && rowValue !== null && rowValue !== '' && !(Array.isArray(rowValue) && !rowValue.length))
+    .map(([key, rowValue]) => `
+      <div class="harness-swarm-inspector-kv">
+        <span>${esc(key)}</span>
+        <strong>${esc(Array.isArray(rowValue) ? rowValue.map(item => compactText(item, JSON.stringify(item))).join(', ') : compactText(rowValue, JSON.stringify(rowValue)))}</strong>
+      </div>
+    `);
+  return rows.join('') || `<div class="harness-empty compact">${esc(emptyText)}</div>`;
+}
+
+function renderSwarmAttemptCard(agent) {
+  const isActive = agent.attemptId === harnessState.swarm.selectedAttemptId;
+  const scoreText = Number.isFinite(agent.score) ? `score ${formatScore(agent.score)}` : '';
+  const verifyText = agent.verifierPassed === true ? 'verified' : agent.verifierPassed === false ? 'needs review' : '';
+  const handoffText = Number.isFinite(agent.handoffQuality) ? `handoff ${formatScore(agent.handoffQuality)}` : '';
+  const meta = [workerLabel(agent.worker), scoreText, verifyText, handoffText].filter(Boolean).join(' | ');
+  return `
+    <button class="harness-swarm-attempt-card ${isActive ? 'active' : ''}" type="button" data-swarm-attempt-id="${escAttr(agent.attemptId || '')}">
+      <span class="harness-swarm-attempt-top">
+        <span class="harness-swarm-attempt-name">${esc(agent.role || 'subagent')} | ${esc(agent.attemptId || '')}</span>
+        <span class="harness-subagent-status ${esc(agent.status || 'unknown')}">${esc(agent.status || 'unknown')}</span>
+      </span>
+      <span class="harness-swarm-attempt-strategy">${esc(agent.strategy || agent.profile?.name || 'strategy pending')}</span>
+      <span class="harness-swarm-attempt-summary">${esc(agent.summary || agent.failure?.message || 'Waiting for activity')}</span>
+      ${meta ? `<span class="harness-swarm-attempt-meta">${esc(meta)}</span>` : ''}
+    </button>
+  `;
+}
+
+function renderSwarmTimelineRow(event, index, selectedEventKey) {
+  const eventKey = swarmEventKey(event, index);
+  const isActive = eventKey === selectedEventKey;
+  const detailText = event.details
+    ? Object.entries(event.details)
+      .slice(0, 4)
+      .map(([key, value]) => `${key}: ${compactText(value, JSON.stringify(value))}`)
+      .join(' | ')
+    : '';
+  const meta = [formatTraceTime(event.timestamp), event.type, detailText].filter(Boolean).join(' | ');
+  return `
+    <button class="harness-swarm-timeline-row ${escAttr(event.severity || 'info')} ${isActive ? 'active' : ''}" type="button" data-swarm-event-key="${escAttr(eventKey)}">
+      <div class="harness-swarm-timeline-top">
+        <span class="harness-trace-event-index">${index + 1}</span>
+        <span class="harness-swarm-phase">${esc(event.phase || event.type || 'event')}</span>
+      </div>
+      <div class="harness-swarm-timeline-summary">${esc(event.summary || '')}</div>
+      ${meta ? `<div class="harness-swarm-timeline-meta">${esc(meta)}</div>` : ''}
+    </button>
+  `;
+}
+
+function renderHarnessSwarmInspector(selected, timeline, selectedEvent) {
+  if (!selected) {
+    if (harnessSwarmInspectorMetadata) harnessSwarmInspectorMetadata.innerHTML = '';
+    if (harnessSwarmThinking) harnessSwarmThinking.innerHTML = '<div class="harness-empty compact">No thinking summary yet</div>';
+    if (harnessSwarmActions) harnessSwarmActions.innerHTML = '<div class="harness-empty compact">No actions yet</div>';
+    if (harnessSwarmHandoff) harnessSwarmHandoff.innerHTML = '<div class="harness-empty compact">No handoff yet</div>';
+    if (harnessSwarmEventInspector) harnessSwarmEventInspector.innerHTML = '<div class="harness-empty compact">No event selected</div>';
+    return;
+  }
+
+  const worker = workerLabel(selected.worker) || 'worker pending';
+  const metadata = [
+    ['worker', worker],
+    ['status', selected.status || 'unknown'],
+    ['score', Number.isFinite(selected.score) ? formatScore(selected.score) : 'n/a'],
+    ['handoff', Number.isFinite(selected.handoffQuality?.score) ? formatScore(selected.handoffQuality.score) : compactText(selected.handoffQuality?.status, 'n/a')],
+    ['budget', selected.budgetRationale || compactText(selected.budget, 'n/a')],
+  ];
+  if (harnessSwarmInspectorMetadata) {
+    harnessSwarmInspectorMetadata.innerHTML = metadata.map(([label, value]) => `
+      <span class="harness-swarm-chip"><strong>${esc(label)}</strong>${esc(value)}</span>
+    `).join('');
+  }
+
+  if (harnessSwarmThinking) {
+    const thinking = selected.thinkingSummary
+      || selected.compactHandoff?.thinkingSummary
+      || selected.compactHandoff?.summary
+      || selected.output?.thinkingSummary;
+    harnessSwarmThinking.innerHTML = thinking
+      ? `<div class="harness-swarm-inspector-text">${esc(thinking)}</div>`
+      : '<div class="harness-empty compact">No visible thinking summary yet</div>';
+  }
+
+  if (harnessSwarmActions) {
+    harnessSwarmActions.innerHTML = timeline.length
+      ? timeline.slice(0, 8).map((event, index) => `
+        <div class="harness-swarm-inspector-line">
+          <strong>${esc(event.phase || event.type || `step ${index + 1}`)}</strong>
+          <span>${esc(event.summary || event.type || '')}</span>
+        </div>
+      `).join('')
+      : '<div class="harness-empty compact">No actions yet</div>';
+  }
+
+  if (harnessSwarmHandoff) {
+    const handoff = selected.compactHandoff || selected.output?.compactHandoff || null;
+    const evidence = selected.verifierEvidence || selected.output?.verifierEvidence || [];
+    harnessSwarmHandoff.innerHTML = [
+      renderInspectorObject(handoff, 'No compact handoff yet'),
+      evidence.length ? `<div class="harness-swarm-inspector-subtitle">Verifier Evidence</div>${renderInspectorList(evidence)}` : '',
+    ].filter(Boolean).join('');
+  }
+
+  if (harnessSwarmEventInspector) {
+    harnessSwarmEventInspector.innerHTML = selectedEvent
+      ? renderInspectorObject({
+        phase: selectedEvent.phase,
+        type: selectedEvent.type,
+        severity: selectedEvent.severity,
+        time: formatTraceTime(selectedEvent.timestamp),
+        summary: selectedEvent.summary,
+        details: selectedEvent.details ? JSON.stringify(selectedEvent.details) : '',
+      }, 'No event details')
+      : '<div class="harness-empty compact">Select a timeline event</div>';
+  }
+}
+
+function renderHarnessSwarm() {
+  if (!harnessSwarmAttempts || !harnessSwarmTimeline) return;
+  const agents = Array.from(harnessState.subagents.values())
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
+  const activeCount = agents.filter(agent => ['running', 'scheduled'].includes(agent.status)).length;
+  if (!harnessState.swarm.selectedAttemptId && agents[0]?.attemptId) {
+    harnessState.swarm.selectedAttemptId = agents[0].attemptId;
+  }
+  const selected = agents.find(agent => agent.attemptId === harnessState.swarm.selectedAttemptId) || agents[0] || null;
+  if (selected?.attemptId && selected.attemptId !== harnessState.swarm.selectedAttemptId) {
+    harnessState.swarm.selectedAttemptId = selected.attemptId;
+  }
+
+  if (harnessSwarmStatus) {
+    harnessSwarmStatus.textContent = agents.length
+      ? `${agents.length} swarm attempt${agents.length === 1 ? '' : 's'} visible`
+      : 'No swarm attempts yet';
+  }
+  if (harnessSwarmActiveCount) {
+    harnessSwarmActiveCount.textContent = `${activeCount} active`;
+  }
+
+  harnessSwarmAttempts.innerHTML = agents.map(renderSwarmAttemptCard).join('')
+    || '<div class="harness-empty compact">No swarm attempts running</div>';
+
+  if (!selected) {
+    if (harnessSwarmDetailSummary) harnessSwarmDetailSummary.textContent = 'Select a subagent attempt';
+    harnessSwarmTimeline.innerHTML = '<div class="harness-empty compact">No timeline events yet</div>';
+    renderHarnessSwarmInspector(null, [], null);
+    return;
+  }
+
+  const worker = workerLabel(selected.worker) || 'worker pending';
+  const detailSummary = [
+    `${selected.role || 'subagent'} ${selected.attemptId || ''}`,
+    worker,
+    selected.strategy,
+    selected.budgetRationale,
+    selected.thinkingSummary ? `thinking: ${selected.thinkingSummary}` : '',
+    selected.compactHandoff?.summary ? `handoff: ${selected.compactHandoff.summary}` : '',
+  ].filter(Boolean).join(' | ');
+  if (harnessSwarmDetailSummary) harnessSwarmDetailSummary.textContent = detailSummary;
+
+  const timeline = harnessState.swarm.timelines.get(selected.attemptId) || [];
+  const eventKeys = timeline.map(swarmEventKey);
+  if (!eventKeys.includes(harnessState.swarm.selectedEventKey)) {
+    harnessState.swarm.selectedEventKey = eventKeys[0] || null;
+  }
+  const selectedEvent = timeline.find((event, index) => swarmEventKey(event, index) === harnessState.swarm.selectedEventKey) || null;
+
+  harnessSwarmTimeline.innerHTML = timeline.map((event, index) => renderSwarmTimelineRow(event, index, harnessState.swarm.selectedEventKey)).join('')
+    || '<div class="harness-empty compact">No timeline events yet</div>';
+  renderHarnessSwarmInspector(selected, timeline, selectedEvent);
+}
+
 function renderHarnessPanel() {
   if (!harnessPanel) return;
   harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
@@ -756,6 +1057,7 @@ function renderHarnessPanel() {
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
   renderHarnessVerifierEvolution();
   renderHarnessSubagents();
+  renderHarnessSwarm();
   renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
@@ -875,6 +1177,176 @@ function listToText(value) {
   return String(value || '');
 }
 
+function slugText(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^@/, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+function safeUrl(value) {
+  try {
+    return new URL(String(value || '').trim());
+  } catch {
+    return null;
+  }
+}
+
+function stripTrailingUrlPunctuation(value) {
+  return String(value || '').replace(/[),.;]+$/g, '');
+}
+
+function smitherySkillQualifiedNameFromInput(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  const urlMatch = input.match(/https?:\/\/smithery\.ai\/skills\/[^\s"'<>]+/i);
+  const parsed = safeUrl(stripTrailingUrlPunctuation(urlMatch?.[0] || input));
+  if (parsed?.hostname === 'smithery.ai') {
+    const parts = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/');
+    const skillsIndex = parts.findIndex(part => part.toLowerCase() === 'skills');
+    if (skillsIndex >= 0 && parts.length >= skillsIndex + 3) {
+      return `${parts[skillsIndex + 1]}/${parts[skillsIndex + 2]}`;
+    }
+  }
+  const bareMatch = input.match(/(?:^|\s)@?([a-z0-9_.-]+\/[a-z0-9_.-]+)(?:\s|$)/i);
+  return bareMatch ? bareMatch[1] : '';
+}
+
+function smitherySkillUrlFromInput(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  const urlMatch = input.match(/https?:\/\/smithery\.ai\/skills\/[^\s"'<>]+/i);
+  if (urlMatch) return stripTrailingUrlPunctuation(urlMatch[0]);
+  const qualifiedName = smitherySkillQualifiedNameFromInput(input);
+  return qualifiedName ? `https://smithery.ai/skills/${qualifiedName.replace(/^@/, '')}` : '';
+}
+
+function remoteUrlFromInput(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  const urlMatch = input.match(/https?:\/\/[^\s"'<>]+/i);
+  if (urlMatch) return stripTrailingUrlPunctuation(urlMatch[0]);
+  return input;
+}
+
+function mcpNameFromUrl(value) {
+  const input = remoteUrlFromInput(value);
+  const parsed = safeUrl(input);
+  if (parsed) {
+    const pathName = parsed.pathname.replace(/^\/+|\/+$/g, '');
+    return pathName || parsed.hostname;
+  }
+  return input.replace(/^@/, '');
+}
+
+function buildSmitherySkillInstallRecord(input, skill = null) {
+  const qualifiedName = skill?.qualifiedName || smitherySkillQualifiedNameFromInput(input);
+  const installUrl = skill?.installUrl || smitherySkillUrlFromInput(input);
+  const displayName = qualifiedName || skill?.displayName || 'Smithery Skill';
+  return {
+    id: `smithery:skill:${slugText(qualifiedName || displayName) || 'skill'}`,
+    type: 'skill',
+    name: qualifiedName || displayName,
+    enabled: true,
+    pathOrCommandOrUrl: installUrl,
+    url: installUrl,
+    command: 'npx',
+    args: ['-y', 'skills', 'add', installUrl],
+    approvalMode: 'inherit',
+    notes: skill?.description || 'Installed from Smithery skill link.',
+    metadata: {
+      source: 'smithery',
+      kind: 'skill',
+      qualifiedName,
+      verified: skill?.verified === true,
+      useCount: Number(skill?.useCount || 0),
+      installCommand: `npx -y skills add ${installUrl}`,
+    },
+  };
+}
+
+function buildMcpInstallRecord(input, server = null) {
+  const installUrl = server?.installUrl || remoteUrlFromInput(input);
+  const qualifiedName = server?.qualifiedName || mcpNameFromUrl(installUrl);
+  const isSmithery = /smithery\.ai|smithery\.run|server\.smithery\.ai/i.test(installUrl);
+  return {
+    id: `${isSmithery ? 'smithery' : 'mcp'}:mcp:${slugText(qualifiedName || server?.displayName || 'server') || 'server'}`,
+    type: 'mcp',
+    name: server?.displayName || qualifiedName || 'Remote MCP',
+    enabled: true,
+    transport: /^https?:\/\//i.test(installUrl) ? 'http' : undefined,
+    pathOrCommandOrUrl: installUrl,
+    url: /^https?:\/\//i.test(installUrl) ? installUrl : undefined,
+    approvalMode: 'inherit',
+    notes: server?.description || (isSmithery ? 'Installed from Smithery MCP URL.' : 'Installed from remote MCP URL.'),
+    metadata: {
+      source: isSmithery ? 'smithery' : 'remote_url',
+      kind: 'mcp',
+      qualifiedName,
+      verified: server?.verified === true,
+      useCount: Number(server?.useCount || 0),
+    },
+  };
+}
+
+function parseCapabilityInstallInput(value) {
+  const input = String(value || '').trim();
+  if (!input) return { kind: 'empty', value: '' };
+  if (/(?:^|\s)skills\s+add\s+/i.test(input) || /https?:\/\/smithery\.ai\/skills\//i.test(input)) {
+    return {
+      kind: 'skill',
+      value: input,
+      qualifiedName: smitherySkillQualifiedNameFromInput(input),
+      installUrl: smitherySkillUrlFromInput(input),
+    };
+  }
+  if (/https?:\/\/(?:mcp\.)?smithery\.run\//i.test(input) || /https?:\/\/server\.smithery\.ai\//i.test(input)) {
+    const installUrl = remoteUrlFromInput(input);
+    return { kind: 'mcp', value: input, qualifiedName: mcpNameFromUrl(installUrl), installUrl };
+  }
+  if (/^https?:\/\//i.test(input)) {
+    const installUrl = remoteUrlFromInput(input);
+    return { kind: 'mcp', value: input, qualifiedName: mcpNameFromUrl(installUrl), installUrl };
+  }
+  if (/^(?:[a-z]:[\\/]|\.{1,2}[\\/]|[\\/])/i.test(input)) {
+    return { kind: 'local-skill', value: input };
+  }
+  return { kind: 'search', value: input };
+}
+
+function searchQueryFromCapabilityInput(value) {
+  const parsed = parseCapabilityInstallInput(value);
+  if (parsed.kind === 'skill') return parsed.qualifiedName || parsed.value;
+  if (parsed.kind === 'mcp') return parsed.qualifiedName || parsed.value;
+  return parsed.value || '';
+}
+
+function buildCapabilityRecordFromInstallInput(value) {
+  const parsed = parseCapabilityInstallInput(value);
+  if (parsed.kind === 'skill') return buildSmitherySkillInstallRecord(parsed.value);
+  if (parsed.kind === 'mcp') return buildMcpInstallRecord(parsed.installUrl || parsed.value);
+  if (parsed.kind === 'local-skill') {
+    return {
+      id: `skill:${slugText(parsed.value) || 'local'}`,
+      type: 'skill',
+      name: parsed.value.split(/[\\/]/).filter(Boolean).pop() || 'Local Skill',
+      enabled: true,
+      pathOrCommandOrUrl: parsed.value,
+      path: parsed.value,
+      approvalMode: 'inherit',
+      notes: 'Installed from local skill path.',
+    };
+  }
+  return null;
+}
+
+function buildCapabilityRecordFromSmitheryResult(result) {
+  if (result?.kind === 'skill') return buildSmitherySkillInstallRecord(result.installUrl || result.qualifiedName, result);
+  return buildMcpInstallRecord(result?.installUrl || result?.qualifiedName || result?.displayName || '', result);
+}
+
 function normalizeCapabilityRecord(record, index = 0) {
   const type = normalizeCapabilityType(record?.type || record?.kind);
   const name = String(record?.name || record?.title || `${type}-${index + 1}`);
@@ -899,6 +1371,16 @@ function handleHarnessCapabilities(payload) {
   harnessCapabilitiesLoaded = true;
   harnessCapabilities = extractCapabilityRecords(payload).map(normalizeCapabilityRecord);
   renderHarnessCapabilities();
+}
+
+function handleHarnessSmitheryResults(payload) {
+  harnessSmitheryResults = Array.isArray(payload?.results) ? payload.results : [];
+  renderSmitheryResults(payload);
+  if (harnessCapabilityStatus) {
+    harnessCapabilityStatus.textContent = payload?.error
+      ? payload.error
+      : `${harnessSmitheryResults.length} Smithery result${harnessSmitheryResults.length === 1 ? '' : 's'}`;
+  }
 }
 
 function handleHarnessCapabilitySaved(payload) {
@@ -928,6 +1410,91 @@ function handleHarnessCapabilityDeleted(payload) {
   }
   renderHarnessCapabilities();
   toast('Capability deleted', 'success');
+}
+
+function renderSmitheryResults(payload = {}) {
+  if (!capabilitySmitheryResults) return;
+  if (payload?.error) {
+    capabilitySmitheryResults.innerHTML = `<div class="harness-empty compact">${esc(payload.error)}</div>`;
+    return;
+  }
+  capabilitySmitheryResults.innerHTML = harnessSmitheryResults.map((server, index) => `
+    <button class="harness-smithery-result" type="button" data-smithery-index="${index}">
+      <span class="harness-smithery-result-main">
+        <strong>${esc(server.displayName || server.qualifiedName || (server.kind === 'skill' ? 'Smithery skill' : 'Smithery MCP'))}</strong>
+        <span>${esc(server.description || server.qualifiedName || server.installUrl || '')}</span>
+      </span>
+      <span class="harness-smithery-result-meta">
+        <span>${esc(server.kind === 'skill' ? 'skill' : 'mcp')}</span>
+        ${server.verified ? '<span>verified</span>' : ''}
+        ${Number.isFinite(server.useCount) && server.useCount > 0 ? `<span>${server.useCount} uses</span>` : ''}
+      </span>
+    </button>
+  `).join('') || '<div class="harness-empty compact">No Smithery results yet</div>';
+}
+
+function populateCapabilityForm(record) {
+  if (!record) return;
+  $('#capability-id').value = record.id || '';
+  $('#capability-type').value = normalizeCapabilityType(record.type);
+  $('#capability-name').value = record.name || '';
+  $('#capability-enabled').checked = record.enabled !== false;
+  $('#capability-location').value = record.pathOrCommandOrUrl || record.path || record.command || record.url || '';
+  $('#capability-args').value = listToText(record.args);
+  $('#capability-env').value = listToText(record.envVarNames || record.env);
+  $('#capability-approval').value = record.approvalMode || 'inherit';
+  $('#capability-notes').value = record.notes || '';
+}
+
+function requestSmitherySearch() {
+  const query = searchQueryFromCapabilityInput(capabilityInstallQuery?.value || '');
+  if (!query) {
+    toast('Search term required', 'error');
+    return;
+  }
+  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Searching Smithery...';
+  send({
+    type: 'harness_smithery_search',
+    query,
+    apiKey: capabilitySmitheryKey?.value?.trim() || undefined,
+    pageSize: 8,
+  });
+}
+
+function saveCapabilityRecord(record) {
+  if (!record?.name) {
+    toast('Capability name required', 'error');
+    return;
+  }
+  populateCapabilityForm(record);
+  send({
+    type: 'harness_capability_save',
+    workspaceRoot: workspacePath || undefined,
+    record,
+  });
+  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = `Installing ${record.name}...`;
+}
+
+function installCapabilityFromQuickSource() {
+  const query = capabilityInstallQuery?.value?.trim() || '';
+  if (!query) {
+    toast('Link or path required', 'error');
+    return;
+  }
+  const record = buildCapabilityRecordFromInstallInput(query);
+  if (!record) {
+    requestSmitherySearch();
+    return;
+  }
+  saveCapabilityRecord(record);
+}
+
+function applySmitheryResult(index, { save = true } = {}) {
+  const server = harnessSmitheryResults[Number(index)];
+  if (!server) return;
+  const record = buildCapabilityRecordFromSmitheryResult(server);
+  if (save) saveCapabilityRecord(record);
+  else populateCapabilityForm(record);
 }
 
 function renderHarnessCapabilities() {
@@ -997,30 +1564,13 @@ function buildCapabilityRecordFromForm() {
 function saveHarnessCapability(event) {
   event?.preventDefault();
   const record = buildCapabilityRecordFromForm();
-  if (!record.name) {
-    toast('Capability name required', 'error');
-    return;
-  }
-  send({
-    type: 'harness_capability_save',
-    workspaceRoot: workspacePath || undefined,
-    record,
-  });
-  if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Saving capability...';
+  saveCapabilityRecord(record);
 }
 
 function editHarnessCapability(capabilityId) {
   const record = harnessCapabilities.find(item => item.id === capabilityId);
   if (!record) return;
-  $('#capability-id').value = record.id;
-  $('#capability-type').value = normalizeCapabilityType(record.type);
-  $('#capability-name').value = record.name || '';
-  $('#capability-enabled').checked = record.enabled !== false;
-  $('#capability-location').value = record.pathOrCommandOrUrl || '';
-  $('#capability-args').value = record.argsText || listToText(record.args);
-  $('#capability-env').value = record.envText || listToText(record.envVarNames || record.env);
-  $('#capability-approval').value = record.approvalMode || 'inherit';
-  $('#capability-notes').value = record.notes || '';
+  populateCapabilityForm(record);
 }
 
 function deleteHarnessCapability(capabilityId) {
@@ -1233,6 +1783,27 @@ function handleHarnessPanelClick(event) {
   const traceButton = event.target.closest('[data-trace-action]');
   if (traceButton) {
     if (traceButton.dataset.traceAction === 'select') requestHarnessTrace(traceButton.dataset.taskId);
+    return;
+  }
+
+  const swarmAttempt = event.target.closest('[data-swarm-attempt-id]');
+  if (swarmAttempt) {
+    harnessState.swarm.selectedAttemptId = swarmAttempt.dataset.swarmAttemptId;
+    harnessState.swarm.selectedEventKey = null;
+    renderHarnessPanel();
+    return;
+  }
+
+  const swarmEvent = event.target.closest('[data-swarm-event-key]');
+  if (swarmEvent) {
+    harnessState.swarm.selectedEventKey = swarmEvent.dataset.swarmEventKey;
+    renderHarnessPanel();
+    return;
+  }
+
+  const smitheryResult = event.target.closest('[data-smithery-index]');
+  if (smitheryResult) {
+    applySmitheryResult(smitheryResult.dataset.smitheryIndex);
     return;
   }
 
@@ -2286,12 +2857,20 @@ $('#btn-harness-run').addEventListener('click', runHarnessTask);
 if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick);
 $('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
 $('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
+$('#btn-capability-search')?.addEventListener('click', requestSmitherySearch);
+$('#btn-capability-install-quick')?.addEventListener('click', installCapabilityFromQuickSource);
 $('#btn-harness-capability-reset')?.addEventListener('click', resetHarnessCapabilityForm);
 $('#btn-harness-traces-refresh')?.addEventListener('click', requestHarnessTraces);
 $('#btn-harness-replay-prepare')?.addEventListener('click', () => prepareHarnessTraceReplay());
 $('#btn-harness-replay-next')?.addEventListener('click', () => prepareHarnessTraceReplay({ next: true }));
 $('#btn-harness-replay-reset')?.addEventListener('click', resetHarnessTraceReplay);
 harnessCapabilityForm?.addEventListener('submit', saveHarnessCapability);
+$('#capability-install-query')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    installCapabilityFromQuickSource();
+  }
+});
 $('#harness-task-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();

@@ -11,6 +11,7 @@ import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
 import { applyHarnessFeedbackToPrompt, createHarnessFeedbackBuffer } from './harness/harnessFeedbackContext.js';
 import { HarnessManager } from './harness/harnessManager.js';
+import { searchSmitheryCatalog } from './harness-sidecar/capabilities/smitheryRegistry.js';
 import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
 import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
@@ -390,6 +391,15 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           record: msg.record || msg.capability || {},
         });
         ws.send(JSON.stringify({ type: 'harness_capability_saved', data: result }));
+        break;
+      }
+      case 'harness_smithery_search': {
+        const result = await searchSmitheryCatalog({
+          query: msg.query,
+          apiKey: msg.apiKey || process.env.SMITHERY_API_KEY,
+          pageSize: msg.pageSize || 8,
+        });
+        ws.send(JSON.stringify({ type: 'harness_smithery_results', data: result }));
         break;
       }
       case 'harness_capability_delete': {

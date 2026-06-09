@@ -21,6 +21,7 @@ export const DEFAULT_HARNESS_CONFIG = {
   features: {
     swarm: false,
     modelDrivenSwarm: false,
+    piNativeSwarm: false,
     deepResearch: false,
     experiments: false,
     visualArtifacts: false,

@@ -24,6 +24,7 @@ test('config loader returns safe defaults when no config file exists', async () 
     assert.equal(config.permissions.mode, 'safe_edit');
     assert.equal(config.features.swarm, false);
     assert.equal(config.features.modelDrivenSwarm, false);
+    assert.equal(config.features.piNativeSwarm, false);
   });
 });
 
@@ -49,6 +50,7 @@ test('config loader reads harness yaml overrides', async () => {
         'features:',
         '  swarm: true',
         '  modelDrivenSwarm: true',
+        '  piNativeSwarm: true',
         '  deepResearch: true',
         '',
       ].join('\n'),
@@ -64,6 +66,7 @@ test('config loader reads harness yaml overrides', async () => {
     assert.deepEqual(config.permissions.allowedTools, ['shell.run', 'github.search_issues']);
     assert.equal(config.features.swarm, true);
     assert.equal(config.features.modelDrivenSwarm, true);
+    assert.equal(config.features.piNativeSwarm, true);
     assert.equal(config.features.deepResearch, true);
   });
 });

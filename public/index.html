@@ -135,16 +135,8 @@
         </div>
       </header>
 
-      <div id="chat-container">
-        <div id="connection-banner" class="connection-banner hidden">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <span id="connection-text">Connecting to Pi...</span>
-        </div>
-        <section id="harness-panel" class="harness-panel hidden">
+      <div id="workspace-layout" class="workspace-layout">
+        <aside id="harness-panel" class="harness-panel hidden" aria-label="Helios Harness tools">
           <div class="harness-panel-header">
             <div>
               <div class="harness-title">Helios Harness</div>
@@ -159,6 +151,7 @@
             <button class="harness-tab active" type="button" data-harness-tab="run">Run</button>
             <button class="harness-tab" type="button" data-harness-tab="deep-research">Deep Research</button>
             <button class="harness-tab" type="button" data-harness-tab="capabilities">Capabilities</button>
+            <button class="harness-tab" type="button" data-harness-tab="swarm">Swarm</button>
             <button class="harness-tab" type="button" data-harness-tab="traces">Traces</button>
           </div>
           <div id="harness-tab-run" class="harness-tab-panel active">
@@ -181,6 +174,21 @@
             <div class="harness-capability-toolbar">
               <span id="harness-capability-status">No capabilities loaded</span>
               <button id="btn-harness-capabilities-refresh" class="harness-btn" type="button">Refresh</button>
+            </div>
+            <div class="harness-capability-install">
+              <div class="harness-capability-install-main">
+                <label>Install / Search
+                  <input id="capability-install-query" type="text" placeholder="npx -y skills add https://smithery.ai/skills/anthropics/skill-creator, https://mcp.smithery.run/jackjstark, or search text" />
+                </label>
+                <label>Smithery API Key
+                  <input id="capability-smithery-key" type="password" placeholder="optional; uses SMITHERY_API_KEY if empty" autocomplete="off" />
+                </label>
+                <div class="harness-capability-install-actions">
+                  <button id="btn-capability-install-quick" class="harness-run-btn" type="button">Install</button>
+                  <button id="btn-capability-search" class="harness-btn" type="button">Search</button>
+                </div>
+              </div>
+              <div id="capability-smithery-results" class="harness-smithery-results"></div>
             </div>
             <div class="harness-capability-layout">
               <div class="harness-capability-sections">
@@ -210,6 +218,7 @@
                 </section>
               </div>
               <form id="harness-capability-form" class="harness-capability-form">
+                <div class="harness-capability-form-title">Advanced Record</div>
                 <input id="capability-id" type="hidden" />
                 <div class="harness-form-grid">
                   <label>Type
@@ -242,6 +251,40 @@
                   <button id="btn-harness-capability-save" class="harness-run-btn" type="submit">Save</button>
                 </div>
               </form>
+            </div>
+          </div>
+          <div id="harness-tab-swarm" class="harness-tab-panel">
+            <div class="harness-swarm-toolbar">
+              <span id="harness-swarm-status">No swarm attempts yet</span>
+              <span id="harness-swarm-active-count">0 active</span>
+            </div>
+            <div class="harness-swarm-layout">
+              <div id="harness-swarm-attempts" class="harness-swarm-attempts"></div>
+              <div id="harness-swarm-attempt-detail" class="harness-swarm-attempt-detail">
+                <div id="harness-swarm-detail-summary" class="harness-swarm-detail-summary">Select a subagent attempt</div>
+                <div id="harness-swarm-inspector" class="harness-swarm-inspector">
+                  <div id="harness-swarm-inspector-metadata" class="harness-swarm-inspector-metadata"></div>
+                  <div id="harness-swarm-timeline" class="harness-swarm-timeline"></div>
+                  <div class="harness-swarm-inspector-grid">
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Thinking</div>
+                      <div id="harness-swarm-thinking" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Actions</div>
+                      <div id="harness-swarm-actions" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Handoff</div>
+                      <div id="harness-swarm-handoff" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Selected Event</div>
+                      <div id="harness-swarm-event-inspector" class="harness-swarm-inspector-body"></div>
+                    </section>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <div id="harness-tab-traces" class="harness-tab-panel">
@@ -287,9 +330,21 @@
             <span>Events</span>
           </div>
           <div id="harness-events" class="harness-events"></div>
+        </aside>
+        <section id="chat-workspace" class="chat-workspace" aria-label="Chat feed">
+          <div id="chat-container">
+            <div id="connection-banner" class="connection-banner hidden">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <span id="connection-text">Connecting to Pi...</span>
+            </div>
+            <div id="messages" class="messages"></div>
+            <div id="scroll-sentinel"></div>
+          </div>
         </section>
-        <div id="messages" class="messages"></div>
-        <div id="scroll-sentinel"></div>
       </div>
 
       <div id="input-area">

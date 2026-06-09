@@ -3,6 +3,7 @@ import { loadDefaultAgentProfiles, selectAgentProfileForAttempt } from './agentP
 import { chooseChampion } from './championSelector.js';
 import { allocateEvolutionSwarmBudgets } from './evolutionBudgetAllocator.js';
 import { runModelDrivenAttempt } from './modelDrivenWorker.js';
+import { runPiNativeAttempt } from './piNativeWorker.js';
 import { recombineApprovedOutputs } from './recombiner.js';
 import { reviewAttempt } from './reviewer.js';
 import { runSwarmAttemptsBounded } from './swarmExecutor.js';
@@ -108,6 +109,9 @@ async function runScheduledAttempt({
   modelExecutor,
   provider,
   modelProfileName,
+  piNativeEnabled = false,
+  piWorkerFactory,
+  emitAttemptTrace,
 }) {
   const taskId = task.taskId;
   const injectedModelWorker = modelWorkerProvider({
@@ -116,6 +120,20 @@ async function runScheduledAttempt({
     modelExecutor,
     provider,
   });
+
+  if (piNativeEnabled) {
+    return runPiNativeAttempt({
+      task: { ...task, taskId },
+      attempt: scheduledAttempt,
+      role,
+      context,
+      budget,
+      outputContract,
+      workspaceRoot,
+      piWorkerFactory,
+      emitTrace: emitAttemptTrace,
+    });
+  }
 
   if (injectedModelWorker) {
     const requestId = modelWorkerRequestId({ taskId, attemptId: scheduledAttempt.attemptId });
@@ -257,6 +275,7 @@ export async function orchestrateSwarm({
   modelExecutor,
   provider,
   modelProfileName,
+  piWorkerFactory,
   planner,
   evolutionPlanner,
   evolutionBudget,
@@ -274,7 +293,8 @@ export async function orchestrateSwarm({
     provider,
   }));
   const hasWorktreeWorker = Boolean(commandAdapter && (workspaceRoot || worktreeManager));
-  const mode = runMode || (hasModelWorker ? 'model-driven' : (commandAdapter ? 'real' : 'dry-run'));
+  const piNativeEnabled = swarmExecution?.piNative === true || runMode === 'pi-native';
+  const mode = runMode || (piNativeEnabled ? 'pi-native' : (hasModelWorker ? 'model-driven' : (commandAdapter ? 'real' : 'dry-run')));
   const profiles = agentProfiles || loadDefaultAgentProfiles();
   const scheduledBaseAttempts = scheduleAttempts({
     taskId,
@@ -310,6 +330,11 @@ export async function orchestrateSwarm({
         const requestId = hasModelWorker
           ? modelWorkerRequestId({ taskId, attemptId: scheduledAttempt.attemptId })
           : null;
+        const workerKind = piNativeEnabled
+          ? 'pi_native_subagent'
+          : (hasModelWorker
+            ? 'model_driven'
+            : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')));
 
         await onAttemptEvent?.({
           type: 'swarm.subagent_started',
@@ -322,10 +347,9 @@ export async function orchestrateSwarm({
           budget: scheduledAttempt.budget,
           budgetRationale: scheduledAttempt.budgetRationale,
           worker: {
-            kind: hasModelWorker
-              ? 'model_driven'
-              : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')),
+            kind: workerKind,
             requestId,
+            protocol: piNativeEnabled ? 'a2a' : undefined,
           },
           model: hasModelWorker ? { requestId, profileName: modelProfileName || scheduledAttempt.profile?.modelProfile || 'critic_low_temp' } : undefined,
           status: 'running',
@@ -352,6 +376,9 @@ export async function orchestrateSwarm({
         score: attemptRecord.score,
         verifierPassed: attemptRecord.verifierPassed,
         patchStats: attemptRecord.patchStats,
+        thinkingSummary: attemptRecord.thinkingSummary,
+        compactHandoff: attemptRecord.compactHandoff,
+        handoffQuality: attemptRecord.handoffQuality,
         failure: attemptRecord.failure,
         startedAt: attemptRecord.startedAt,
         completedAt: attemptRecord.completedAt,
@@ -377,6 +404,9 @@ export async function orchestrateSwarm({
       modelExecutor,
       provider,
       modelProfileName: modelProfileName || scheduledAttempt.profile?.modelProfile,
+      piNativeEnabled,
+      piWorkerFactory,
+      emitAttemptTrace: onAttemptEvent,
     });
 
     return attemptRecord;
