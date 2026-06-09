@@ -1502,6 +1502,11 @@ export function createHarnessSidecar({
         piNative: piNativeSwarmEnabled,
         concurrency: Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
       },
+      featureFlags: {
+        localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,
+        localMemoryGraph: harnessConfig?.features?.localMemoryGraph !== false,
+        localMetaArchive: false,
+      },
       onAttemptEvent: emitEvent,
       commandAdapter: swarmCommandRunner,
       verifierAdapter: useWorktreeOptions ? swarmVerifierAdapter : undefined,

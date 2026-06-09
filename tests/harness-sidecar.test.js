@@ -181,6 +181,8 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'experiment.decision_written',
       'swarm.subagent_started',
       'swarm.subagent_completed',
+      'local_meta.completed',
+      'local_memory.proposed',
       'swarm.attempts_scheduled',
       'swarm.champion_selected',
       'swarm.orchestration_completed',

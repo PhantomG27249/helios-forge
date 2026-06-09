@@ -51,6 +51,26 @@ let harnessState = {
     selectedEventKey: null,
     timelines: new Map(),
   },
+  hierarchy: {
+    localMeta: {
+      status: 'idle',
+      candidateCount: 0,
+      cellId: null,
+      attemptId: null,
+    },
+    memory: {
+      status: 'idle',
+      proposalCount: 0,
+      cellId: null,
+      attemptId: null,
+    },
+    experiments: {
+      status: 'idle',
+      runCount: 0,
+      decision: null,
+      experimentId: null,
+    },
+  },
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -316,6 +336,15 @@ const harnessSwarmThinking = $('#harness-swarm-thinking');
 const harnessSwarmActions = $('#harness-swarm-actions');
 const harnessSwarmHandoff = $('#harness-swarm-handoff');
 const harnessSwarmEventInspector = $('#harness-swarm-event-inspector');
+const harnessLocalMetaStatus = $('#harness-local-meta-status');
+const harnessLocalMetaCandidates = $('#harness-local-meta-candidates');
+const harnessLocalMetaCell = $('#harness-local-meta-cell');
+const harnessMemoryHierarchyStatus = $('#harness-memory-hierarchy-status');
+const harnessMemoryProposals = $('#harness-memory-proposals');
+const harnessMemorySource = $('#harness-memory-source');
+const harnessExperimentsStatus = $('#harness-experiments-status');
+const harnessExperimentRuns = $('#harness-experiment-runs');
+const harnessExperimentDecision = $('#harness-experiment-decision');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -724,6 +753,7 @@ function handleHarnessEvent(event) {
   updateHarnessAdaptiveSearch(event);
   updateHarnessSkillCandidateEvents(event);
   updateHarnessAbMctsReplayEvents(event);
+  updateHarnessHierarchyFeedback(event);
 
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
@@ -826,6 +856,39 @@ function updateHarnessVerifierEvolution(event) {
   if (event.type === 'approval.required' || event.type === 'approval.resolved') {
     state.pendingVerifierPromotions = Array.from(harnessState.pendingApprovals.values())
       .filter(isVerifierPromotionApproval).length;
+  }
+}
+
+function updateHarnessHierarchyFeedback(event) {
+  if (event.type === 'local_meta.completed') {
+    harnessState.hierarchy.localMeta = {
+      status: 'completed',
+      candidateCount: event.candidateCount ?? (event.candidates || []).length,
+      cellId: event.cellId || null,
+      attemptId: event.attemptId || null,
+    };
+    event.summary = event.summary || `${harnessState.hierarchy.localMeta.candidateCount} local meta candidates`;
+  }
+
+  if (event.type === 'local_memory.proposed') {
+    harnessState.hierarchy.memory = {
+      status: 'pending global review',
+      proposalCount: event.proposalCount ?? (event.memoryProposals || []).length,
+      cellId: event.cellId || null,
+      attemptId: event.attemptId || null,
+    };
+    event.summary = event.summary || `${harnessState.hierarchy.memory.proposalCount} memory proposals`;
+  }
+
+  if (event.type === 'harness_experiment.completed' || event.type === 'experiment.decision_written') {
+    const current = harnessState.hierarchy.experiments;
+    harnessState.hierarchy.experiments = {
+      status: event.status || 'completed',
+      runCount: current.runCount + 1,
+      decision: event.decision?.status || event.decision?.conclusion || event.result || event.status || 'completed',
+      experimentId: event.experimentId || current.experimentId,
+    };
+    event.summary = event.summary || `experiment ${harnessState.hierarchy.experiments.decision}`;
   }
 }
 
@@ -1200,6 +1263,23 @@ function renderHarnessSwarm() {
   renderHarnessSwarmInspector(selected, timeline, selectedEvent);
 }
 
+function renderHarnessHierarchyFeedback() {
+  const localMeta = harnessState.hierarchy.localMeta;
+  if (harnessLocalMetaStatus) harnessLocalMetaStatus.textContent = localMeta.status || 'idle';
+  if (harnessLocalMetaCandidates) harnessLocalMetaCandidates.textContent = String(localMeta.candidateCount || 0);
+  if (harnessLocalMetaCell) harnessLocalMetaCell.textContent = localMeta.cellId || 'n/a';
+
+  const memory = harnessState.hierarchy.memory;
+  if (harnessMemoryHierarchyStatus) harnessMemoryHierarchyStatus.textContent = memory.status || 'idle';
+  if (harnessMemoryProposals) harnessMemoryProposals.textContent = String(memory.proposalCount || 0);
+  if (harnessMemorySource) harnessMemorySource.textContent = memory.cellId || 'n/a';
+
+  const experiments = harnessState.hierarchy.experiments;
+  if (harnessExperimentsStatus) harnessExperimentsStatus.textContent = experiments.status || 'idle';
+  if (harnessExperimentRuns) harnessExperimentRuns.textContent = String(experiments.runCount || 0);
+  if (harnessExperimentDecision) harnessExperimentDecision.textContent = experiments.decision || 'n/a';
+}
+
 function renderHarnessPanel() {
   if (!harnessPanel) return;
   harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
@@ -1213,6 +1293,7 @@ function renderHarnessPanel() {
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
   renderHarnessSwarm();
+  renderHarnessHierarchyFeedback();
   renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
