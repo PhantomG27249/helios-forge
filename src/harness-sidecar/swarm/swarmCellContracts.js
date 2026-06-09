@@ -13,6 +13,10 @@ function normalizedStringList(value) {
     });
 }
 
+function normalizedList(value) {
+  return asArray(value).filter((item) => item !== undefined && item !== null);
+}
+
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
 }
@@ -41,9 +45,15 @@ export function normalizeEvolutionOutput(evolution = {}) {
   return {
     hardCaseTags: normalizedStringList(source.hardCaseTags ?? source.hardCases ?? source.tags),
     evidenceRefs: normalizedStringList(source.evidenceRefs ?? source.evidenceReferences),
+    roleWeakness: source.roleWeakness ?? null,
+    suggestedProfileChange: source.suggestedProfileChange ?? null,
+    suggestedSkill: source.suggestedSkill ?? null,
     suggestedCodeChange: source.suggestedCodeChange ?? null,
+    suggestedVerifierChange: source.suggestedVerifierChange ?? null,
     suggestedPolicyChange: source.suggestedPolicyChange ?? null,
+    suggestedMemoryPolicyChange: source.suggestedMemoryPolicyChange ?? null,
     suggestedMemoryChange: source.suggestedMemoryChange ?? null,
+    memoryProposals: normalizedList(source.memoryProposals),
     durableApplyRequested: Boolean(source.durableApplyRequested),
     durableApplyApproved,
   };
