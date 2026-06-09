@@ -27,6 +27,7 @@ test('model-driven worker calls injected gateway with structured role prompt and
             patch: 'diff --git a/src/harness-sidecar/swarm/modelDrivenWorker.js b/src/harness-sidecar/swarm/modelDrivenWorker.js',
             verifierEvidence: ['node --test tests/harness-swarm-model-worker.test.js'],
             verifierCommands: ['node --test tests/harness-swarm-model-worker.test.js'],
+            evolutionOutput: { hardCaseTags: ['missing_context'] },
             score: 91,
             artifacts: [{ path: 'artifact.txt', type: 'text' }],
             risks: ['Needs orchestrator wiring later.'],
@@ -53,7 +54,9 @@ test('model-driven worker calls injected gateway with structured role prompt and
   assert.match(result.patch, /diff --git/);
   assert.deepEqual(result.verifierEvidence, ['node --test tests/harness-swarm-model-worker.test.js']);
   assert.deepEqual(result.verifierCommands, ['node --test tests/harness-swarm-model-worker.test.js']);
+  assert.deepEqual(result.evolutionOutput.hardCaseTags, ['missing_context']);
   assert.equal(result.score, 91);
+  assert.equal(result.contract.valid, true);
   assert.deepEqual(result.artifacts, [{ path: 'artifact.txt', type: 'text' }]);
   assert.deepEqual(result.risks, ['Needs orchestrator wiring later.']);
   assert.deepEqual(result.compactHandoff, {

@@ -71,6 +71,7 @@ test('pi native worker emits trace events and normalizes final compact handoff',
           data: {
             summary: 'Pi worker implemented a local adapter.',
             verifierEvidence: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+            evolutionOutput: { hardCaseTags: ['missing_context'] },
             compactHandoff: {
               summary: 'Added Pi-native worker adapter.',
               filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
@@ -93,6 +94,8 @@ test('pi native worker emits trace events and normalizes final compact handoff',
   assert.equal(result.status, 'completed');
   assert.equal(result.worker.kind, 'pi_native_subagent');
   assert.equal(result.thinkingSummary, 'Checked the role contract and returned verifier evidence.');
+  assert.deepEqual(result.evolutionOutput.hardCaseTags, ['missing_context']);
+  assert.equal(result.contract.valid, true);
   assert.equal(result.compactHandoff.filesChanged.includes('src/harness-sidecar/swarm/piNativeWorker.js'), true);
   assert.equal(result.handoffQuality.status, 'acceptable');
   assert.deepEqual(

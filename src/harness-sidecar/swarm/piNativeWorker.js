@@ -2,6 +2,11 @@ import { PiRpcManager } from '../../pi/piRpcManager.js';
 import { buildSwarmA2AEnvelope } from '../interop/a2aSwarmEnvelope.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { normalizeCompactHandoff, scoreCompactHandoff } from './subagentRunner.js';
+import {
+  normalizeEvolutionOutput,
+  normalizeSwarmCellOutput,
+  validateSwarmCellContract,
+} from './swarmCellContracts.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -292,7 +297,15 @@ export async function runPiNativeAttempt({
     const verifierEvidence = output.verifierEvidence || [];
     const requiredFields = outputContract.requiredFields || [];
     const missingFields = missingRequiredFields(output, requiredFields);
-    const valid = missingFields.length === 0;
+    const swarmCellOutput = normalizeSwarmCellOutput({
+      taskOutput: output,
+      evolutionOutput: output.evolutionOutput || output.evolution || {},
+    });
+    const swarmCellContract = validateSwarmCellContract({
+      taskOutput: output,
+      evolutionOutput: output.evolutionOutput || output.evolution || {},
+    });
+    const contractValid = missingFields.length === 0 && swarmCellContract.valid;
 
     emit(traceEvent({
       taskId,
@@ -309,8 +322,10 @@ export async function runPiNativeAttempt({
       ...attempt,
       attemptId,
       role,
-      status: valid ? 'completed' : 'contract_failed',
+      status: missingFields.length ? 'contract_failed' : 'completed',
       output,
+      taskOutput: swarmCellOutput.taskOutput,
+      evolutionOutput: swarmCellOutput.evolutionOutput,
       compactHandoff,
       handoffQuality,
       thinkingSummary: output.thinkingSummary || output.visibleThinkingSummary || null,
@@ -326,7 +341,8 @@ export async function runPiNativeAttempt({
       contract: {
         requiredFields,
         missingFields,
-        valid: Boolean(valid),
+        reasons: swarmCellContract.reasons,
+        valid: Boolean(contractValid),
       },
       startedAt,
       completedAt: new Date().toISOString(),
@@ -345,6 +361,8 @@ export async function runPiNativeAttempt({
       role,
       status: 'failed',
       output: null,
+      taskOutput: null,
+      evolutionOutput: normalizeEvolutionOutput({}),
       compactHandoff: normalizeCompactHandoff({ summary: error.message, risks: ['pi_native_worker_failed'] }),
       handoffQuality: scoreCompactHandoff({ summary: error.message, risks: ['pi_native_worker_failed'] }),
       verifierPassed: false,
@@ -363,6 +381,7 @@ export async function runPiNativeAttempt({
       contract: {
         requiredFields: outputContract.requiredFields || [],
         missingFields: outputContract.requiredFields || [],
+        reasons: ['pi_native_worker_failed'],
         valid: false,
       },
       startedAt,

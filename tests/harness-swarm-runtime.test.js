@@ -49,6 +49,7 @@ test('subagent runner passes scoped budget and enforces output contract', async 
       return {
         patch: 'abcdefghijklmnop',
         verifierEvidence: ['node --test tests/harness-swarm-runtime.test.js'],
+        evolutionOutput: { hardCaseTags: ['missing_context'] },
         score: 88,
       };
     },
@@ -59,6 +60,7 @@ test('subagent runner passes scoped budget and enforces output contract', async 
   assert.match(calls[0].prompt.text, /test_first/);
   assert.equal(result.status, 'completed');
   assert.equal(result.output.patch, 'abcdefghijklmnop');
+  assert.deepEqual(result.evolutionOutput.hardCaseTags, ['missing_context']);
   assert.equal(result.contract.valid, true);
   assert.equal(result.budget.truncatedOutput.patch, 'abcdefghijkl');
   assert.equal(result.budget.exceeded, true);

@@ -1,6 +1,10 @@
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { buildRolePrompt } from './rolePrompts.js';
 import { normalizeCompactHandoff, scoreCompactHandoff } from './subagentRunner.js';
+import {
+  normalizeSwarmCellOutput,
+  validateSwarmCellContract,
+} from './swarmCellContracts.js';
 
 const MODEL_WORKER_REQUIRED_FIELDS = ['summary', 'patch or verifierEvidence'];
 
@@ -101,6 +105,14 @@ export function normalizeModelWorkerOutput({
     risks: asArray(output.risks),
   };
   const compactHandoff = normalizeCompactHandoff(normalizedOutput);
+  const swarmCellOutput = normalizeSwarmCellOutput({
+    taskOutput: normalizedOutput,
+    evolutionOutput: output.evolutionOutput || output.evolution || {},
+  });
+  const swarmCellContract = validateSwarmCellContract({
+    taskOutput: normalizedOutput,
+    evolutionOutput: output.evolutionOutput || output.evolution || {},
+  });
 
   return {
     attemptId: attempt.attemptId,
@@ -113,9 +125,17 @@ export function normalizeModelWorkerOutput({
     score: normalizeScore(output.score),
     artifacts: normalizedOutput.artifacts,
     risks: normalizedOutput.risks,
+    taskOutput: swarmCellOutput.taskOutput,
+    evolutionOutput: swarmCellOutput.evolutionOutput,
     compactHandoff,
     handoffQuality: scoreCompactHandoff(compactHandoff),
     status: 'completed',
+    contract: {
+      requiredFields: MODEL_WORKER_REQUIRED_FIELDS,
+      missingFields: [],
+      reasons: swarmCellContract.reasons,
+      valid: swarmCellContract.valid,
+    },
     model: modelMetadata(response, profileName, requestId),
   };
 }

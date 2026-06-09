@@ -1,4 +1,9 @@
 import { buildRolePrompt } from './rolePrompts.js';
+import {
+  normalizeEvolutionOutput,
+  normalizeSwarmCellOutput,
+  validateSwarmCellContract,
+} from './swarmCellContracts.js';
 
 function missingRequiredFields(output, requiredFields = []) {
   return requiredFields.filter((field) => output?.[field] === undefined || output?.[field] === null);
@@ -161,6 +166,15 @@ export async function runSubagentAttempt({
     const verifierEvidence = output?.verifierEvidence || [];
     const compactHandoff = normalizeCompactHandoff(output);
     const handoffQuality = scoreCompactHandoff(compactHandoff);
+    const swarmCellOutput = normalizeSwarmCellOutput({
+      taskOutput: output,
+      evolutionOutput: output?.evolutionOutput || output?.evolution || {},
+    });
+    const swarmCellContract = validateSwarmCellContract({
+      taskOutput: output,
+      evolutionOutput: output?.evolutionOutput || output?.evolution || {},
+    });
+    const contractValid = missingFields.length === 0 && swarmCellContract.valid;
 
     return {
       attemptId: attempt.attemptId,
@@ -168,6 +182,8 @@ export async function runSubagentAttempt({
       role,
       status: missingFields.length ? 'contract_failed' : 'completed',
       output,
+      taskOutput: swarmCellOutput.taskOutput,
+      evolutionOutput: swarmCellOutput.evolutionOutput,
       compactHandoff,
       handoffQuality,
       prompt,
@@ -177,7 +193,8 @@ export async function runSubagentAttempt({
       contract: {
         requiredFields,
         missingFields,
-        valid: missingFields.length === 0,
+        reasons: swarmCellContract.reasons,
+        valid: contractValid,
       },
       budget: {
         ...budget,
@@ -194,6 +211,8 @@ export async function runSubagentAttempt({
       role,
       status: 'failed',
       output: null,
+      taskOutput: null,
+      evolutionOutput: normalizeEvolutionOutput({}),
       prompt,
       verifierEvidence: [],
       score: 0,
@@ -201,6 +220,7 @@ export async function runSubagentAttempt({
       contract: {
         requiredFields: outputContract.requiredFields || [],
         missingFields: outputContract.requiredFields || [],
+        reasons: ['attempt_failed'],
         valid: false,
       },
       budget: {
