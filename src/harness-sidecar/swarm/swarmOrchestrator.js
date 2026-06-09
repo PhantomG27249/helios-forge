@@ -431,13 +431,16 @@ export async function orchestrateSwarm({
       });
     } : undefined,
     runAttempt: async ({ attempt: scheduledAttempt }) => {
+    const attemptOutputContract = piNativeEnabled
+      ? (scheduledAttempt.profile?.outputContract || outputContract)
+      : outputContract;
     const attemptRecord = await runScheduledAttempt({
       task: { ...task, taskId },
       scheduledAttempt,
       role: scheduledAttempt.profile?.role || 'implementer',
       context,
       budget: { ...budget, ...(scheduledAttempt.budget || {}) },
-      outputContract,
+      outputContract: attemptOutputContract,
       commandAdapter,
       verifierAdapter,
       command,

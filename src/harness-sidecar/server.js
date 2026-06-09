@@ -262,11 +262,24 @@ export function createHarnessSidecar({
   let server = null;
   let actualPort = port;
 
+  function registerEventArtifacts(event = {}) {
+    const eventArtifacts = [
+      ...(Array.isArray(event.artifacts) ? event.artifacts : []),
+      event.artifact,
+    ].filter(Boolean);
+    for (const artifact of eventArtifacts) {
+      if (artifact?.artifactId) {
+        artifacts.set(artifact.artifactId, artifact);
+      }
+    }
+  }
+
   async function emitEvent(event) {
     const enrichedEvent = {
       timestamp: new Date().toISOString(),
       ...event,
     };
+    registerEventArtifacts(enrichedEvent);
     if (enrichedEvent.taskId) {
       await traceWriter.writeEvent(enrichedEvent);
     }
@@ -2299,14 +2312,36 @@ export function createHarnessSidecar({
     };
   }
 
+  async function getAdaptiveSearchRuntimeStatus() {
+    const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+    const enabled = harnessConfig?.features?.adaptiveSearch === true
+      || process.env.HELIOS_ADAPTIVE_SEARCH === '1';
+    const mode = harnessConfig?.adaptiveSearch?.mode || 'advisory';
+    return {
+      enabled,
+      mode,
+      advisory: mode !== 'enforcing',
+      maxActionsPerTask: harnessConfig?.adaptiveSearch?.maxActionsPerTask ?? 8,
+      allowProfileSwitching: harnessConfig?.adaptiveSearch?.allowProfileSwitching !== false,
+    };
+  }
+
   async function getAdaptiveSearchStatus({ taskId, limit } = {}) {
+    const runtimeStatus = await getAdaptiveSearchRuntimeStatus();
     if (taskId) {
       const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId });
-      return summarizeAdaptiveSearchEvents({
+      const summary = summarizeAdaptiveSearchEvents({
         taskId: trace.taskId,
         events: trace.events,
         limit,
       });
+      return {
+        ...runtimeStatus,
+        selectedArm: summary.latestSelection?.selectedArm || summary.latestSelection?.arm || null,
+        recentReward: summary.latestOutcome?.reward ?? null,
+        reason: summary.eventCount > 0 ? 'adaptive_search_events_found' : 'no_adaptive_search_events_yet',
+        ...summary,
+      };
     }
 
     const traces = await listTraces({ workspaceRoot: resolvedWorkspaceRoot });
@@ -2320,10 +2355,15 @@ export function createHarnessSidecar({
       });
       if (summary.eventCount > 0) summaries.push(summary);
     }
+    const latest = summaries[0] || null;
     return {
+      ...runtimeStatus,
       taskId: null,
+      selectedArm: latest?.latestSelection?.selectedArm || latest?.latestSelection?.arm || null,
+      recentReward: latest?.latestOutcome?.reward ?? null,
       traceCount: summaries.length,
       summaries,
+      reason: summaries.length > 0 ? 'adaptive_search_events_found' : 'no_adaptive_search_events_yet',
     };
   }
 
@@ -2567,7 +2607,7 @@ export function createHarnessSidecar({
           sendJson(res, 404, { error: 'Artifact not found' });
           return;
         }
-        const artifactBody = await artifactStore.readTextArtifact(artifact);
+        const artifactBody = await artifactStore.readArtifact(artifact);
         sendJson(res, 200, artifactBody);
         return;
       }

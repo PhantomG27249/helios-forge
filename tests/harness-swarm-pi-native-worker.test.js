@@ -101,6 +101,163 @@ test('pi native worker emits trace events and normalizes final compact handoff',
   );
 });
 
+test('pi native worker recovers structured handoff from Pi messages after prompt ack', async () => {
+  const calls = [];
+  const result = await runPiNativeAttempt({
+    task: { taskId: 'task_pi_ack', task: 'Recover final Pi message.' },
+    attempt: { attemptId: 'attempt_pi_ack', strategy: 'pi_prompt_ack' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'verifierEvidence'] },
+    piWorkerFactory: async () => ({
+      start: async () => calls.push('start'),
+      sendCommand: async (command) => {
+        calls.push(command.type);
+        if (command.type === 'prompt') {
+          return {
+            id: 'cmd-2',
+            type: 'response',
+            command: 'prompt',
+            success: true,
+          };
+        }
+        assert.equal(command.type, 'get_messages');
+        return {
+          success: true,
+          data: {
+            messages: [
+              { role: 'user', content: 'Recover final Pi message.' },
+              {
+                role: 'assistant',
+                content: JSON.stringify({
+                  summary: 'Recovered the final assistant handoff.',
+                  verifierEvidence: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+                  compactHandoff: {
+                    summary: 'Recovered from get_messages.',
+                    filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
+                    filesChanged: [],
+                    testsRun: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+                    nextAction: 'Run focused swarm tests.',
+                    sourcePointers: ['piNativeWorker.js:responsePayload'],
+                    risks: ['ack_payload_shape'],
+                  },
+                  score: 77,
+                }),
+              },
+            ],
+          },
+        };
+      },
+      stop: async () => calls.push('stop'),
+    }),
+  });
+
+  assert.deepEqual(calls, ['start', 'prompt', 'get_messages', 'stop']);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.output.summary, 'Recovered the final assistant handoff.');
+  assert.deepEqual(result.contract.missingFields, []);
+  assert.equal(result.score, 77);
+});
+
+test('pi native worker waits for delayed structured handoff after prompt ack', async () => {
+  let messagePolls = 0;
+  const result = await runPiNativeAttempt({
+    task: { taskId: 'task_pi_delayed_ack', task: 'Wait for final Pi message.' },
+    attempt: { attemptId: 'attempt_pi_delayed_ack', strategy: 'pi_prompt_delayed_ack' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'patch', 'verifierEvidence'] },
+    piWorkerFactory: async () => ({
+      start: async () => {},
+      sendCommand: async (command) => {
+        if (command.type === 'prompt') {
+          return {
+            id: 'cmd-2',
+            type: 'response',
+            command: 'prompt',
+            success: true,
+          };
+        }
+        messagePolls += 1;
+        if (messagePolls === 1) {
+          return { success: true, data: { messages: [] } };
+        }
+        return {
+          success: true,
+          data: {
+            messages: [
+              {
+                role: 'assistant',
+                content: JSON.stringify({
+                  summary: 'Delayed Pi handoff recovered.',
+                  patch: 'diff --git a/a b/a\n',
+                  verifierEvidence: ['delayed handoff verifier passed'],
+                  compactHandoff: {
+                    summary: 'Delayed handoff recovered.',
+                    filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
+                    filesChanged: [],
+                    testsRun: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+                    nextAction: 'Review delayed recovery.',
+                    sourcePointers: ['piNativeWorker.js:pollForMessagesPayload'],
+                    risks: ['delayed_rpc_message'],
+                  },
+                  score: 73,
+                }),
+              },
+            ],
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  assert.equal(messagePolls, 2);
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.contract.missingFields, []);
+  assert.equal(result.output.summary, 'Delayed Pi handoff recovered.');
+});
+
+test('pi native worker adapts natural-language handoffs instead of contract failing', async () => {
+  const result = await runPiNativeAttempt({
+    task: { taskId: 'task_pi_prose_ack', task: 'Handle prose Pi message.' },
+    attempt: { attemptId: 'attempt_pi_prose_ack', strategy: 'pi_prompt_prose_ack' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'patch', 'verifierEvidence'] },
+    piWorkerFactory: async () => ({
+      start: async () => {},
+      sendCommand: async (command) => {
+        if (command.type === 'prompt') {
+          assert.match(command.message, /Return one compact JSON object only/);
+          assert.match(command.message, /Required top-level fields: summary, patch, verifierEvidence/);
+          return {
+            id: 'cmd-2',
+            type: 'response',
+            command: 'prompt',
+            success: true,
+          };
+        }
+        return {
+          success: true,
+          data: {
+            messages: [
+              {
+                role: 'assistant',
+                content: 'I inspected the workspace and would continue by running the focused verifier.',
+              },
+            ],
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.contract.missingFields, []);
+  assert.equal(result.output.contractFallback.used, true);
+  assert.match(result.output.patch, /No patch was proposed/);
+  assert.equal(result.verifierEvidence[0].verifier, 'pi_native_handoff_adapter');
+});
+
 test('swarm orchestrator can run Pi-native attempts behind explicit opt-in', async () => {
   const events = [];
   const result = await orchestrateSwarm({
@@ -138,4 +295,43 @@ test('swarm orchestrator can run Pi-native attempts behind explicit opt-in', asy
   assert.equal(events.some((event) => event.type === 'swarm.subagent_started' && event.worker.kind === 'pi_native_subagent'), true);
   assert.equal(events.some((event) => event.type === 'swarm.subagent_trace' && event.phase === 'handoff_created'), true);
   assert.equal(events.some((event) => event.type === 'swarm.subagent_completed' && event.worker.kind === 'pi_native_subagent'), true);
+});
+
+test('swarm orchestrator uses selected profile output contract for Pi-native attempts', async () => {
+  let requiredFields = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_pi_profile_contract', task: 'Research source provenance.' },
+    taskType: 'research',
+    maxAttempts: 1,
+    swarmExecution: { piNative: true, concurrency: 1 },
+    piWorkerFactory: async () => ({
+      start: async () => {},
+      sendCommand: async (command) => {
+        requiredFields = command.a2a.message.outputContract.requiredFields;
+        return {
+          success: true,
+          data: {
+            summary: 'Research provenance gathered.',
+            researchFindings: ['Found local plan references.'],
+            sources: ['docs/superpowers/plans/example.md'],
+            compactHandoff: {
+              summary: 'Research provenance gathered.',
+              filesInspected: ['docs/superpowers/plans/example.md'],
+              filesChanged: [],
+              testsRun: [],
+              nextAction: 'Use findings in implementation.',
+              sourcePointers: ['docs/superpowers/plans/example.md'],
+              risks: ['research_only'],
+            },
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  assert.deepEqual(requiredFields, ['summary', 'researchFindings', 'sources']);
+  assert.equal(result.attempts[0].profile.id, 'researcher');
+  assert.equal(result.attempts[0].status, 'completed');
+  assert.deepEqual(result.attempts[0].contract.missingFields, []);
 });

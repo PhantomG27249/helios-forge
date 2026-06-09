@@ -47,7 +47,14 @@ test('setup creates local harness config, installs bundled package, and mounts c
     const runtimeManifestPath = path.join(workspaceRoot, '.harness', 'runtime', 'capabilities.mount.json');
     assert.equal(result.config.configPath, configPath);
     assert.equal(result.runtimeManifestPath, runtimeManifestPath);
-    assert.match(await readFile(configPath, 'utf8'), /name: Helios Forge/);
+    const configText = await readFile(configPath, 'utf8');
+    assert.match(configText, /name: Helios Forge/);
+    assert.match(configText, /modelDrivenSwarm: true/);
+    assert.match(configText, /piNativeSwarm: true/);
+    assert.match(configText, /autonomousToolLoop: true/);
+    assert.match(configText, /adaptiveSearch: true/);
+    assert.match(configText, /safeApply: true/);
+    assert.match(configText, /mode: advisory/);
 
     const registry = JSON.parse(await readFile(registryPath, 'utf8'));
     assert.equal(registry.capabilities.length, 10);

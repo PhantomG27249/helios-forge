@@ -122,6 +122,34 @@ test('adaptive search status summarizes stored trace events without leaking secr
   });
 });
 
+test('adaptive search status reports enabled config even before adaptive traces exist', async () => {
+  await withSidecar(async ({ baseUrl, workspaceRoot }) => {
+    await mkdir(path.join(workspaceRoot, '.harness'), { recursive: true });
+    await writeFile(
+      path.join(workspaceRoot, '.harness', 'config.yaml'),
+      [
+        'features:',
+        '  adaptiveSearch: true',
+        'adaptiveSearch:',
+        '  mode: advisory',
+        '  maxActionsPerTask: 8',
+        '  allowProfileSwitching: true',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const status = await requestJson(baseUrl, '/v1/adaptive-search/status');
+
+    assert.equal(status.enabled, true);
+    assert.equal(status.mode, 'advisory');
+    assert.equal(status.advisory, true);
+    assert.equal(status.traceCount, 0);
+    assert.equal(status.selectedArm, null);
+    assert.equal(status.reason, 'no_adaptive_search_events_yet');
+  });
+});
+
 test('adaptive search replay derives trace evidence and returns a dry-run AB-MCTS choice', async () => {
   await withSidecar(async ({ baseUrl, workspaceRoot }) => {
     await writeTrace(workspaceRoot, 'task_abmcts_replay', [

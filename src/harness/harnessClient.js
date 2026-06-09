@@ -48,6 +48,39 @@ export class HarnessClient {
     return this.postJson(`/v1/traces/${encodeURIComponent(taskId)}/replay`, { cursor, limit });
   }
 
+  async getAdaptiveSearchStatus({ taskId, limit } = {}) {
+    const params = new URLSearchParams();
+    if (taskId) params.set('taskId', taskId);
+    if (Number.isFinite(limit)) params.set('limit', String(limit));
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.getJson(`/v1/adaptive-search/status${query}`);
+  }
+
+  async prepareAdaptiveSearchReplay({ taskId, events, context, evidence, scheduler, policy } = {}) {
+    return this.postJson('/v1/adaptive-search/replay', {
+      taskId,
+      events,
+      context,
+      evidence,
+      scheduler,
+      policy,
+    });
+  }
+
+  async listSkillCandidates({ limit } = {}) {
+    const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+    return this.getJson(`/v1/skill-candidates${query}`);
+  }
+
+  async reviewSkillCandidate({ candidateId, decision, reviewer = 'human', reason } = {}) {
+    const action = decision === 'reject' ? 'reject' : 'approve';
+    return this.postJson(`/v1/skill-candidates/${encodeURIComponent(candidateId)}/${action}`, {
+      reviewer,
+      approver: reviewer,
+      reason,
+    });
+  }
+
   async resolveApproval(actionId, choice) {
     return this.postJson(`/v1/approvals/${encodeURIComponent(actionId)}`, { choice });
   }

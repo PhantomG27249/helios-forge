@@ -115,6 +115,11 @@ export function selectAgentProfileForAttempt({
   task = {},
   goalTree,
 } = {}) {
+  const goalTreeText = typeof goalTree === 'string'
+    ? goalTree
+    : Array.isArray(goalTree?.nodes)
+      ? goalTree.nodes.map((node) => node.description || node.label || '').join(' ')
+      : '';
   const text = [
     attempt.profileId,
     attempt.specialization,
@@ -122,15 +127,12 @@ export function selectAgentProfileForAttempt({
     task.taskType,
     task.goal,
     task.description,
-    goalTree,
+    task.task,
+    goalTreeText,
   ].map((value) => {
     if (typeof value === 'string') return value;
     if (value === undefined || value === null) return '';
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
+    return String(value);
   }).join(' ').toLowerCase();
 
   if (attempt.profileId && profiles[attempt.profileId]) return profiles[attempt.profileId];

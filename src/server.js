@@ -157,6 +157,53 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function contentTypeForArtifactPath(artifactPath = '') {
+  const ext = path.extname(artifactPath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.pdf') return 'application/pdf';
+  if (ext === '.json') return 'application/json';
+  if (ext === '.md') return 'text/markdown';
+  return 'text/plain';
+}
+
+function primaryArtifactPath(artifact = {}) {
+  if (artifact.path) return artifact.path;
+  const nested = artifact.artifacts && typeof artifact.artifacts === 'object' ? artifact.artifacts : {};
+  return nested.image || nested.diff || nested.after || nested.before || nested.pdf || null;
+}
+
+function readWorkspaceArtifactFallback({ workspaceRoot, artifact }) {
+  const artifactPath = primaryArtifactPath(artifact);
+  if (!artifactPath || !workspaceRoot) return null;
+  const resolvedWorkspace = path.resolve(workspaceRoot);
+  const resolvedArtifact = path.resolve(artifactPath);
+  if (resolvedArtifact !== resolvedWorkspace && !resolvedArtifact.startsWith(`${resolvedWorkspace}${path.sep}`)) {
+    throw new Error('Artifact path is outside the active workspace');
+  }
+  if (!existsSync(resolvedArtifact)) return null;
+  const contentType = artifact.contentType || contentTypeForArtifactPath(resolvedArtifact);
+  if (contentType.startsWith('image/') || contentType === 'application/pdf') {
+    const bytes = fs.readFileSync(resolvedArtifact);
+    return {
+      artifact: { ...artifact, path: artifact.path || resolvedArtifact, contentType },
+      content: artifact.summary || artifact.title || artifact.type || '',
+      contentType,
+      dataUrl: `data:${contentType};base64,${bytes.toString('base64')}`,
+      fallback: true,
+    };
+  }
+  return {
+    artifact: { ...artifact, path: artifact.path || resolvedArtifact, contentType },
+    content: fs.readFileSync(resolvedArtifact, 'utf-8'),
+    contentType,
+    fallback: true,
+  };
+}
+
 function isLocalRequest(req) {
   const remoteAddress = req.socket?.remoteAddress || '';
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress);
@@ -442,6 +489,47 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'harness_trace_replay', data: result }));
         break;
       }
+      case 'harness_adaptive_search_status_get': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.getAdaptiveSearchStatus({
+          taskId: msg.taskId || msg.traceId,
+          limit: msg.limit || 25,
+        });
+        ws.send(JSON.stringify({ type: 'harness_adaptive_search_status', data: result }));
+        break;
+      }
+      case 'harness_adaptive_search_replay_prepare': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.prepareAdaptiveSearchReplay({
+          taskId: msg.taskId || msg.traceId,
+          events: msg.events,
+          context: msg.context,
+          evidence: msg.evidence,
+          scheduler: msg.scheduler,
+          policy: msg.policy,
+        });
+        ws.send(JSON.stringify({ type: 'harness_abmcts_replay', data: result }));
+        break;
+      }
+      case 'harness_skill_candidates_get': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.listSkillCandidates({
+          limit: msg.limit || 20,
+        });
+        ws.send(JSON.stringify({ type: 'harness_skill_candidates', data: result }));
+        break;
+      }
+      case 'harness_skill_candidate_review': {
+        await ensureHarnessRunning(harness, pi, feedback);
+        const result = await harness.client.reviewSkillCandidate({
+          candidateId: msg.candidateId || msg.id,
+          decision: msg.decision,
+          reviewer: msg.reviewer || 'human',
+          reason: msg.reason,
+        });
+        ws.send(JSON.stringify({ type: 'harness_skill_candidate_reviewed', data: result }));
+        break;
+      }
       case 'harness_task_start': {
         await ensureHarnessRunning(harness, pi, feedback);
         const task = await harness.client.startTask({
@@ -463,8 +551,19 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       }
       case 'harness_artifact_get': {
         await ensureHarnessRunning(harness, pi, feedback);
-        const artifact = await harness.client.getArtifact(msg.artifactId);
-        ws.send(JSON.stringify({ type: 'harness_artifact', data: artifact }));
+        try {
+          const artifact = await harness.client.getArtifact(msg.artifactId);
+          ws.send(JSON.stringify({ type: 'harness_artifact', data: artifact }));
+        } catch (error) {
+          const fallback = msg.artifact
+            ? readWorkspaceArtifactFallback({
+                workspaceRoot: harness.manager.workspaceRoot || pi.cwd,
+                artifact: msg.artifact,
+              })
+            : null;
+          if (!fallback) throw error;
+          ws.send(JSON.stringify({ type: 'harness_artifact', data: fallback }));
+        }
         break;
       }
       case 'delete_session': {

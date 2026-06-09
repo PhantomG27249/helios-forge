@@ -82,6 +82,19 @@ let harnessSkillCandidatesLoaded = false;
 let harnessSkillCandidatesRequestTimer = null;
 let harnessAdaptiveStatus = null;
 let harnessSkillCandidates = [];
+let assistantActivityTimer = null;
+let assistantActivityHideTimer = null;
+let assistantActivity = {
+  phase: 'idle',
+  detail: 'Waiting for a task.',
+  startedAt: null,
+  updatedAt: null,
+  thinkingChars: 0,
+  textChars: 0,
+  toolCalls: 0,
+  errors: 0,
+  toolName: null,
+};
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -106,6 +119,95 @@ function resetConnectTimeout() {
       debug(`  Messages logged: ${debugLog.length}`);
     }
   }, 15000);
+}
+
+function formatActivityDuration(startedAt) {
+  if (!startedAt) return '0s';
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function resetAssistantActivity() {
+  assistantActivity = {
+    phase: 'idle',
+    detail: 'Waiting for a task.',
+    startedAt: null,
+    updatedAt: null,
+    thinkingChars: 0,
+    textChars: 0,
+    toolCalls: 0,
+    errors: 0,
+    toolName: null,
+  };
+}
+
+function ensureAssistantActivityTimer() {
+  if (assistantActivityTimer) return;
+  assistantActivityTimer = setInterval(renderAssistantActivity, 1000);
+}
+
+function stopAssistantActivityTimer() {
+  if (!assistantActivityTimer) return;
+  clearInterval(assistantActivityTimer);
+  assistantActivityTimer = null;
+}
+
+function setAssistantActivity(patch = {}) {
+  if (assistantActivityHideTimer) {
+    clearTimeout(assistantActivityHideTimer);
+    assistantActivityHideTimer = null;
+  }
+  const now = Date.now();
+  assistantActivity = {
+    ...assistantActivity,
+    ...patch,
+    startedAt: patch.startedAt === undefined ? (assistantActivity.startedAt || now) : patch.startedAt,
+    updatedAt: now,
+  };
+  renderAssistantActivity();
+  ensureAssistantActivityTimer();
+}
+
+function finishAssistantActivity(detail = 'Turn complete.') {
+  setAssistantActivity({ phase: 'complete', detail, toolName: null });
+  stopAssistantActivityTimer();
+  assistantActivityHideTimer = setTimeout(() => {
+    resetAssistantActivity();
+    renderAssistantActivity();
+  }, 6000);
+}
+
+function renderAssistantActivity() {
+  if (!assistantActivityEl) return;
+  if (assistantActivity.phase === 'idle') {
+    assistantActivityEl.classList.add('hidden');
+    return;
+  }
+  assistantActivityEl.classList.remove('hidden');
+  assistantActivityEl.dataset.phase = assistantActivity.phase;
+  const phaseLabels = {
+    starting: 'Starting',
+    thinking: 'Thinking',
+    writing: 'Writing',
+    tool: 'Using tool',
+    waiting: 'Waiting',
+    error: 'Error',
+    complete: 'Complete',
+  };
+  if (assistantActivityPhase) {
+    assistantActivityPhase.textContent = phaseLabels[assistantActivity.phase] || assistantActivity.phase;
+  }
+  if (assistantActivityDetail) assistantActivityDetail.textContent = assistantActivity.detail || '';
+  const metrics = [
+    formatActivityDuration(assistantActivity.startedAt),
+    assistantActivity.thinkingChars ? `thinking ${assistantActivity.thinkingChars} chars` : null,
+    assistantActivity.textChars ? `writing ${assistantActivity.textChars} chars` : null,
+    assistantActivity.toolCalls ? `${assistantActivity.toolCalls} tool${assistantActivity.toolCalls === 1 ? '' : 's'}` : null,
+    assistantActivity.toolName ? `current ${assistantActivity.toolName}` : null,
+    assistantActivity.errors ? `${assistantActivity.errors} error${assistantActivity.errors === 1 ? '' : 's'}` : null,
+  ].filter(Boolean);
+  if (assistantActivityMetrics) assistantActivityMetrics.textContent = metrics.join(' | ');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -151,6 +253,10 @@ const sendBtn = $('#btn-send');
 const abortBtn = $('#btn-abort');
 const steerBtn = $('#btn-steer');
 const sessionTitle = $('#session-title');
+const assistantActivityEl = $('#assistant-activity');
+const assistantActivityPhase = $('#assistant-activity-phase');
+const assistantActivityDetail = $('#assistant-activity-detail');
+const assistantActivityMetrics = $('#assistant-activity-metrics');
 const modelDisplay = $('#model-display');
 const thinkingDisplay = $('#thinking-display');
 const scrollSentinel = $('#scroll-sentinel');
@@ -530,10 +636,17 @@ function handleMessage(msg) {
 
   // Agent events
   switch (msg.type) {
-    case 'agent_start': isStreaming = true; updateInput(); showLoading(); break;
+    case 'agent_start':
+      isStreaming = true;
+      resetAssistantActivity();
+      setAssistantActivity({ phase: 'starting', detail: 'Waiting for assistant response.' });
+      updateInput();
+      showLoading();
+      break;
     case 'agent_end':
       isStreaming = false; pendingToolCalls.clear();
       activeThinking = null; activeStream = null;
+      finishAssistantActivity(assistantActivity.errors ? 'Turn ended with errors.' : 'Turn complete.');
       updateInput(); hideLoading();
       // Refresh sessions after response completes (new session may have been created)
       setTimeout(() => send({ type: 'get_session_files' }), 1000);
@@ -542,12 +655,17 @@ function handleMessage(msg) {
       activeStream = null; 
       activeThinking = null;
       savedThinkingBlocks = [];
+      setAssistantActivity({ phase: 'starting', detail: 'Turn started.' });
       break;
-    case 'turn_end': if (activeStream) finalizeStream(); break;
+    case 'turn_end':
+      if (activeStream) finalizeStream();
+      setAssistantActivity({ phase: 'waiting', detail: 'Finishing turn.' });
+      break;
     case 'message_start':
       if (msg.message.role === 'assistant') {
         const el = createAssistantMsg();
         activeStream = { el, contentEl: el.querySelector('.msg-content'), text: '' };
+        setAssistantActivity({ phase: 'writing', detail: 'Assistant message opened.' });
       }
       break;
     case 'message_update': handleMessageUpdate(msg); break;
@@ -2391,13 +2509,38 @@ function openHarnessArtifact(artifactId) {
   $('#harness-artifact-title').textContent = artifact?.title || 'Harness Artifact';
   $('#harness-artifact-content').textContent = 'Loading...';
   openModal('harness-artifact');
-  send({ type: 'harness_artifact_get', artifactId });
+  send({ type: 'harness_artifact_get', artifactId, artifact });
 }
 
 function renderHarnessArtifact(payload) {
   const artifact = payload.artifact || {};
   $('#harness-artifact-title').textContent = artifact.title || artifact.type || 'Harness Artifact';
-  $('#harness-artifact-content').textContent = payload.content || '';
+  const contentEl = $('#harness-artifact-content');
+  contentEl.textContent = '';
+  contentEl.classList.toggle('visual', Boolean(payload.dataUrl));
+  if (payload.dataUrl && String(payload.contentType || '').startsWith('image/')) {
+    const image = document.createElement('img');
+    image.className = 'harness-artifact-image';
+    image.src = payload.dataUrl;
+    image.alt = artifact.summary || artifact.title || artifact.type || 'Harness artifact image';
+    contentEl.appendChild(image);
+    if (payload.content) {
+      const caption = document.createElement('div');
+      caption.className = 'harness-artifact-caption';
+      caption.textContent = payload.content;
+      contentEl.appendChild(caption);
+    }
+    return;
+  }
+  if (payload.dataUrl && payload.contentType === 'application/pdf') {
+    const frame = document.createElement('iframe');
+    frame.className = 'harness-artifact-frame';
+    frame.src = payload.dataUrl;
+    frame.title = artifact.summary || artifact.title || 'PDF artifact';
+    contentEl.appendChild(frame);
+    return;
+  }
+  contentEl.textContent = payload.content || '';
   openModal('harness-artifact');
 }
 
@@ -2420,12 +2563,18 @@ function handleMessageUpdate(msg) {
 
   switch (ev.type) {
     case 'text_start':
+      setAssistantActivity({ phase: 'writing', detail: 'Writing response.' });
       if (activeStream && !activeStream.text) {
         // Don't clear thinking blocks - they're saved
         activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + '<span class="cursor"></span>';
       }
       break;
     case 'text_delta':
+      setAssistantActivity({
+        phase: 'writing',
+        detail: 'Writing response.',
+        textChars: assistantActivity.textChars + String(ev.delta || '').length,
+      });
       if (activeStream) {
         activeStream.text += ev.delta;
         activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + renderMD(activeStream.text) + '<span class="cursor"></span>';
@@ -2434,9 +2583,15 @@ function handleMessageUpdate(msg) {
       }
       break;
     case 'thinking_start': 
+      setAssistantActivity({ phase: 'thinking', detail: 'Model is producing a thinking trace.' });
       createThinkingBlock(); 
       break;
     case 'thinking_delta':
+      setAssistantActivity({
+        phase: 'thinking',
+        detail: 'Model is thinking.',
+        thinkingChars: assistantActivity.thinkingChars + String(ev.delta || '').length,
+      });
       if (activeThinking) {
         activeThinking.text += ev.delta;
         const preview = activeThinking.el.querySelector('.thinking-preview');
@@ -2449,6 +2604,7 @@ function handleMessageUpdate(msg) {
       }
       break;
     case 'thinking_end':
+      setAssistantActivity({ phase: 'writing', detail: 'Thinking trace complete.' });
       if (activeThinking) {
         activeThinking.el.classList.add('thinking-done');
         const preview = activeThinking.el.querySelector('.thinking-preview');
@@ -2593,6 +2749,12 @@ function updateSessionTitle(data) {
 // Tools
 // ═══════════════════════════════════════════════════════════
 function handleToolStart(msg) {
+  setAssistantActivity({
+    phase: 'tool',
+    detail: `Running tool: ${msg.toolName || 'unknown'}.`,
+    toolName: msg.toolName || null,
+    toolCalls: assistantActivity.toolCalls + 1,
+  });
   const el = createToolElDynamic(msg.toolName, msg.args, 'running');
   const last = messagesEl.lastElementChild;
   if (last?.classList.contains('message-assistant')) {
@@ -2603,6 +2765,11 @@ function handleToolStart(msg) {
 }
 
 function handleToolUpdate(msg) {
+  setAssistantActivity({
+    phase: 'tool',
+    detail: `Tool update: ${msg.toolName || assistantActivity.toolName || 'running'}.`,
+    toolName: msg.toolName || assistantActivity.toolName,
+  });
   const p = pendingToolCalls.get(msg.toolCallId);
   if (p && msg.partialResult) {
     const r = p.el.querySelector('.tool-result');
@@ -2615,6 +2782,14 @@ function handleToolUpdate(msg) {
 }
 
 function handleToolEnd(msg) {
+  setAssistantActivity({
+    phase: msg.isError ? 'error' : 'tool',
+    detail: msg.isError
+      ? `Tool error: ${msg.toolName || assistantActivity.toolName || 'unknown'}.`
+      : `Tool complete: ${msg.toolName || assistantActivity.toolName || 'unknown'}.`,
+    toolName: msg.isError ? (msg.toolName || assistantActivity.toolName || null) : null,
+    errors: assistantActivity.errors + (msg.isError ? 1 : 0),
+  });
   const p = pendingToolCalls.get(msg.toolCallId);
   if (p) {
     p.status = msg.isError ? 'error' : 'success';

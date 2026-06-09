@@ -91,6 +91,29 @@ test('profile selector routes visual and test attempts to specialist profiles', 
   );
 });
 
+test('profile selector ignores generic goal-tree source keys for normal implementer attempts', () => {
+  const profiles = loadDefaultAgentProfiles();
+  const profile = selectAgentProfileForAttempt({
+    profiles,
+    attempt: { strategy: 'minimal_patch' },
+    task: {
+      taskType: 'coding_bugfix',
+      task: 'Fix the runtime handoff contract path.',
+    },
+    goalTree: {
+      nodes: [
+        {
+          id: 'goal_1',
+          description: 'Resolve malformed tool call',
+          source: 'rho_failure',
+        },
+      ],
+    },
+  });
+
+  assert.equal(profile.id, 'implementer');
+});
+
 test('orchestrator attaches selected profile metadata to attempts', async () => {
   const seen = [];
   const result = await orchestrateSwarm({

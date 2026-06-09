@@ -9,11 +9,55 @@ test('harness controls expose deep research and capabilities as first-class tool
   assert.match(html, /id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research"/);
   assert.match(html, /id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs"/);
   assert.match(html, /<div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">/);
-  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*absolute/s);
-  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*left:\s*16px/s);
-  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*bottom:\s*16px/s);
-  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
+  const inputStart = html.indexOf('<div id="input-area">');
+  const inputEnd = html.indexOf('</main>', inputStart);
+  const dockStart = html.indexOf('<div class="topbar-actions bottom-left-tool-dock"', inputStart);
+  assert.ok(dockStart > inputStart && dockStart < inputEnd, 'tool dock should live in the input-area chrome layer');
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*static/s);
+  assert.doesNotMatch(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
+  assert.match(css, /#input-area\s*\{[^}]*grid-template-columns:\s*144px\s+minmax\(0,\s*1fr\)\s+144px/s);
   assert.doesNotMatch(html, /topbar-text-btn/);
+});
+
+test('chat surface exposes live assistant activity while turns are running', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+  const css = await readFile('public/app.css', 'utf8');
+
+  assert.match(html, /id="assistant-activity" class="assistant-activity hidden"/);
+  assert.match(html, /id="assistant-activity-phase"/);
+  assert.match(html, /id="assistant-activity-detail"/);
+  assert.match(html, /id="assistant-activity-metrics"/);
+  assert.match(appJs, /let assistantActivity =/);
+  assert.match(appJs, /function setAssistantActivity/);
+  assert.match(appJs, /function renderAssistantActivity/);
+  assert.match(appJs, /phase:\s*'thinking'/);
+  assert.match(appJs, /phase:\s*'tool'/);
+  assert.match(appJs, /phase:\s*msg\.isError \? 'error' : 'tool'/);
+  assert.match(appJs, /thinkingChars/);
+  assert.match(appJs, /textChars/);
+  assert.match(css, /\.assistant-activity/);
+  assert.match(css, /\.assistant-activity-dot/);
+  assert.match(css, /\.assistant-activity-metrics/);
+});
+
+test('harness artifact modal supports stale visual artifact previews', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+  const css = await readFile('public/app.css', 'utf8');
+  const serverJs = await readFile('src/server.js', 'utf8');
+  const sidecarJs = await readFile('src/harness-sidecar/server.js', 'utf8');
+
+  assert.match(html, /<div id="harness-artifact-content" class="harness-artifact-content">Loading\.\.\.<\/div>/);
+  assert.match(appJs, /send\(\{ type: 'harness_artifact_get', artifactId, artifact \}\)/);
+  assert.match(appJs, /payload\.dataUrl && String\(payload\.contentType \|\| ''\)\.startsWith\('image\/'\)/);
+  assert.match(appJs, /payload\.contentType === 'application\/pdf'/);
+  assert.match(css, /\.harness-artifact-content\.visual/);
+  assert.match(css, /\.harness-artifact-image/);
+  assert.match(css, /\.harness-artifact-frame/);
+  assert.match(serverJs, /function readWorkspaceArtifactFallback/);
+  assert.match(sidecarJs, /function registerEventArtifacts/);
+  assert.match(sidecarJs, /artifactStore\.readArtifact/);
 });
 
 test('harness controls expose trace replay as a compact toolbar and tab surface', async () => {
@@ -37,6 +81,8 @@ test('harness controls expose trace replay as a compact toolbar and tab surface'
 test('harness panel exposes AB-MCTS adaptive search, skill review, and replay surfaces', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');
+  const serverJs = await readFile('src/server.js', 'utf8');
+  const harnessClientJs = await readFile('src/harness/harnessClient.js', 'utf8');
   const css = await readFile('public/app.css', 'utf8');
 
   assert.match(html, /id="harness-adaptive-search"/);
@@ -63,6 +109,14 @@ test('harness panel exposes AB-MCTS adaptive search, skill review, and replay su
   assert.match(appJs, /renderHarnessAbMctsReplay/);
   assert.match(appJs, /data-skill-candidate-action="approve"/);
   assert.match(appJs, /data-skill-candidate-action="reject"/);
+  assert.match(serverJs, /case 'harness_adaptive_search_status_get'/);
+  assert.match(serverJs, /case 'harness_adaptive_search_replay_prepare'/);
+  assert.match(serverJs, /case 'harness_skill_candidates_get'/);
+  assert.match(serverJs, /case 'harness_skill_candidate_review'/);
+  assert.match(harnessClientJs, /async getAdaptiveSearchStatus/);
+  assert.match(harnessClientJs, /async prepareAdaptiveSearchReplay/);
+  assert.match(harnessClientJs, /async listSkillCandidates/);
+  assert.match(harnessClientJs, /async reviewSkillCandidate/);
 
   assert.match(css, /\.harness-adaptive-search/);
   assert.match(css, /\.harness-skill-candidate/);
@@ -227,6 +281,6 @@ test('harness panel exposes verifier evolution operator visibility', async () =>
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250620/);
-  assert.match(html, /app\.js\?v=20250620/);
+  assert.match(html, /app\.css\?v=20250621/);
+  assert.match(html, /app\.js\?v=20250621/);
 });

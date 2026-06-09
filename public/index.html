@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250620">
+  <link rel="stylesheet" href="/app.css?v=20250621">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -114,27 +114,6 @@
           </div>
         </div>
       </header>
-
-      <div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">
-        <button id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
-        </button>
-        <button id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5 5l14 14"/><path d="M19 5L5 19"/></svg>
-        </button>
-        <button id="btn-traces" class="topbar-icon-btn" title="Traces" aria-label="Open Traces and Replay">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/><path d="M17 15l3 3-3 3"/><path d="M14 18h6"/></svg>
-        </button>
-        <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
-        </button>
-        <button id="btn-export" class="topbar-icon-btn" title="Export">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        </button>
-        <button id="btn-stats" class="topbar-icon-btn" title="Stats">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        </button>
-      </div>
 
       <div id="workspace-layout" class="workspace-layout">
         <aside id="harness-panel" class="harness-panel hidden" aria-label="Helios Harness tools">
@@ -385,6 +364,14 @@
               </svg>
               <span id="connection-text">Connecting to Pi...</span>
             </div>
+            <div id="assistant-activity" class="assistant-activity hidden" aria-live="polite">
+              <div class="assistant-activity-main">
+                <span class="assistant-activity-dot"></span>
+                <span id="assistant-activity-phase" class="assistant-activity-phase">Idle</span>
+                <span id="assistant-activity-detail" class="assistant-activity-detail">Waiting for a task.</span>
+              </div>
+              <div id="assistant-activity-metrics" class="assistant-activity-metrics"></div>
+            </div>
             <div id="messages" class="messages"></div>
             <div id="scroll-sentinel"></div>
           </div>
@@ -392,6 +379,26 @@
       </div>
 
       <div id="input-area">
+        <div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">
+          <button id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
+          </button>
+          <button id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5 5l14 14"/><path d="M19 5L5 19"/></svg>
+          </button>
+          <button id="btn-traces" class="topbar-icon-btn" title="Traces" aria-label="Open Traces and Replay">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/><path d="M17 15l3 3-3 3"/><path d="M14 18h6"/></svg>
+          </button>
+          <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
+          </button>
+          <button id="btn-export" class="topbar-icon-btn" title="Export">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </button>
+          <button id="btn-stats" class="topbar-icon-btn" title="Stats">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          </button>
+        </div>
         <div class="input-box">
           <div id="image-preview" class="image-preview"></div>
           <textarea id="message-input" placeholder="Write a message..." rows="1"></textarea>
@@ -471,7 +478,7 @@
       <div class="modal-overlay"></div>
       <div class="modal-content">
         <div class="modal-header"><h2 id="harness-artifact-title">Harness Artifact</h2><button class="modal-close" onclick="closeModal('harness-artifact')">&times;</button></div>
-        <div class="modal-body"><pre id="harness-artifact-content" class="harness-artifact-content">Loading...</pre></div>
+        <div class="modal-body"><div id="harness-artifact-content" class="harness-artifact-content">Loading...</div></div>
       </div>
     </div>
 
@@ -495,6 +502,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250620"></script>
+  <script src="/app.js?v=20250621"></script>
 </body>
 </html>

@@ -37,6 +37,31 @@ test('artifact store writes and reads text artifact manifests', async () => {
   }
 });
 
+test('artifact store reads visual artifact paths as preview data URLs', async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'pi-artifacts-'));
+  const store = createArtifactStore({ workspaceRoot });
+
+  try {
+    const imagePath = path.join(workspaceRoot, 'preview.png');
+    await writeFile(
+      imagePath,
+      Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=', 'base64'),
+    );
+    const result = await store.readArtifact({
+      artifactId: 'screenshot_test',
+      type: 'screenshot',
+      summary: 'Preview screenshot',
+      artifacts: { image: imagePath },
+    });
+
+    assert.equal(result.contentType, 'image/png');
+    assert.match(result.dataUrl, /^data:image\/png;base64,/);
+    assert.equal(result.content, 'Preview screenshot');
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
 test('visual diff artifact records before after and diff paths', () => {
   const artifact = createVisualDiffArtifact({
     taskId: 'task_visual',
