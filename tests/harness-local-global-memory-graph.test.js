@@ -107,6 +107,21 @@ test('memory graph runtime persists promoted global layers and constructed graph
   });
 });
 
+test('memory graph runtime loads persisted global graph snapshots', async () => {
+  await makeTempWorkspace(async (workspaceRoot) => {
+    const runtime = createMemoryGraphRuntime({ workspaceRoot });
+    await runtime.ingestPromotion({
+      passages: [{ passageId: 'p1', text: 'A requires B.' }],
+      facts: [{ subject: 'A', relation: 'requires', object: 'B', passageIds: ['p1'] }],
+    });
+
+    const reloaded = createMemoryGraphRuntime({ workspaceRoot });
+    const graph = await reloaded.loadGraph();
+
+    assert.equal(graph.stats.passageCount, 1);
+  });
+});
+
 test('hierarchical memory retriever returns active facts passages and summary counts', () => {
   const layers = createGlobalMemoryLayers();
   upsertPassage(layers, { passageId: 'p1', text: 'A requires B.' });
@@ -130,5 +145,6 @@ test('hierarchical memory retriever returns active facts passages and summary co
 
   assert.equal(context.items.some((item) => item.kind === 'active_fact'), true);
   assert.equal(context.items.some((item) => item.kind === 'passage'), true);
+  assert.equal(context.items.some((item) => item.kind === 'graph_summary'), true);
   assert.equal(context.summary.activeFactCount, 1);
 });

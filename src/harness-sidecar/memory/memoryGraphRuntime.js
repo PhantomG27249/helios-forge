@@ -99,6 +99,15 @@ export function createMemoryGraphRuntime({
     return withSchemaVersion(createGlobalMemoryLayers(loaded || {}));
   }
 
+  async function loadGraph() {
+    return readJsonIfPresent(paths.graphPath, {
+      schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
+      nodes: [],
+      edges: [],
+      stats: {},
+    });
+  }
+
   async function saveRuntimeState({ layers, graph }) {
     await mkdir(paths.memoryDir, { recursive: true });
     await writeFile(paths.layersPath, `${JSON.stringify(withSchemaVersion(layers), null, 2)}\n`, 'utf8');
@@ -131,6 +140,7 @@ export function createMemoryGraphRuntime({
     workspaceRoot: resolvedRoot,
     paths,
     loadLayers,
+    loadGraph,
     ingestPromotion,
   };
 }

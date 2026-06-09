@@ -89,6 +89,24 @@ function passageItem(passage, terms) {
   };
 }
 
+function graphSummaryItem(graph = {}, terms) {
+  const stats = graph.stats || {};
+  const text = [
+    'graph summary',
+    `schemas ${stats.schemaCount ?? stats.stableSchemaCount ?? 0}`,
+    `facts ${stats.factCount ?? stats.activeFactCount ?? 0}`,
+    `passages ${stats.passageCount ?? 0}`,
+  ].join(' ');
+  return {
+    id: 'graph_summary',
+    kind: 'graph_summary',
+    score: Math.max(0.01, overlapScore(text, terms, 0.05)),
+    text,
+    provenance: [],
+    stats,
+  };
+}
+
 export function retrieveHierarchicalMemoryContext({
   query,
   layers = {},
@@ -104,6 +122,7 @@ export function retrieveHierarchicalMemoryContext({
     ...facts.map((fact) => factItem(fact, terms)),
     ...schemas.filter((schema) => schema.status === 'stable').map((schema) => schemaItem(schema, terms)),
     ...passages.map((passage) => passageItem(passage, terms)),
+    graphSummaryItem(graph, terms),
   ]
     .filter((item) => item.score > 0)
     .sort(itemSort)
