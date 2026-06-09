@@ -9,7 +9,7 @@ test('harness controls expose deep research and capabilities as first-class tool
   assert.match(html, /id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research"/);
   assert.match(html, /id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs"/);
   assert.match(html, /<div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">/);
-  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*fixed/s);
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*absolute/s);
   assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*left:\s*16px/s);
   assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*bottom:\s*16px/s);
   assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
