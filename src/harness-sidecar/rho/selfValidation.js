@@ -36,13 +36,13 @@ export function scoreSelfValidation(rollout = {}) {
     reasons.push('not_completed');
     return { passed: false, score: 0, reason: 'not_completed', reasons };
   }
-  if (verifierPassed) {
-    reasons.push('verifier_passed');
-    return { passed: true, score: 1, reason: 'verifier_passed', reasons };
-  }
   if (hasFailedTestEvidence(rollout)) {
     reasons.push('tests_failed');
     return { passed: false, score: 0, reason: 'tests_failed', reasons };
+  }
+  if (verifierPassed) {
+    reasons.push('verifier_passed');
+    return { passed: true, score: 1, reason: 'verifier_passed', reasons };
   }
   if (testsObserved) {
     reasons.push('tests_observed');

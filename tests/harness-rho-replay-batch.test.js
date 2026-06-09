@@ -20,6 +20,7 @@ test('passes self-validation from completed status and verifier evidence', () =>
 test('self-validation does not pass failed test evidence', () => {
   const result = scoreSelfValidation({
     status: 'completed',
+    verifierEvidence: [{ passed: true }],
     compactHandoff: {
       summary: 'tests failed',
       testsRun: [{ command: 'npm test', status: 'failed', passed: false }],
