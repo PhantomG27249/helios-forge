@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let Helios Forge propose, test, evolve, and approval-promote its own workspace-local `SKILL.md` capabilities using Retrospective Harness Optimization, BES, AB-MCTS scheduling, verifiers, and safe capability mounting.
+**Goal:** Let Helios Forge propose, test, evolve, and approval-promote its own workspace-local `SKILL.md` capabilities using Retrospective Harness Optimization, BES, AB-MCTS scheduling, verifiers, source-skill snapshots, and safe capability mounting.
 
-**Architecture:** The agent never writes directly to global Pi, Codex, Claude, or user skill folders. It writes shadow-only skill candidates under `.harness/meta/skill-candidates/<candidateId>/`, evaluates them against RHO-selected hard cases and held-out traces, and only installs the winner into `.harness/packages` through an approval-gated promotion path.
+**Architecture:** The agent never writes directly to global Pi, Codex, Claude, or user skill folders. It writes shadow-only skill candidates under `.harness/meta/skill-candidates/<candidateId>/`, evaluates them against RHO-selected hard cases and held-out traces, and only installs the winner into `.harness/packages` through an approval-gated promotion path. When an existing loaded skill is relevant, Helios stores an immutable workspace-local source snapshot and evolves a separate adapted candidate so the original and the moment-specific adaptation can be inspected side by side.
 
 **Tech Stack:** Node.js ESM, `node:test`, Helios capability store and package installer, `.harness` workspace state, RHO coreset builder, BES meta optimizer, verifier registry, trace replay, approval resume, safe apply.
 
@@ -24,15 +24,18 @@ Helios already supports:
 
 Missing piece: a first-class skill-candidate lifecycle. This plan adds one.
 
+Original RHO alignment: this plan should mirror the paper's core pattern more closely than a generic skill generator. RHO selects hard cases from prior trajectories, replays or re-solves them, extracts self-validation and self-consistency diagnostics, proposes harness updates, and chooses a winner by pairwise preference against the baseline. For skills, the baseline can be either no skill, the currently loaded skill, or an immutable source snapshot of a loaded skill.
+
 ## Lifecycle
 
 1. RHO mines traces for repeated failure patterns that would benefit from a reusable skill.
-2. BES decomposes the desired skill into goals, constraints, and evaluation cases.
-3. AB-MCTS schedules whether to generate a new skill, refine a current candidate, gather more evidence, or stop.
-4. Candidate writer creates `SKILL.md` plus metadata in `.harness/meta/skill-candidates/<candidateId>/`.
-5. Verifiers and trace replay score the candidate.
-6. Promotion policy queues an approval.
-7. Approved candidate is packaged into `.harness/packages/<packageId>/` and mounted as a normal workspace-local skill.
+2. If a loaded skill is relevant, Helios snapshots the original `SKILL.md` plus provenance into `.harness/meta/skill-snapshots/<snapshotId>/`.
+3. BES decomposes the desired skill adaptation into goals, constraints, and evaluation cases.
+4. AB-MCTS schedules whether to copy/snapshot a source skill, generate a new skill, refine a current candidate, gather more evidence, or stop.
+5. Candidate writer creates an adapted `SKILL.md` plus metadata in `.harness/meta/skill-candidates/<candidateId>/`.
+6. Verifiers and trace replay score the original baseline and adapted candidate.
+7. Promotion policy queues an approval.
+8. Approved candidate is packaged into `.harness/packages/<packageId>/` and mounted as a normal workspace-local skill.
 
 ## Chunk 1: Skill Candidate Store
 
@@ -48,7 +51,7 @@ Cover:
 
 - writes candidate under `.harness/meta/skill-candidates/<safe-id>/`;
 - rejects unsafe ids and paths;
-- writes `SKILL.md`, `candidate.json`, and optional `evaluation.json`;
+- writes `SKILL.md`, `candidate.json`, optional `evaluation.json`, and optional source-snapshot references;
 - never writes outside workspace;
 - never writes to global Pi/Codex/Claude folders.
 
@@ -77,11 +80,21 @@ Candidate record:
   source: {
     rhoCaseIds: [],
     traceIds: [],
-    failureModes: []
+    failureModes: [],
+    sourceSkillSnapshotId: 'skill_snapshot_superpowers_debugging_001',
+    sourceSkillPath: 'C:/Users/<user>/.codex/superpowers/skills/systematic-debugging/SKILL.md',
+    sourceLicense: 'unknown',
+    sourcePermission: 'snapshot_for_local_evaluation_only'
+  },
+  lineage: {
+    origin: 'adapted_from_loaded_skill',
+    sourceSnapshotId: 'skill_snapshot_superpowers_debugging_001',
+    adaptationReason: 'RHO hard cases showed repeated debugging drift in Helios tasks'
   },
   safety: {
     secretsScan: 'pending',
     pathScan: 'pending',
+    licenseScan: 'pending',
     globalWrite: false
   },
   rollback: {
@@ -98,6 +111,8 @@ export async function writeSkillCandidate({ workspaceRoot, candidate, skillMarkd
 export async function readSkillCandidate({ workspaceRoot, candidateId } = {}) {}
 export async function listSkillCandidates({ workspaceRoot } = {}) {}
 export async function writeSkillCandidateEvaluation({ workspaceRoot, candidateId, evaluation } = {}) {}
+export async function writeSourceSkillSnapshot({ workspaceRoot, sourceSkill, skillMarkdown } = {}) {}
+export async function readSourceSkillSnapshot({ workspaceRoot, snapshotId } = {}) {}
 ```
 
 - [ ] **Step 4: Run tests and commit**
@@ -153,7 +168,23 @@ Return ranked needs:
 
 Compare against installed skill names, ids, triggers, and package metadata so the harness refines existing skills when a close match already exists.
 
-- [ ] **Step 4: Run tests and commit**
+- [ ] **Step 4: Surface source-skill adaptation opportunities**
+
+When an installed or loaded skill already covers part of the need, return an adaptation opportunity instead of only a blank-slate skill request:
+
+```js
+{
+  needId: 'skill_need_visual_debugging_repair',
+  sourceSkill: {
+    name: 'systematic-debugging',
+    path: 'C:/Users/<user>/.codex/superpowers/skills/systematic-debugging/SKILL.md',
+    permission: 'snapshot_for_local_evaluation_only'
+  },
+  requestedAdaptation: 'Tailor the workflow to Helios visual verifier traces and VLM artifact evidence.'
+}
+```
+
+- [ ] **Step 5: Run tests and commit**
 
 ```powershell
 npm test -- tests/harness-skill-need-miner.test.js tests/harness-rho-coreset.test.js
@@ -177,6 +208,7 @@ Cover:
 - creates multiple skill candidate genomes from one skill need;
 - decomposes skill quality into subgoals;
 - recombines useful sections from parent skills;
+- adapts from immutable source-skill snapshots without mutating the original;
 - preserves strict safety boundaries;
 - candidate stays `shadow_only`.
 
@@ -188,6 +220,7 @@ Skill genome fields:
 {
   genomeId,
   skillId,
+  sourceSnapshotId,
   triggerPolicy,
   workflowSteps,
   requiredEvidence,
@@ -205,6 +238,7 @@ Render markdown from the genome. Required sections:
 - purpose;
 - when to use;
 - when not to use;
+- source skill lineage, when adapted from a snapshot;
 - required evidence;
 - workflow;
 - safety constraints;
@@ -255,6 +289,7 @@ export function normalizeSkillEvolutionReward({ candidate, evaluation } = {}) {}
 Emit:
 
 - `skill_evolution.ab_mcts_action_selected`
+- `skill_evolution.source_snapshot_selected`
 - `skill_evolution.candidate_refined`
 - `skill_evolution.evidence_requested`
 
@@ -279,6 +314,7 @@ git commit -m "feat(skills): schedule skill evolution with adaptive search"
 
 Candidate skill should be scored on:
 
+- baseline comparison against no skill, current loaded skill, or source snapshot;
 - trigger precision;
 - task success improvement;
 - verifier evidence completeness;
@@ -286,6 +322,7 @@ Candidate skill should be scored on:
 - no secrets;
 - no broad unsafe instructions;
 - no global writes;
+- license/provenance compatibility for copied or adapted source text;
 - no prompt-injection susceptibility in skill text;
 - cost and latency impact.
 
@@ -322,6 +359,7 @@ Cover:
 
 - promotion rejected without human approval;
 - promotion rejected without held-out improvement;
+- promotion rejected when copied/adapted source provenance is missing or incompatible;
 - promotion rejected with unsafe text/path/global write;
 - approved candidate installs into `.harness/packages/generated-skills/<skill-id>/SKILL.md`;
 - capability record is saved with `type: "skill"`;
@@ -374,6 +412,7 @@ git commit -m "feat(skills): promote approved skill candidates"
 Operator should see:
 
 - candidate skill name;
+- source skill snapshot and diff, when adapted from a loaded skill;
 - source hard cases;
 - generated `SKILL.md`;
 - evaluation score;
@@ -405,8 +444,11 @@ git commit -m "feat(ui): add skill evolution review"
 ## Safety Rules
 
 - Agent-authored skills are always `shadow_only` until approved.
+- Source skill snapshots are immutable and workspace-local.
+- Adapted skills never overwrite the original loaded skill.
 - Candidate skills cannot write outside `.harness/meta/skill-candidates`.
 - Promotion cannot write outside workspace-local `.harness/packages`.
+- Copied or adapted text must retain provenance, source path, license/permission metadata, and a diff from the original.
 - Skill text must pass secret scan and prompt-injection hygiene checks.
 - Generated skills must include "when not to use" and explicit escalation rules.
 - Generated skills cannot weaken approval, verifier, sandbox, or secret-handling policy.

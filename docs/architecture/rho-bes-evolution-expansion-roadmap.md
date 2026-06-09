@@ -2,9 +2,10 @@
 
 This document records additional places where Helios Forge can apply the RHO + BES + evolution + meta-promotion pattern. It is a roadmap for later work, not a claim that every subsystem should become self-mutating immediately.
 
-Relevant external reference:
+Relevant external references:
 
 - MemGraphRAG: Memory-based Multi-Agent System for Graph Retrieval-Augmented Generation, `https://arxiv.org/pdf/2606.00610`
+- Retrospective Harness Optimization: self-supervised harness improvement from past trajectories using coreset selection, group rollout, self-validation, self-consistency, candidate harness proposals, and pairwise self-preference, `https://arxiv.org/pdf/2606.05922`
 - SakanaAI TreeQuest / AB-MCTS: adaptive branching tree search for deciding whether inference-time search should go wider, go deeper, switch model/profile/worker, gather evidence, or stop.
 
 ## Core Pattern
@@ -279,16 +280,21 @@ Likely anchors:
 
 Use RHO to identify repeated hard cases that deserve a reusable skill, BES to generate and refine candidate `SKILL.md` files, and AB-MCTS to decide whether to sample wider, refine deeper, gather more held-out evidence, or queue promotion.
 
+This should include source-skill adaptation, not only blank-slate skill writing. If a loaded skill such as a Superpowers skill, Codex skill, Claude skill, Pi skill, or Smithery-installed skill is relevant, Helios should snapshot the original skill into workspace-local metadata, preserve provenance and permission data, then evolve a separate adapted candidate for the current hard cases. The original skill remains inspectable and untouched; the adapted candidate carries lineage, diff evidence, replay evidence, and safety checks.
+
 Potential changes:
 
 - Store skill candidates under `.harness/meta/skill-candidates/<candidateId>/` in shadow mode.
+- Store immutable source skill snapshots under `.harness/meta/skill-snapshots/<snapshotId>/` when adapting from an existing loaded skill.
 - Evaluate candidate skills with trace replay, trigger precision checks, verifier evidence, safety scans, and held-out cases.
+- Compare adapted candidates against the source snapshot or current loaded skill, not just against no-skill baseline.
 - Install approved candidates only into workspace-local `.harness/packages`, then register them through the existing capability store.
 - Keep global Pi, Codex, Claude, and home skill folders read-only unless a separate explicit installer path is approved.
 
 Likely anchors:
 
 - `src/harness-sidecar/skills/skillCandidateStore.js`
+- `src/harness-sidecar/skills/sourceSkillSnapshotStore.js`
 - `src/harness-sidecar/skills/skillEvolution.js`
 - `src/harness-sidecar/skills/skillCandidateEvaluator.js`
 - `src/harness-sidecar/skills/skillCandidateApply.js`
