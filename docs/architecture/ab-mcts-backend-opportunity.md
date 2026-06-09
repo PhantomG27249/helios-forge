@@ -67,6 +67,11 @@ Key cases:
 - records trace metadata for selected action and sampled arm;
 - keeps policy advisory unless explicitly enabled.
 
+## Follow-On Plans
+
+- `docs/superpowers/plans/2026-06-09-wide-ab-mcts-deployment.md`: deploy AB-MCTS broadly as the online budget/search scheduler across swarm, tool loops, meta evolution, verifiers, visual/VLM, research, memory, and skill evolution.
+- `docs/superpowers/plans/2026-06-09-self-authored-skill-evolution.md`: let Helios propose, evaluate, evolve, and approval-promote workspace-local `SKILL.md` capabilities using Retrospective Harness Optimization, BES, AB-MCTS, and verifier gates.
+
 ## Sources
 
 - Sakana AI, "Inference-Time Scaling and Collective Intelligence for Frontier AI", July 1, 2025.
