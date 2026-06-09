@@ -98,6 +98,58 @@ This plan must treat these as first-class optimization effects, not background i
 - **Memory Graph RAG effects:** graph construction, conflict adjudication, bridge/retrieval tuning, promotion policy, and hierarchical retrieval context.
 - **A2A interop effects:** external/internal agent routing, delegated evidence, lineage preservation, and trust metadata propagation.
 
+## Comparison With Current Architecture And Paper-Derived Plans
+
+This plan is a continuation of `docs/superpowers/plans/2026-06-09-hierarchical-swarm-meta-harness-implementation.md`, not a replacement. The completed hierarchical plan established the first deterministic local/global loop:
+
+- SwarmCell contracts and local evolution outputs exist.
+- Local meta-harnesses can create archived candidates without durable apply authority.
+- Local memory graphs, SwarmCell graph merge, global memory promotion, memory graph runtime persistence, and hierarchical retrieval exist.
+- RHO replay batches produce self-validation, self-consistency, and self-preference evidence.
+- BES lane contracts, trajectory operators, dense subgoal verification, and lineage tracking exist.
+- Global harness experiment storage, frontier comparison, and trust-kernel boundaries exist.
+- UI/runtime visibility exists for local meta, memory hierarchy, and harness experiments.
+
+The BES lane expansion plan adds the missing shared connective layer:
+
+- one common BES lane runtime instead of separate one-off wrappers per subsystem;
+- explicit lane envelopes for policy evolvers, memory, research, skill, swarm, verifier, context, compaction, tool, budget, visual, and MCP trust;
+- optimization-effect metadata for RHO, AB-MCTS/adaptive search, ToolTree, Shinka trajectory operators, champion archives, Pareto/frontier scoring, and verifier-genome evolution;
+- A2A envelope metadata so nested agents, SwarmCells, swarms, local harnesses, and global harnesses can exchange lineage and evidence references;
+- Memory Graph RAG context packets that feed lane optimization without promoting memory by side effect;
+- explicit harness-of-harnesses representation, where harness policies and configurations are themselves candidates optimized by higher-level harness loops.
+
+Alignment with the paper-derived architecture:
+
+| Paper-derived thread | Current architecture status | What this plan adds |
+| --- | --- | --- |
+| MemGraphRAG | Local, SwarmCell, and global memory graph scaffolding exists, with deterministic runtime persistence and hierarchical retrieval. | Makes memory graph context an explicit lane-runtime input, preserves provenance/conflict flags in candidate envelopes, and prevents retrieved memory from counting as promotion evidence unless adjudicated. |
+| Meta-Harness | Global experiment run store, baseline/candidate comparison, frontier update, and trust-kernel checks exist. | Generalizes harness optimization so harness policies/configs become candidates and can be compared as part of a harness-of-harnesses loop. |
+| RHO | Replay batches, self-validation, self-consistency, and self-preference exist for selected hard cases. | Treats RHO hard cases as cross-layer inputs from agents, SwarmCells, swarms, memory, research, skills, tools, and external A2A routes. |
+| BES | Lane contracts, trajectory operators, dense subgoals, lineage, mutation, recombination, and evolution runner modules exist. | Adds a shared lane runtime that wraps all BES effects into consistent evidence envelopes across every harness layer. |
+| AB-MCTS/adaptive search | Adaptive search scheduling exists as a BES-adjacent optimization primitive. | Requires lane envelopes to preserve adaptive action summaries and budget/exploration outcomes so higher-level harnesses can compare them. |
+| ToolTree/tool planning | ToolTree and tool-loop evolution are adjacent modules/plans. | Makes tool-path planning and tool-loop repair a first-class lane effect instead of only a local planner detail. |
+| Shinka/evolution operators | Trajectory operators exist and are tested as local BES primitives. | Requires operator provenance to survive lane wrapping, A2A transfer, and global comparison. |
+| Trust kernel | Local/global durable apply is blocked unless trust checks and approval gates pass. | Extends the same non-self-authorizing rule to A2A claims, Memory Graph RAG context, lane candidates, and harness-of-harness candidates. |
+
+Important gap statement:
+
+```text
+Current architecture has the pieces.
+This plan standardizes how those pieces compose across layers.
+It does not make the system fully autonomous, paper-grade, or self-authorizing.
+```
+
+Remaining gaps after the current implementation, which this plan should close:
+
+- No shared `runBesLaneRuntime` adapter exists yet.
+- Policy evolvers do not yet emit a consistent BES lane evidence envelope.
+- Memory, research, skill, and swarm candidates are not yet uniformly wrapped as lane candidates.
+- A2A envelopes do not yet preserve BES/RHO/memory graph lineage as a tested nested-harness contract.
+- Hierarchical Memory Graph RAG retrieval is not yet a standardized lane-runtime context packet.
+- Harness-of-harnesses candidates are an architecture goal, not yet a concrete candidate schema.
+- Optimization metadata from adaptive search, ToolTree, trajectory operators, champion archives, verifier genomes, and frontier scoring is not yet consistently attached to candidates.
+
 ## Safety Invariants
 
 Every chunk must preserve these invariants:
