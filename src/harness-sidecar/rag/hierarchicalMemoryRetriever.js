@@ -145,6 +145,12 @@ function graphContextItem(item = {}) {
   };
 }
 
+function numericBudget(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : fallback;
+}
+
 function resolveLayersAndGraph({ layers, graph, snapshot }) {
   return {
     layers: layers || snapshot?.layers || snapshot?.globalLayers || {},
@@ -161,12 +167,15 @@ export function retrieveHierarchicalMemoryContext({
   budgets = {},
 } = {}) {
   const terms = queryTerms(query);
-  const limit = Math.max(0, Math.floor(Number(maxItems) || 8));
+  const limit = Math.max(0, Math.floor(numericBudget(maxItems, 8)));
   const resolved = resolveLayersAndGraph({ layers, graph, snapshot });
   const schemas = normalizeList(resolved.layers.schemas);
   const facts = normalizeList(resolved.layers.facts);
   const passages = normalizeList(resolved.layers.passages);
-  const graphItemLimit = Math.max(0, Math.floor(Number(budgets.graphItems ?? budgets.maxGraphItems ?? 4) || 4));
+  const graphItemLimit = Math.max(0, Math.floor(numericBudget(
+    budgets.graphItems ?? budgets.maxGraphItems,
+    4,
+  )));
   const graphItems = retrieveMemoryAwareGraphContext({
     graph: resolved.graph,
     query,

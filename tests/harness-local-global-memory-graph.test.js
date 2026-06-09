@@ -185,3 +185,34 @@ test('hierarchical memory retriever accepts snapshots budgets and graph bridge c
   assert.equal(context.items.some((item) => item.source === 'memory_graph'), true);
   assert.equal(context.summary.bridgeCount >= 1, true);
 });
+
+test('hierarchical memory retriever honors zero item budgets', () => {
+  const layers = createGlobalMemoryLayers();
+  upsertPassage(layers, { passageId: 'p1', text: 'A requires B.' });
+  upsertSchema(layers, { headType: 'module', relation: 'requires', tailType: 'feature', frequency: 2 });
+  upsertFact(layers, {
+    subject: 'A',
+    subjectType: 'module',
+    relation: 'requires',
+    object: 'B',
+    objectType: 'feature',
+    passageIds: ['p1'],
+  });
+  activateStableSchemas({ layers, schemaThreshold: 2 });
+  const graph = constructMemoryGuidedGraph({ layers });
+
+  const noItems = retrieveHierarchicalMemoryContext({
+    query: 'A requires B',
+    snapshot: { layers, graph },
+    maxItems: 0,
+  });
+  const noGraphItems = retrieveHierarchicalMemoryContext({
+    query: 'A requires B',
+    snapshot: { layers, graph },
+    maxItems: 8,
+    budgets: { graphItems: 0 },
+  });
+
+  assert.deepEqual(noItems.items, []);
+  assert.equal(noGraphItems.items.some((item) => item.source === 'memory_graph'), false);
+});
