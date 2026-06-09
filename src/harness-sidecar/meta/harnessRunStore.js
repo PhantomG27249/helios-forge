@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const SAFE_RUN_ID = /^[A-Za-z0-9_-]+$/;
@@ -40,6 +40,16 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 export function getHarnessRunRoot(workspaceRoot) {
   const resolvedWorkspaceRoot = assertWorkspaceRoot(workspaceRoot);
   const runRoot = path.join(resolvedWorkspaceRoot, '.harness', 'meta', 'harness-runs');
@@ -64,6 +74,10 @@ export async function createHarnessRun({
     resolvedWorkspaceRoot,
     path.join(getHarnessRunRoot(resolvedWorkspaceRoot), safeRunId),
   );
+
+  if (await pathExists(runDir)) {
+    throw new Error(`Harness run already exists: ${safeRunId}`);
+  }
 
   await mkdir(runDir, { recursive: true });
 

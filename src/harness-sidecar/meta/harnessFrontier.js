@@ -40,7 +40,9 @@ export function harnessMetricsDominate(left = {}, right = {}) {
 
 export function evaluateHarnessFrontierCandidate({ current = [], candidate = {} } = {}) {
   const candidateRecord = metricRecord(candidate);
-  const frontier = current.map(metricRecord);
+  const frontier = current
+    .map(metricRecord)
+    .filter((entry) => entry.candidateId !== candidateRecord.candidateId);
   const dominator = frontier.find((entry) => harnessMetricsDominate(entry, candidateRecord));
 
   if (dominator) {

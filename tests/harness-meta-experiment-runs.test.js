@@ -32,6 +32,26 @@ test('creates a harness run directory with candidate metadata', async () => {
   });
 });
 
+test('harness run store rejects duplicate run ids instead of overwriting evidence', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await createHarnessRun({
+      workspaceRoot,
+      runId: 'run_1',
+      candidate: { candidateId: 'cand_1' },
+    });
+
+    await assert.rejects(
+      createHarnessRun({
+        workspaceRoot,
+        runId: 'run_1',
+        candidate: { candidateId: 'cand_2' },
+      }),
+      /already exists/,
+    );
+  });
+});
+
+
 test('experiment runner prefers candidate when metrics dominate baseline', async () => {
   const result = await runHarnessExperiment({
     candidate: { candidateId: 'cand_1' },
@@ -52,4 +72,23 @@ test('frontier keeps non-dominated candidate', () => {
   });
 
   assert.equal(frontier.length, 1);
+});
+
+test('frontier replaces existing candidate id instead of duplicating it', () => {
+  const frontier = updateHarnessFrontier({
+    current: [{
+      candidateId: 'cand_1',
+      metrics: { quality: 0.8, safety: 0.8, cost: 0.3, latency: 0.3 },
+      note: 'old',
+    }],
+    candidate: {
+      candidateId: 'cand_1',
+      metrics: { quality: 0.8, safety: 0.8, cost: 0.3, latency: 0.3 },
+      note: 'new',
+    },
+  });
+
+  assert.equal(frontier.length, 1);
+  assert.equal(frontier[0].metrics.quality, 0.8);
+  assert.equal(frontier[0].note, 'new');
 });

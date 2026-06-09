@@ -29,7 +29,19 @@ function proposalPaths(proposal = {}) {
 }
 
 function changesOf(proposal = {}) {
-  return proposal.changes && typeof proposal.changes === 'object' ? proposal.changes : {};
+  return {
+    ...(proposal.changes && typeof proposal.changes === 'object' ? proposal.changes : {}),
+    auditEnabled: proposal.auditEnabled,
+    auditLogEnabled: proposal.auditLogEnabled,
+    auditRequired: proposal.auditRequired,
+    disableAudit: proposal.disableAudit,
+    secretRedactionEnabled: proposal.secretRedactionEnabled,
+    redactSecrets: proposal.redactSecrets,
+    secretsRedacted: proposal.secretsRedacted,
+    disableSecretRedaction: proposal.disableSecretRedaction,
+    autoMerge: proposal.autoMerge,
+    autoMergeEnabled: proposal.autoMergeEnabled,
+  };
 }
 
 function verifierFloorWeakened(proposal = {}) {
@@ -68,7 +80,7 @@ function autoMergeRequested(proposal = {}) {
 }
 
 function hasExplicitApproval({ approved, approval, proposal }) {
-  return approved === true || approval?.approved === true || proposal?.approval?.approved === true;
+  return approved === true || approval?.approved === true;
 }
 
 function decision(overrides = {}) {
@@ -92,7 +104,14 @@ export function evaluateTrustKernelBoundary({
 
   if (workspaceRoot) {
     const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
-    for (const proposalPath of proposalPaths(proposal)) {
+    const paths = proposalPaths(proposal);
+    if ((kind === 'source_patch' || proposal.patch || proposal.sourcePatch) && paths.length === 0) {
+      return decision({
+        reason: 'missing_patch_paths',
+        reasons: ['missing_patch_paths'],
+      });
+    }
+    for (const proposalPath of paths) {
       const resolvedPath = resolveProposalPath(resolvedWorkspaceRoot, proposalPath);
       if (!isInsideRoot(resolvedWorkspaceRoot, resolvedPath)) {
         return decision({
