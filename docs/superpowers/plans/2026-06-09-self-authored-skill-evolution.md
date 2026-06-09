@@ -16,6 +16,7 @@ Helios already supports:
 
 - workspace-local capabilities in `src/harness-sidecar/capabilities/capabilityStore.js`;
 - package installation with declared `skills/*/SKILL.md` files in `src/harness-sidecar/capabilities/piPackageInstaller.js`;
+- install records for external skill sources such as Smithery, Codex marketplace, Claude Code marketplace, and Pi packages;
 - memory candidates in `src/harness-sidecar/memory/memoryWriter.js`;
 - verifier and policy candidate promotion in `src/harness-sidecar/meta/promotionPolicy.js`;
 - RHO hard-case mining in `src/harness-sidecar/rho/coresetBuilder.js`;
@@ -26,16 +27,19 @@ Missing piece: a first-class skill-candidate lifecycle. This plan adds one.
 
 Original RHO alignment: this plan should mirror the paper's core pattern more closely than a generic skill generator. RHO selects hard cases from prior trajectories, replays or re-solves them, extracts self-validation and self-consistency diagnostics, proposes harness updates, and chooses a winner by pairwise preference against the baseline. For skills, the baseline can be either no skill, the currently loaded skill, or an immutable source snapshot of a loaded skill.
 
+Recommended external seed: `https://smithery.ai/skills/anthropics/skill-creator`. Treat this as a candidate skill-creation scaffold and rubric source when available through the normal capability installer. It can help shape generated `SKILL.md` structure, trigger clarity, workflow boundaries, safety sections, and verification checklists, but it should be snapshotted and evaluated like any other source skill before Helios adapts from it.
+
 ## Lifecycle
 
 1. RHO mines traces for repeated failure patterns that would benefit from a reusable skill.
 2. If a loaded skill is relevant, Helios snapshots the original `SKILL.md` plus provenance into `.harness/meta/skill-snapshots/<snapshotId>/`.
 3. BES decomposes the desired skill adaptation into goals, constraints, and evaluation cases.
-4. AB-MCTS schedules whether to copy/snapshot a source skill, generate a new skill, refine a current candidate, gather more evidence, or stop.
-5. Candidate writer creates an adapted `SKILL.md` plus metadata in `.harness/meta/skill-candidates/<candidateId>/`.
-6. Verifiers and trace replay score the original baseline and adapted candidate.
-7. Promotion policy queues an approval.
-8. Approved candidate is packaged into `.harness/packages/<packageId>/` and mounted as a normal workspace-local skill.
+4. Skill-creation scaffolds, such as Smithery `anthropics/skill-creator`, may provide seed structure or evaluation rubrics.
+5. AB-MCTS schedules whether to copy/snapshot a source skill, generate a new skill, refine a current candidate, gather more evidence, or stop.
+6. Candidate writer creates an adapted `SKILL.md` plus metadata in `.harness/meta/skill-candidates/<candidateId>/`.
+7. Verifiers and trace replay score the original baseline and adapted candidate.
+8. Promotion policy queues an approval.
+9. Approved candidate is packaged into `.harness/packages/<packageId>/` and mounted as a normal workspace-local skill.
 
 ## Chunk 1: Skill Candidate Store
 
@@ -85,6 +89,12 @@ Candidate record:
     sourceSkillPath: 'C:/Users/<user>/.codex/superpowers/skills/systematic-debugging/SKILL.md',
     sourceLicense: 'unknown',
     sourcePermission: 'snapshot_for_local_evaluation_only'
+  },
+  scaffold: {
+    source: 'smithery',
+    qualifiedName: 'anthropics/skill-creator',
+    url: 'https://smithery.ai/skills/anthropics/skill-creator',
+    usage: 'structure_and_rubric_seed'
   },
   lineage: {
     origin: 'adapted_from_loaded_skill',
@@ -184,7 +194,11 @@ When an installed or loaded skill already covers part of the need, return an ada
 }
 ```
 
-- [ ] **Step 5: Run tests and commit**
+- [ ] **Step 5: Prefer skill-creator scaffolds when available**
+
+If `anthropics/skill-creator` or a similar skill-creation skill is installed, expose it as a scaffold source for the generator and evaluator. The scaffold should supply structure and rubric hints only; it must not bypass Helios safety, replay, approval, or promotion policy.
+
+- [ ] **Step 6: Run tests and commit**
 
 ```powershell
 npm test -- tests/harness-skill-need-miner.test.js tests/harness-rho-coreset.test.js
@@ -207,6 +221,7 @@ Cover:
 
 - creates multiple skill candidate genomes from one skill need;
 - decomposes skill quality into subgoals;
+- uses installed skill-creation scaffolds as optional structure/rubric seeds;
 - recombines useful sections from parent skills;
 - adapts from immutable source-skill snapshots without mutating the original;
 - preserves strict safety boundaries;
@@ -239,6 +254,7 @@ Render markdown from the genome. Required sections:
 - when to use;
 - when not to use;
 - source skill lineage, when adapted from a snapshot;
+- scaffold lineage, when generated with `anthropics/skill-creator` or another creation skill;
 - required evidence;
 - workflow;
 - safety constraints;
@@ -315,6 +331,7 @@ git commit -m "feat(skills): schedule skill evolution with adaptive search"
 Candidate skill should be scored on:
 
 - baseline comparison against no skill, current loaded skill, or source snapshot;
+- adherence to the selected skill-creation scaffold without blindly copying unsafe or irrelevant instructions;
 - trigger precision;
 - task success improvement;
 - verifier evidence completeness;
@@ -446,6 +463,7 @@ git commit -m "feat(ui): add skill evolution review"
 - Agent-authored skills are always `shadow_only` until approved.
 - Source skill snapshots are immutable and workspace-local.
 - Adapted skills never overwrite the original loaded skill.
+- Skill-creation scaffolds, including `https://smithery.ai/skills/anthropics/skill-creator`, are advisory structure/rubric sources only.
 - Candidate skills cannot write outside `.harness/meta/skill-candidates`.
 - Promotion cannot write outside workspace-local `.harness/packages`.
 - Copied or adapted text must retain provenance, source path, license/permission metadata, and a diff from the original.

@@ -282,10 +282,13 @@ Use RHO to identify repeated hard cases that deserve a reusable skill, BES to ge
 
 This should include source-skill adaptation, not only blank-slate skill writing. If a loaded skill such as a Superpowers skill, Codex skill, Claude skill, Pi skill, or Smithery-installed skill is relevant, Helios should snapshot the original skill into workspace-local metadata, preserve provenance and permission data, then evolve a separate adapted candidate for the current hard cases. The original skill remains inspectable and untouched; the adapted candidate carries lineage, diff evidence, replay evidence, and safety checks.
 
+Skill-creation skills should also be usable as scaffolds. For example, `https://smithery.ai/skills/anthropics/skill-creator` can be installed through the normal skill installer, snapshotted like any other source skill, and used as a structure/rubric seed for generated `SKILL.md` candidates. It should guide skill format, trigger clarity, safety sections, and verification checklists without bypassing RHO/BES evaluation or approval gates.
+
 Potential changes:
 
 - Store skill candidates under `.harness/meta/skill-candidates/<candidateId>/` in shadow mode.
 - Store immutable source skill snapshots under `.harness/meta/skill-snapshots/<snapshotId>/` when adapting from an existing loaded skill.
+- Treat installed skill-creation skills as advisory scaffolds and rubrics for blank-slate skill candidates.
 - Evaluate candidate skills with trace replay, trigger precision checks, verifier evidence, safety scans, and held-out cases.
 - Compare adapted candidates against the source snapshot or current loaded skill, not just against no-skill baseline.
 - Install approved candidates only into workspace-local `.harness/packages`, then register them through the existing capability store.
