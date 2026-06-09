@@ -1,3 +1,4 @@
+import { recordAdaptiveSearchOutcome } from '../bes/adaptiveSearchScheduler.js';
 import { scheduleAttempts } from './attemptScheduler.js';
 import { loadDefaultAgentProfiles, selectAgentProfileForAttempt } from './agentProfiles.js';
 import { chooseChampion } from './championSelector.js';
@@ -55,6 +56,46 @@ function outputFromModelWorker(result = {}) {
     artifacts: result.artifacts,
     risks: result.risks,
   };
+}
+
+function firstAdaptiveSearchAction(attempts = []) {
+  return attempts.find((attempt) => attempt?.planning?.action?.actionId)?.planning?.action || null;
+}
+
+function bestVerifierSignal(attempts = []) {
+  const evidence = attempts
+    .flatMap((attempt) => asArray(attempt.verifierEvidence))
+    .filter(Boolean);
+  const passed = evidence.some((item) => item.passed === true) || attempts.some((attempt) => attempt.verifierPassed === true);
+  const confidence = evidence.reduce((best, item) => {
+    const value = Number(item.confidence);
+    return Number.isFinite(value) ? Math.max(best, value) : best;
+  }, passed ? 0.7 : 0.35);
+
+  return { passed, confidence };
+}
+
+function adaptiveSearchReward({ attempts, champion, budget }) {
+  return {
+    swarm: {
+      championScore: champion?.score ?? Math.max(0, ...attempts.map((attempt) => Number(attempt.score) || 0)),
+    },
+    verifier: bestVerifierSignal(attempts),
+    cost: {
+      pressure: budget?.pressure ?? budget?.budgetPressure ?? 0,
+    },
+  };
+}
+
+function adaptiveSearchSchedulerSummary(scheduler) {
+  return Object.values(scheduler?.arms || {}).map((arm) => ({
+    arm: arm.arm,
+    visits: arm.visits,
+    lastReward: arm.lastReward,
+    meanReward: arm.visits > 0
+      ? Math.round((arm.totalReward / arm.visits) * 1000000) / 1000000
+      : arm.prior,
+  }));
 }
 
 function failureAttemptRecord({
@@ -302,7 +343,12 @@ export async function orchestrateSwarm({
     maxAttempts,
     planner,
     evolutionPlanner: evolutionPlanner || planner?.evolutionPlanner,
+    adaptiveSearch: planner?.adaptiveSearch,
   });
+  const adaptiveSearchAction = firstAdaptiveSearchAction(scheduledBaseAttempts);
+  if (adaptiveSearchAction?.trace) {
+    await onAttemptEvent?.(adaptiveSearchAction.trace);
+  }
   const profiledAttempts = scheduledBaseAttempts.map((attempt) => ({
     ...attempt,
     profile: attempt.profile || selectAgentProfileForAttempt({
@@ -419,6 +465,27 @@ export async function orchestrateSwarm({
   }));
   const recombination = recombineApprovedOutputs({ taskId, reviews });
   const champion = chooseChampion(attempts);
+  let adaptiveSearchOutcome = null;
+  if (adaptiveSearchAction?.actionId && planner?.adaptiveSearch?.scheduler) {
+    adaptiveSearchOutcome = recordAdaptiveSearchOutcome({
+      scheduler: planner.adaptiveSearch.scheduler,
+      actionId: adaptiveSearchAction.actionId,
+      reward: adaptiveSearchReward({ attempts, champion, budget }),
+      evidence: {
+        taskId,
+        attemptCount: attempts.length,
+        championAttemptId: champion?.attemptId || null,
+      },
+    });
+    await onAttemptEvent?.(adaptiveSearchOutcome);
+    await onAttemptEvent?.({
+      type: 'ab_mcts.scheduler_summary',
+      taskId,
+      actionId: adaptiveSearchAction.actionId,
+      selectedArm: adaptiveSearchAction.arm,
+      arms: adaptiveSearchSchedulerSummary(planner.adaptiveSearch.scheduler),
+    });
+  }
 
   return {
     taskId,
@@ -433,6 +500,14 @@ export async function orchestrateSwarm({
     champion,
     planning: {
       strategy: planner?.enabled ? planner.strategy : 'seeded',
+      adaptiveSearch: adaptiveSearchAction
+        ? {
+          actionId: adaptiveSearchAction.actionId,
+          selectedArm: adaptiveSearchAction.arm,
+          advisory: adaptiveSearchAction.advisory,
+          outcome: adaptiveSearchOutcome,
+        }
+        : null,
       attempts: scheduledAttempts.map((attempt) => ({
         attemptId: attempt.attemptId,
         strategy: attempt.strategy,

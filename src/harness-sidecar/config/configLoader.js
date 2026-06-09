@@ -25,6 +25,12 @@ export const DEFAULT_HARNESS_CONFIG = {
     deepResearch: false,
     experiments: false,
     visualArtifacts: false,
+    adaptiveSearch: false,
+  },
+  adaptiveSearch: {
+    mode: 'advisory',
+    maxActionsPerTask: 8,
+    allowProfileSwitching: true,
   },
 };
 

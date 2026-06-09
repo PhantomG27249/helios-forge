@@ -41,6 +41,15 @@ function isVerifierPolicyCandidate(candidateRun = {}) {
   );
 }
 
+function isSkillCandidate(candidateRun = {}) {
+  return Boolean(
+    candidateRun.target === 'skill_candidate'
+      || candidateRun.target === 'skill_policy'
+      || candidateRun.skillCandidate === true
+      || candidateRun.candidateId?.startsWith?.('skill_candidate_')
+  );
+}
+
 function isShadowOnlyCandidate(candidateRun = {}) {
   return candidateRun.status === 'shadow_only' || candidateRun.directApplyAllowed === false;
 }
@@ -151,6 +160,142 @@ function evaluateVerifierPromotion({
   };
 }
 
+function skillHoldoutImproved(metrics = {}) {
+  return metrics.holdoutImproved === true
+    || metrics.skillHoldoutImproved === true
+    || Number(metrics.taskSuccessDelta ?? metrics.improvement ?? 0) > 0;
+}
+
+function skillSafetyClean(candidateRun = {}) {
+  const safety = candidateRun.safety || {};
+  return safety.passed !== false
+    && safety.secrets !== true
+    && safety.secretDetected !== true
+    && safety.promptInjection !== true
+    && safety.globalWrite !== true
+    && safety.unsafeText !== true;
+}
+
+function skillProvenanceCompatible(candidateRun = {}) {
+  const safety = candidateRun.safety || {};
+  if (safety.provenanceCompatible === false || safety.licenseCompatible === false) return false;
+  if (candidateRun.source?.sourceSkillSnapshotId || candidateRun.lineage?.sourceSnapshotId) {
+    return Boolean(
+      candidateRun.source?.sourcePermission
+        || candidateRun.source?.sourceLicense
+        || candidateRun.lineage?.sourceSnapshotId
+    );
+  }
+  return true;
+}
+
+function skillTriggerPrecisionOk(metrics = {}, policy = {}) {
+  const threshold = Number.isFinite(policy.triggerPrecisionThreshold)
+    ? policy.triggerPrecisionThreshold
+    : 0.75;
+  const precision = Number(metrics.triggerPrecision ?? metrics.skillTriggerPrecision);
+  if (!Number.isFinite(precision)) return false;
+  return precision >= threshold;
+}
+
+function skillCostOk(metrics = {}, baseline = {}, approvals = [], policy = {}) {
+  const candidateCost = Number(metrics.averageCost ?? metrics.cost);
+  const baselineCost = Number(baseline.averageCost ?? baseline.cost);
+  if (!Number.isFinite(candidateCost) || !Number.isFinite(baselineCost) || baselineCost <= 0) return true;
+  const threshold = Number.isFinite(policy.costIncreaseThreshold)
+    ? policy.costIncreaseThreshold
+    : 0.1;
+  if (candidateCost <= baselineCost * (1 + threshold)) return true;
+  return approvals.some((approval = {}) => approval.allowCostIncrease === true || approval.costOverride === true);
+}
+
+function rollbackAvailable(candidateRun = {}) {
+  return Boolean(
+    candidateRun.rollback?.available === true
+      || candidateRun.rollback?.packageId
+      || candidateRun.rollback?.installRecordId
+  );
+}
+
+function evaluateSkillPromotion({
+  candidateRun,
+  baselineFrontier = [],
+  approvals = [],
+  skillPolicy = {},
+} = {}) {
+  const candidateId = candidateRun?.candidateId;
+  const metrics = candidateRun?.metrics || {};
+  const baseline = baselineFrontier[0] || {};
+  const reasons = [];
+
+  if (isApproved(candidateId, approvals)) {
+    reasons.push('human_approved');
+  } else {
+    reasons.push('missing_human_approval');
+  }
+
+  if (skillHoldoutImproved(metrics)) {
+    reasons.push('skill_holdout_improved');
+  } else {
+    reasons.push('missing_skill_holdout_improvement');
+  }
+
+  if (skillSafetyClean(candidateRun)) {
+    reasons.push('skill_safety_clean');
+  } else {
+    reasons.push('skill_safety_failed');
+  }
+
+  if (skillProvenanceCompatible(candidateRun)) {
+    // Provenance is folded into the clean safety gate so accepted reasons stay compact.
+  } else {
+    reasons.push('skill_provenance_incompatible');
+  }
+
+  if (skillTriggerPrecisionOk(metrics, skillPolicy)) {
+    reasons.push('skill_trigger_precision_ok');
+  } else {
+    reasons.push('skill_trigger_precision_low');
+  }
+
+  if (skillCostOk(metrics, baseline, approvals, skillPolicy)) {
+    reasons.push('skill_cost_ok');
+  } else {
+    reasons.push('skill_cost_regression');
+  }
+
+  if (rollbackAvailable(candidateRun)) {
+    reasons.push('rollback_available');
+  } else {
+    reasons.push('missing_rollback');
+  }
+
+  const status = (
+    reasons.includes('human_approved')
+    && reasons.includes('skill_holdout_improved')
+    && reasons.includes('skill_safety_clean')
+    && !reasons.includes('skill_provenance_incompatible')
+    && reasons.includes('skill_trigger_precision_ok')
+    && reasons.includes('skill_cost_ok')
+    && reasons.includes('rollback_available')
+  ) ? 'promoted' : 'rejected';
+
+  return {
+    candidateId,
+    status,
+    reasons,
+    metrics,
+    skillPolicy: {
+      triggerPrecisionThreshold: Number.isFinite(skillPolicy.triggerPrecisionThreshold)
+        ? skillPolicy.triggerPrecisionThreshold
+        : 0.75,
+      costIncreaseThreshold: Number.isFinite(skillPolicy.costIncreaseThreshold)
+        ? skillPolicy.costIncreaseThreshold
+        : 0.1,
+    },
+  };
+}
+
 export function evaluatePromotion({
   candidateRun,
   baselineFrontier = [],
@@ -159,6 +304,7 @@ export function evaluatePromotion({
   approvals = [],
   safetyThreshold = 0.9,
   verifierPolicy = {},
+  skillPolicy = {},
   autoApproval = null,
 } = {}) {
   if (isVerifierPolicyCandidate(candidateRun)) {
@@ -168,6 +314,14 @@ export function evaluatePromotion({
       baselineResults,
       approvals,
       verifierPolicy,
+    });
+  }
+  if (isSkillCandidate(candidateRun)) {
+    return evaluateSkillPromotion({
+      candidateRun,
+      baselineFrontier,
+      approvals,
+      skillPolicy,
     });
   }
 

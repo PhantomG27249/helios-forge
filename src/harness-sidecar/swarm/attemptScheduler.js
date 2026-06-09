@@ -1,3 +1,4 @@
+import { selectAdaptiveSearchAction } from '../bes/adaptiveSearchScheduler.js';
 import { seedAttemptStrategies } from '../bes/strategySeeder.js';
 import { planToolTree } from '../bes/toolTreePlanner.js';
 import { planEvolutionSwarmAttempts } from './evolutionSwarmPlanner.js';
@@ -76,23 +77,64 @@ function scheduledToolTreeAttempts({ taskId, taskType, maxAttempts, planner }) {
   return [...plannedAttempts, ...fillAttempts];
 }
 
+function activeAdaptiveSearch({ adaptiveSearch, planner } = {}) {
+  const config = adaptiveSearch || planner?.adaptiveSearch;
+  if (config?.enabled !== true || !config.scheduler) return null;
+  return config;
+}
+
+function buildAdaptiveSearchContext({ config, taskId, taskType, maxAttempts }) {
+  return {
+    taskId,
+    taskType,
+    maxAttempts,
+    ...(config.context || {}),
+    budget: {
+      remainingActions: maxAttempts,
+      ...(config.context?.budget || {}),
+      ...(config.budget || {}),
+    },
+  };
+}
+
+function annotateAdaptiveSearchAttempts({ attempts, action }) {
+  return attempts.map((attempt, index) => ({
+    ...attempt,
+    adaptiveSearch: {
+      actionId: action.actionId,
+      arm: action.arm,
+      advisory: action.advisory,
+    },
+    planning: {
+      ...(attempt.planning || {}),
+      baseStrategy: attempt.planning?.strategy || 'seeded',
+      strategy: 'adaptive_search',
+      rank: attempt.planning?.rank || index + 1,
+      action,
+    },
+  }));
+}
+
 export function scheduleAttempts({
   taskId,
   taskType = 'general',
   maxAttempts = 4,
   planner = {},
   evolutionPlanner,
+  adaptiveSearch,
 } = {}) {
   const activeEvolutionPlanner = evolutionPlanner || planner?.evolutionPlanner;
   const seeded = fallbackAttempts({ taskId, taskType, maxAttempts });
+  const activeSearch = activeAdaptiveSearch({ adaptiveSearch, planner });
   const hasEvolutionInputs = activeEvolutionPlanner?.enabled === true && (
     (Array.isArray(activeEvolutionPlanner.evolutionArchive) && activeEvolutionPlanner.evolutionArchive.length > 0)
     || (Array.isArray(activeEvolutionPlanner.evolutionArchive?.archive) && activeEvolutionPlanner.evolutionArchive.archive.length > 0)
     || (Array.isArray(activeEvolutionPlanner.bidirectionalBes?.frontier) && activeEvolutionPlanner.bidirectionalBes.frontier.length > 0)
   );
 
+  let attempts;
   if (hasEvolutionInputs) {
-    return planEvolutionSwarmAttempts({
+    attempts = planEvolutionSwarmAttempts({
       taskId,
       taskType,
       maxAttempts,
@@ -101,11 +143,25 @@ export function scheduleAttempts({
       rhoCoreset: activeEvolutionPlanner.rhoCoreset,
       fallbackAttempts: seeded,
     });
+  } else if (isToolTreePlannerEnabled(planner)) {
+    attempts = scheduledToolTreeAttempts({ taskId, taskType, maxAttempts, planner });
+  } else {
+    attempts = seeded;
   }
 
-  if (isToolTreePlannerEnabled(planner)) {
-    return scheduledToolTreeAttempts({ taskId, taskType, maxAttempts, planner });
+  if (!activeSearch) {
+    return attempts;
   }
 
-  return seeded;
+  const action = selectAdaptiveSearchAction({
+    scheduler: activeSearch.scheduler,
+    context: buildAdaptiveSearchContext({
+      config: activeSearch,
+      taskId,
+      taskType,
+      maxAttempts,
+    }),
+  });
+
+  return annotateAdaptiveSearchAttempts({ attempts, action });
 }

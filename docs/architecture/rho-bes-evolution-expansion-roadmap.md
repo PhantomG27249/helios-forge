@@ -56,6 +56,32 @@ The implementation plan lives in `docs/superpowers/plans/2026-06-09-wide-ab-mcts
 | 12 | Evidence-gated approvals | Low-risk unattended evolution is useful, but unsafe self-approval would be dangerous. | auto-approval tiers, rollback requirements, human-required boundaries |
 | 13 | Self-authored skill evolution | Repeated hard cases should become reusable, testable, workspace-local skills when evidence supports them. | skill candidates, trigger rules, workflow steps, safety constraints, package/capability records |
 
+## Current Implementation Snapshot
+
+Implemented in the first AB-MCTS and self-authored skill wave:
+
+- Core AB-MCTS scheduler with `go_wider`, `go_deeper`, `switch_worker`, `gather_evidence`, and `stop_or_promote` arms.
+- Reward normalization for verifier, BES, swarm, visual, research, cost, latency, safety, and approval signals.
+- Adapter builders for verifier, visual/VLM, research, and context-memory lanes.
+- Swarm scheduling integration that annotates attempts with adaptive-search actions while preserving old behavior when disabled.
+- Swarm trace feedback through `ab_mcts.action_selected`, `ab_mcts.outcome_recorded`, and `ab_mcts.scheduler_summary`.
+- Config defaults for disabled/advisory adaptive search.
+- Skill need mining from RHO-style repeated failures.
+- Shadow-only skill candidate storage and immutable source-skill snapshots.
+- BES-style skill candidate generation, scaffold lineage, and source-skill adaptation metadata.
+- Skill-evolution AB-MCTS scheduling and deterministic reward normalization.
+- Deterministic skill candidate evaluation across trigger precision, safety, provenance, verifier evidence, cost, and latency.
+- Skill-candidate promotion gates in `promotionPolicy.js`.
+- Workspace-local approved skill apply and rollback into `.harness/packages/generated-skills` plus the capability registry.
+
+Still pending for later waves:
+
+- Live meta optimizer routing through AB-MCTS for BES/RHO policy candidates.
+- Runtime adapters wired into verifier selector, deep research manager, RAG composer, and memory maintenance beyond pure adapter helpers.
+- Operator UI for adaptive search status and skill-candidate review.
+- Trace replay UI for AB-MCTS decisions.
+- Broader memory-guided graph construction and MCP trust-policy evolution.
+
 ## Target Details
 
 ### 1. AB-MCTS Adaptive Search Scheduler

@@ -44,6 +44,22 @@ Hook it into:
 - `src/harness-sidecar/swarm/swarmOrchestrator.js` when attempt scores and verifier results arrive;
 - `src/harness-sidecar/meta/besMetaOptimizer.js` when population diversity collapses or champion refinement stalls.
 
+## Implementation Status
+
+Implemented:
+
+- Core scheduler: `src/harness-sidecar/bes/adaptiveSearchScheduler.js`
+- Subsystem adapters: `src/harness-sidecar/bes/adaptiveSearchAdapters.js`
+- Swarm scheduling integration: `src/harness-sidecar/swarm/attemptScheduler.js`
+- Swarm outcome feedback and trace events: `src/harness-sidecar/swarm/swarmOrchestrator.js`
+- Disabled-by-default config: `features.adaptiveSearch` and `adaptiveSearch.*`
+
+Still pending:
+
+- Meta optimizer context routing for live BES/RHO policy candidates.
+- UI observability for current arm, reward, and wider/deeper balance.
+- Trace replay UI that can replay AB-MCTS choices without mutating runtime state.
+
 ## Guardrails
 
 - Do not replace RHO/BES scoring. AB-MCTS should decide allocation of the next attempt, not redefine all reward semantics.

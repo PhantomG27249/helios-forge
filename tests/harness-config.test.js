@@ -25,6 +25,10 @@ test('config loader returns safe defaults when no config file exists', async () 
     assert.equal(config.features.swarm, false);
     assert.equal(config.features.modelDrivenSwarm, false);
     assert.equal(config.features.piNativeSwarm, false);
+    assert.equal(config.features.adaptiveSearch, false);
+    assert.equal(config.adaptiveSearch.mode, 'advisory');
+    assert.equal(config.adaptiveSearch.maxActionsPerTask, 8);
+    assert.equal(config.adaptiveSearch.allowProfileSwitching, true);
   });
 });
 
@@ -52,6 +56,11 @@ test('config loader reads harness yaml overrides', async () => {
         '  modelDrivenSwarm: true',
         '  piNativeSwarm: true',
         '  deepResearch: true',
+        '  adaptiveSearch: true',
+        'adaptiveSearch:',
+        '  mode: enabled',
+        '  maxActionsPerTask: 3',
+        '  allowProfileSwitching: false',
         '',
       ].join('\n'),
       'utf8',
@@ -68,5 +77,9 @@ test('config loader reads harness yaml overrides', async () => {
     assert.equal(config.features.modelDrivenSwarm, true);
     assert.equal(config.features.piNativeSwarm, true);
     assert.equal(config.features.deepResearch, true);
+    assert.equal(config.features.adaptiveSearch, true);
+    assert.equal(config.adaptiveSearch.mode, 'enabled');
+    assert.equal(config.adaptiveSearch.maxActionsPerTask, 3);
+    assert.equal(config.adaptiveSearch.allowProfileSwitching, false);
   });
 });

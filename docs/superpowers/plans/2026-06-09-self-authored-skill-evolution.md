@@ -29,6 +29,22 @@ Original RHO alignment: this plan should mirror the paper's core pattern more cl
 
 Recommended external seed: `https://smithery.ai/skills/anthropics/skill-creator`. Treat this as a candidate skill-creation scaffold and rubric source when available through the normal capability installer. It can help shape generated `SKILL.md` structure, trigger clarity, workflow boundaries, safety sections, and verification checklists, but it should be snapshotted and evaluated like any other source skill before Helios adapts from it.
 
+## Implementation Progress
+
+Done:
+
+- Chunk 1 skill candidate store and immutable source-skill snapshots.
+- Chunk 2 RHO skill-need mining and duplicate/adaptation detection.
+- Chunk 3 BES-style skill candidate generation and skill markdown rendering.
+- Chunk 4 AB-MCTS scheduling for skill evolution.
+- Chunk 5 deterministic skill candidate evaluation.
+- Chunk 6 promotion-policy gates plus workspace-local approved apply and rollback.
+
+Remaining:
+
+- Chunk 7 operator review UI and sidecar endpoints.
+- Deeper trace replay integration for measuring candidate skill impact on full live tasks.
+
 ## Lifecycle
 
 1. RHO mines traces for repeated failure patterns that would benefit from a reusable skill.

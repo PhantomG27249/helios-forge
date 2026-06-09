@@ -26,6 +26,21 @@ Helios already has the pieces AB-MCTS should coordinate:
 
 Do not introduce AB-MCTS as a second meta harness. It should be a small ask/tell policy that sits between planning options and budget spend.
 
+## Implementation Progress
+
+Done:
+
+- Chunk 1 core scheduler and reward normalization.
+- Chunk 2 swarm scheduling integration, outcome recording, and AB-MCTS trace events.
+- Chunk 4 pure adapters for verifier, visual/VLM, research, and context-memory lanes.
+- Chunk 5 config flag/defaults.
+
+Remaining:
+
+- Chunk 3 live meta optimizer context routing.
+- Chunk 4 runtime wiring into verifier selector, deep research, RAG, and memory managers.
+- Chunk 5 trace replay support and UI observability.
+
 ## Search Arms
 
 Initial arms should be explicit and testable:

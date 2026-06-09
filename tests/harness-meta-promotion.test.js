@@ -186,6 +186,75 @@ test('promotion policy never self-applies shadow compaction candidates', () => {
   assert.equal(approvedShadow.reasons.includes('human_approved'), true);
 });
 
+test('promotion policy gates skill candidates on approval evidence safety and rollback', () => {
+  const baselineFrontier = [
+    { candidateId: 'baseline_skill', quality: 0.6, safety: 0.9, cost: 0.4, latency: 0.4 },
+  ];
+  const candidate = candidateRun({
+    candidateId: 'skill_candidate_visual_debug',
+    target: 'skill_candidate',
+    status: 'candidate',
+    smokePassed: true,
+    metrics: {
+      quality: 0.84,
+      safety: 0.98,
+      cost: 0.2,
+      latency: 0.2,
+      holdoutImproved: true,
+      triggerPrecision: 0.86,
+      averageCost: 0.2,
+    },
+    safety: {
+      passed: true,
+      secrets: false,
+      promptInjection: false,
+      globalWrite: false,
+      provenanceCompatible: true,
+    },
+    rollback: {
+      available: true,
+      packageId: 'generated-skills',
+    },
+  });
+
+  const accepted = evaluatePromotion({
+    candidateRun: candidate,
+    baselineFrontier,
+    approvals: [{ candidateId: 'skill_candidate_visual_debug', choice: 'approve', approver: 'human' }],
+  });
+  assert.equal(accepted.status, 'promoted');
+  assert.deepEqual(accepted.reasons, [
+    'human_approved',
+    'skill_holdout_improved',
+    'skill_safety_clean',
+    'skill_trigger_precision_ok',
+    'skill_cost_ok',
+    'rollback_available',
+  ]);
+
+  const missingEvidence = evaluatePromotion({
+    candidateRun: {
+      ...candidate,
+      metrics: { ...candidate.metrics, holdoutImproved: false },
+    },
+    baselineFrontier,
+    approvals: [{ candidateId: 'skill_candidate_visual_debug', choice: 'approve' }],
+  });
+  assert.equal(missingEvidence.status, 'rejected');
+  assert.equal(missingEvidence.reasons.includes('missing_skill_holdout_improvement'), true);
+
+  const unsafe = evaluatePromotion({
+    candidateRun: {
+      ...candidate,
+      safety: { ...candidate.safety, provenanceCompatible: false },
+    },
+    baselineFrontier,
+    approvals: [{ candidateId: 'skill_candidate_visual_debug', choice: 'approve' }],
+  });
+  assert.equal(unsafe.status, 'rejected');
+  assert.equal(unsafe.reasons.includes('skill_provenance_incompatible'), true);
+});
+
 test('change proposal is approval-ready and blocks direct apply without approval', async () => {
   const proposal = createChangeProposal({
     candidate: {
