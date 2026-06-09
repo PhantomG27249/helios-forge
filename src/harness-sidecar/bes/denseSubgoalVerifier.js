@@ -17,7 +17,7 @@ function evidenceText(entry) {
 }
 
 function requirementText(subgoal = {}) {
-  return asArray(subgoal.requires ?? subgoal.requirement ?? subgoal.command ?? subgoal.id)
+  return asArray(subgoal.requiredEvidence ?? subgoal.requires ?? subgoal.requirement ?? subgoal.command ?? subgoal.id)
     .map((value) => String(value).trim().toLowerCase())
     .filter(Boolean);
 }

@@ -11,10 +11,19 @@ function hasPassedVerifierEvidence(rollout = {}) {
 function hasTestEvidence(rollout = {}) {
   const testsRun = asArray(rollout.compactHandoff?.testsRun ?? rollout.testsRun ?? rollout.tests_run);
   const testEvidence = asArray(rollout.testEvidence ?? rollout.test_evidence);
+  if ([...testsRun, ...testEvidence].some((entry) => entry?.passed === false || entry?.status === 'failed')) {
+    return false;
+  }
   return Boolean(
-    testsRun.length > 0 ||
-      testEvidence.some((entry) => entry === true || entry?.passed === true || entry?.status === 'passed')
+    testsRun.some((entry) => typeof entry === 'string' || entry === true || entry?.passed === true || entry?.status === 'passed')
+      || testEvidence.some((entry) => entry === true || entry?.passed === true || entry?.status === 'passed')
   );
+}
+
+function hasFailedTestEvidence(rollout = {}) {
+  const testsRun = asArray(rollout.compactHandoff?.testsRun ?? rollout.testsRun ?? rollout.tests_run);
+  const testEvidence = asArray(rollout.testEvidence ?? rollout.test_evidence);
+  return [...testsRun, ...testEvidence].some((entry) => entry?.passed === false || entry?.status === 'failed');
 }
 
 export function scoreSelfValidation(rollout = {}) {
@@ -30,6 +39,10 @@ export function scoreSelfValidation(rollout = {}) {
   if (verifierPassed) {
     reasons.push('verifier_passed');
     return { passed: true, score: 1, reason: 'verifier_passed', reasons };
+  }
+  if (hasFailedTestEvidence(rollout)) {
+    reasons.push('tests_failed');
+    return { passed: false, score: 0, reason: 'tests_failed', reasons };
   }
   if (testsObserved) {
     reasons.push('tests_observed');

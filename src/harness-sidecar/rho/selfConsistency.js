@@ -26,8 +26,7 @@ function compareGroups(left, right) {
 
 export function scoreSelfConsistency({ rollouts = [] } = {}) {
   const normalized = asArray(rollouts)
-    .map(rolloutSummary)
-    .filter(Boolean);
+    .map((rollout) => rolloutSummary(rollout) || '__missing_summary__');
   const counts = new Map();
   for (const summary of normalized) {
     counts.set(summary, (counts.get(summary) ?? 0) + 1);
@@ -40,9 +39,10 @@ export function scoreSelfConsistency({ rollouts = [] } = {}) {
   const total = normalized.length;
   const majorityCount = majority.count;
   const score = total > 0 ? majorityCount / total : 0;
+  const missingSummaryMajority = majority.summary === '__missing_summary__';
 
   return {
-    consistent: total > 0 && majorityCount > total / 2,
+    consistent: total > 0 && majorityCount > total / 2 && !missingSummaryMajority,
     score,
     majoritySummary: majority.summary,
     majorityCount,

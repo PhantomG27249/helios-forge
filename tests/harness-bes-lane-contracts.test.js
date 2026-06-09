@@ -27,7 +27,7 @@ test('applies deletion trajectory operator to remove a step', () => {
 
 test('scores dense subgoals from matching evidence strings', () => {
   const result = verifyDenseSubgoals({
-    subgoals: [{ id: 'tests', requires: 'npm test' }],
+    subgoals: [{ id: 'tests', requiredEvidence: 'npm test' }],
     evidence: ['npm test'],
   });
 
@@ -45,4 +45,17 @@ test('records global lineage with deterministic parents', () => {
   assert.deepEqual(result.parents, ['local_a', 'local_b']);
   assert.equal(result.candidateId, 'global_1');
   assert.equal(result.operator, 'crossover');
+});
+
+test('lineage tracker falls back for blank ids after trimming', () => {
+  const result = recordLineage({
+    candidateId: '   ',
+    parents: [' local_b ', 'local_a'],
+    operator: '   ',
+  });
+
+  assert.equal(result.candidateId, 'candidate');
+  assert.equal(result.operator, 'seed');
+  assert.deepEqual(result.parents, ['local_a', 'local_b']);
+  assert.equal(result.lineageId, 'candidate:seed:local_a:local_b');
 });

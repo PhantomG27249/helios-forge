@@ -4,7 +4,8 @@ function asArray(value) {
 }
 
 function normalizeId(value, fallback) {
-  return String(value ?? fallback).trim();
+  const normalized = String(value ?? fallback).trim();
+  return normalized || fallback;
 }
 
 function normalizeParents(parents) {

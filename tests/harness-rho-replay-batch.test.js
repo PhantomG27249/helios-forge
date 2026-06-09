@@ -17,6 +17,19 @@ test('passes self-validation from completed status and verifier evidence', () =>
   assert.equal(result.reason, 'verifier_passed');
 });
 
+test('self-validation does not pass failed test evidence', () => {
+  const result = scoreSelfValidation({
+    status: 'completed',
+    compactHandoff: {
+      summary: 'tests failed',
+      testsRun: [{ command: 'npm test', status: 'failed', passed: false }],
+    },
+  });
+
+  assert.equal(result.passed, false);
+  assert.equal(result.reasons.includes('tests_failed'), true);
+});
+
 test('scores self-consistency from majority normalized summaries', () => {
   const result = scoreSelfConsistency({
     rollouts: [
@@ -28,6 +41,20 @@ test('scores self-consistency from majority normalized summaries', () => {
 
   assert.equal(result.consistent, true);
   assert.equal(result.majorityCount, 2);
+});
+
+test('self-consistency counts blank rollout summaries against agreement', () => {
+  const result = scoreSelfConsistency({
+    rollouts: [
+      { output: { summary: 'same' } },
+      { output: {} },
+      {},
+    ],
+  });
+
+  assert.equal(result.total, 3);
+  assert.equal(result.consistent, false);
+  assert.equal(result.groups.some((group) => group.summary === '__missing_summary__' && group.count === 2), true);
 });
 
 test('runs grouped replay batches for baseline and candidate variants', async () => {
