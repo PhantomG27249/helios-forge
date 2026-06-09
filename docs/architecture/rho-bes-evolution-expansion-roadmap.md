@@ -5,6 +5,7 @@ This document records additional places where Helios Forge can apply the RHO + B
 Relevant external reference:
 
 - MemGraphRAG: Memory-based Multi-Agent System for Graph Retrieval-Augmented Generation, `https://arxiv.org/pdf/2606.00610`
+- SakanaAI TreeQuest / AB-MCTS: adaptive branching tree search for deciding whether inference-time search should go wider, go deeper, switch model/profile/worker, gather evidence, or stop.
 
 ## Core Pattern
 
@@ -13,29 +14,71 @@ The reusable pattern is:
 1. **RHO selects hard cases.** Mine traces, verifier outcomes, visual evidence, budget gates, rejected approvals, and failed runs for high-signal cases.
 2. **BES decomposes the target.** Build backward goals and dense partial-credit criteria for what a better policy should satisfy.
 3. **Evolution searches candidates.** Generate policy/genome/rubric/profile candidates, preserve diversity, and archive winners and informative failures.
-4. **Meta-promotion gates changes.** Promote only after replay, held-out tests, verifier evidence, rollback metadata, and approval policy allow it.
+4. **AB-MCTS allocates online search budget.** Use a TreeQuest-style ask/tell scheduler to decide whether the next unit of work should go wider, go deeper, switch worker/model/profile, gather more evidence, or stop.
+5. **Meta-promotion gates changes.** Promote only after replay, held-out tests, verifier evidence, rollback metadata, and approval policy allow it.
 
 The goal is not cleverness for its own sake. The goal is to make each subsystem more measurable, adaptive, and safer over time.
+
+## AB-MCTS As The Cross-Cutting Scheduler
+
+AB-MCTS should be treated as part of the expanded RHO + BES opportunity stack, not as a separate research toy. RHO decides what past failures matter, BES turns those failures into candidate goals and lineages, and AB-MCTS decides how to spend the next live budget unit across those candidates.
+
+In Helios terms, the TreeQuest-style scheduler should choose among actions such as:
+
+- `go_wider`: sample another candidate, swarm attempt, retrieval pack, verifier variant, visual artifact, research path, or skill candidate;
+- `go_deeper`: refine the current champion, expand a promising trace, improve a verifier/skill candidate, or repair a failing patch;
+- `switch_worker`: move the next attempt to a different subagent role, model profile, VLM path, verifier worker, or research worker;
+- `gather_evidence`: spend budget on replay, verifier evidence, screenshots, OCR, graph neighbors, citations, or contradiction checks;
+- `stop_or_promote`: stop search, report, or queue a promotion candidate for the existing approval gates.
+
+This gives Helios the algorithm-stacking benefit:
+
+`RHO -> hard cases -> BES -> candidates/goals -> AB-MCTS -> next budget allocation -> verifiers/replay -> promotion gates`
+
+The implementation plan lives in `docs/superpowers/plans/2026-06-09-wide-ab-mcts-deployment.md`. The self-authored skill lane that uses the same stack lives in `docs/superpowers/plans/2026-06-09-self-authored-skill-evolution.md`.
 
 ## Priority Targets
 
 | Priority | Subsystem | Why it matters | Candidate evolved objects |
 | --- | --- | --- | --- |
-| 1 | Context and RAG selection | Better context improves every downstream agent/tool/verifier decision. | retrieval weights, graph/RAG blend, chunk budgets, memory inclusion policy |
-| 2 | Memory-guided graph construction | MemGraphRAG-style global memory can prevent noisy, contradictory, fragmented GraphRAG indexes. | schema/fact/passage layers, pending/active promotion, conflict adjudication, graph bridging |
-| 3 | Tool loop policy | Tool stalls, malformed calls, retries, and approval dead ends directly block task completion. | tool selection rules, retry policy, recovery prompts, approval escalation thresholds |
-| 4 | Budget allocation | The harness needs to know when to spend on model calls, verifiers, VLM, retrieval, or subagents. | budget profiles, downshift rules, confidence thresholds, verifier/VLM spend policy |
-| 5 | Verifier selection and routing | Verifier choice is the safety backbone, especially for visual/UI and risky code changes. | selector rules, verifier bundles, rerun policy, flake handling |
-| 6 | Swarm scheduling | Swarm currently runs near evolution but is not yet driven by it. | subagent strategies, island assignments, budget weights, specialist profiles |
-| 7 | Visual/VLM pipeline | Visual evidence is high value but easy to overtrust or underspecify. | capture strategy, VLM rubric, diff thresholds, OCR/PDF/image routing |
-| 8 | Memory promotion and decay | Bad durable memory can poison future runs; good memory compounds. | promotion policy, decay rules, contradiction penalties, retrieval priority |
-| 9 | MCP and capability trust | External tools and capability packages are trust boundaries. | trust tiers, quarantine rules, allow/deny policy, poisoning checks |
-| 10 | Deep Research quality loop | Research tasks need citation, contradiction, novelty, and figure-evidence discipline. | source ranking, claim extraction prompts, contradiction checks, report templates |
-| 11 | Evidence-gated approvals | Low-risk unattended evolution is useful, but unsafe self-approval would be dangerous. | auto-approval tiers, rollback requirements, human-required boundaries |
+| 1 | AB-MCTS adaptive search scheduler | Every subsystem below needs a budget allocator that can choose wider, deeper, worker/profile switching, evidence gathering, or stopping. | scheduler arms, reward normalizers, branch statistics, advisory/enabled policy |
+| 2 | Context and RAG selection | Better context improves every downstream agent/tool/verifier decision. | retrieval weights, graph/RAG blend, chunk budgets, memory inclusion policy |
+| 3 | Memory-guided graph construction | MemGraphRAG-style global memory can prevent noisy, contradictory, fragmented GraphRAG indexes. | schema/fact/passage layers, pending/active promotion, conflict adjudication, graph bridging |
+| 4 | Tool loop policy | Tool stalls, malformed calls, retries, and approval dead ends directly block task completion. | tool selection rules, retry policy, recovery prompts, approval escalation thresholds |
+| 5 | Budget allocation | The harness needs to know when to spend on model calls, verifiers, VLM, retrieval, or subagents. | budget profiles, downshift rules, confidence thresholds, verifier/VLM spend policy |
+| 6 | Verifier selection and routing | Verifier choice is the safety backbone, especially for visual/UI and risky code changes. | selector rules, verifier bundles, rerun policy, flake handling |
+| 7 | Swarm scheduling | Swarm currently runs near evolution but is not yet driven by it. | subagent strategies, island assignments, budget weights, specialist profiles |
+| 8 | Visual/VLM pipeline | Visual evidence is high value but easy to overtrust or underspecify. | capture strategy, VLM rubric, diff thresholds, OCR/PDF/image routing |
+| 9 | Memory promotion and decay | Bad durable memory can poison future runs; good memory compounds. | promotion policy, decay rules, contradiction penalties, retrieval priority |
+| 10 | MCP and capability trust | External tools and capability packages are trust boundaries. | trust tiers, quarantine rules, allow/deny policy, poisoning checks |
+| 11 | Deep Research quality loop | Research tasks need citation, contradiction, novelty, and figure-evidence discipline. | source ranking, claim extraction prompts, contradiction checks, report templates |
+| 12 | Evidence-gated approvals | Low-risk unattended evolution is useful, but unsafe self-approval would be dangerous. | auto-approval tiers, rollback requirements, human-required boundaries |
+| 13 | Self-authored skill evolution | Repeated hard cases should become reusable, testable, workspace-local skills when evidence supports them. | skill candidates, trigger rules, workflow steps, safety constraints, package/capability records |
 
 ## Target Details
 
-### 1. Context And RAG Selection
+### 1. AB-MCTS Adaptive Search Scheduler
+
+Use TreeQuest-style AB-MCTS as the online scheduler for the whole RHO + BES system. It should not replace RHO, BES, verifier scoring, or promotion policy. It should decide how the next unit of budget is allocated.
+
+Potential changes:
+
+- Add `src/harness-sidecar/bes/adaptiveSearchScheduler.js` with ask/tell-style state.
+- Normalize rewards from verifier results, BES goal satisfaction, swarm outcomes, VLM evidence, cost, latency, and approval results.
+- Add subsystem adapters for swarm, tool loops, meta evolution, visual/VLM, research, memory/RAG, and skill evolution.
+- Keep the scheduler advisory by default, behind a feature flag, and replayable against historical traces.
+- Emit trace events that explain selected arms, arm scores, and budget impact.
+
+Likely anchors:
+
+- `src/harness-sidecar/bes/adaptiveSearchScheduler.js`
+- `src/harness-sidecar/bes/mctsPolicy.js`
+- `src/harness-sidecar/swarm/attemptScheduler.js`
+- `src/harness-sidecar/meta/besMetaOptimizer.js`
+- `src/harness-sidecar/budget/*`
+- `docs/superpowers/plans/2026-06-09-wide-ab-mcts-deployment.md`
+
+### 2. Context And RAG Selection
 
 Use RHO to collect tasks where missing, noisy, stale, or overlarge context hurt the run. BES should decompose "good context" into goals such as enough relevant files, low noise, graph-neighbor coverage, memory usefulness, and token efficiency.
 
@@ -53,7 +96,7 @@ Likely anchors:
 - `src/harness-sidecar/graph/*`
 - `src/harness-sidecar/memory/*`
 
-### 2. Memory-Guided Graph Construction
+### 3. Memory-Guided Graph Construction
 
 Fold in the strongest lesson from MemGraphRAG: graph construction should be governed by shared global memory, not isolated chunk extraction. Helios should add explicit schema, fact, and passage/provenance memory layers, then use RHO+BES+evolution to tune when extracted knowledge becomes active and how conflicts are adjudicated.
 
@@ -76,7 +119,7 @@ Likely anchors:
 - `src/harness-sidecar/rag/unifiedContextComposer.js`
 - `src/harness-sidecar/graph/*`
 
-### 3. Tool Loop Policy
+### 4. Tool Loop Policy
 
 Use RHO to mine unknown-tool failures, malformed arguments, stalled loops, repeated no-progress events, and approval-required dead ends. BES can define a better tool loop as one that advances goals, repairs calls, avoids repeated failures, and asks for approval only when needed.
 
@@ -94,7 +137,7 @@ Likely anchors:
 - `src/harness-sidecar/reliability/toolCallRecovery.js`
 - `src/harness-sidecar/reliability/noProgressDetector.js`
 
-### 4. Budget Allocation
+### 5. Budget Allocation
 
 Use RHO to find runs where the harness spent too much on low-value work or stopped too early. BES should define budget goals across quality, safety, cost, latency, and confidence.
 
@@ -111,7 +154,7 @@ Likely anchors:
 - `src/harness-sidecar/context/contextPressure.js`
 - `src/harness-sidecar/tools/finalValidator.js`
 
-### 5. Verifier Selection And Routing
+### 6. Verifier Selection And Routing
 
 Verifier evolution already exists, but selector evolution can decide which verifiers to run, when to add visual checks, and when to rerun or quarantine flaky checks.
 
@@ -129,7 +172,7 @@ Likely anchors:
 - `src/harness-sidecar/meta/verifierEvolutionLoop.js`
 - `src/harness-sidecar/tools/verifierConfigApply.js`
 
-### 6. Swarm Scheduling
+### 7. Swarm Scheduling
 
 Swarm scheduling deserves its own plan in `docs/architecture/swarm-evolution-integration-plan.md`. The high-level goal is to let BES/RHO/evolution drive subagent strategy, budget, diversity, and specialist assignment.
 
@@ -146,7 +189,7 @@ Likely anchors:
 - `src/harness-sidecar/bes/*`
 - `src/harness-sidecar/meta/besMetaOptimizer.js`
 
-### 7. Visual And VLM Pipeline
+### 8. Visual And VLM Pipeline
 
 Use RHO to collect visual false positives, false negatives, poor screenshots, OCR misses, PDF extraction misses, and VLM rubric weaknesses. BES should define visual verification goals as artifact quality, relevant view coverage, rubric fit, and threshold reliability.
 
@@ -163,7 +206,7 @@ Likely anchors:
 - `src/harness-sidecar/tools/verifierSelector.js`
 - `src/harness-sidecar/rho/coresetBuilder.js`
 
-### 8. Memory Promotion And Decay
+### 9. Memory Promotion And Decay
 
 Use RHO to identify memories that helped, hurt, contradicted current evidence, or became stale. BES can define durable-memory goals around relevance, correctness, specificity, actionability, and non-conflict.
 
@@ -181,7 +224,7 @@ Likely anchors:
 - `src/harness-sidecar/graph/claimEvidenceGraph.js`
 - `src/harness-sidecar/core/traceReader.js`
 
-### 9. MCP And Capability Trust
+### 10. MCP And Capability Trust
 
 Use RHO to mine suspicious MCP outputs, tool poisoning, excessive permissions, failed capability startups, and unsafe model-visible fields. BES can decompose trust into provenance, permissions, behavior, and output hygiene.
 
@@ -199,7 +242,7 @@ Likely anchors:
 - `src/harness-sidecar/tools/mcpPoisoningEval.js`
 - `src/harness-sidecar/capabilities/*`
 
-### 10. Deep Research Quality Loop
+### 11. Deep Research Quality Loop
 
 Use RHO to collect weak citations, unsupported novelty, contradictions, source fetch failures, figure-only evidence risk, and report quality issues. BES can define research quality as source support, contradiction handling, claim coverage, and handoff usefulness.
 
@@ -216,7 +259,7 @@ Likely anchors:
 - `src/harness-sidecar/graph/claimEvidenceGraph.js`
 - `src/harness-sidecar/experiments/*`
 
-### 11. Evidence-Gated Approvals
+### 12. Evidence-Gated Approvals
 
 Use RHO to find approval bottlenecks and rejected proposal patterns. BES can define safe autonomous approval as narrow scope, reversibility, evidence sufficiency, trust, and no hard-boundary crossing.
 
@@ -231,6 +274,27 @@ Likely anchors:
 - `src/harness-sidecar/core/approvalResume.js`
 - `src/harness-sidecar/meta/promotionPolicy.js`
 - `src/harness-sidecar/tools/verifierConfigApply.js`
+
+### 13. Self-Authored Skill Evolution
+
+Use RHO to identify repeated hard cases that deserve a reusable skill, BES to generate and refine candidate `SKILL.md` files, and AB-MCTS to decide whether to sample wider, refine deeper, gather more held-out evidence, or queue promotion.
+
+Potential changes:
+
+- Store skill candidates under `.harness/meta/skill-candidates/<candidateId>/` in shadow mode.
+- Evaluate candidate skills with trace replay, trigger precision checks, verifier evidence, safety scans, and held-out cases.
+- Install approved candidates only into workspace-local `.harness/packages`, then register them through the existing capability store.
+- Keep global Pi, Codex, Claude, and home skill folders read-only unless a separate explicit installer path is approved.
+
+Likely anchors:
+
+- `src/harness-sidecar/skills/skillCandidateStore.js`
+- `src/harness-sidecar/skills/skillEvolution.js`
+- `src/harness-sidecar/skills/skillCandidateEvaluator.js`
+- `src/harness-sidecar/skills/skillCandidateApply.js`
+- `src/harness-sidecar/capabilities/capabilityStore.js`
+- `src/harness-sidecar/capabilities/piPackageInstaller.js`
+- `docs/superpowers/plans/2026-06-09-self-authored-skill-evolution.md`
 
 ## Shared Safety Requirements
 
@@ -251,6 +315,7 @@ Each subsystem integration should include tests for:
 
 - RHO selects high-signal hard cases from that subsystem.
 - BES creates dense goals from those cases.
+- AB-MCTS allocates budget between wider search, deeper refinement, worker/profile switching, evidence gathering, and stopping.
 - Evolution creates diverse candidates rather than one greedy candidate.
 - Memory-guided graph construction keeps extracted knowledge pending until evidence and schema stability allow activation.
 - Conflict adjudication retrieves provenance before discarding, refining, or temporally qualifying facts.
@@ -261,11 +326,13 @@ Each subsystem integration should include tests for:
 
 ## Recommended Next Steps
 
-1. Finish swarm evolution integration because it already has a dedicated plan and clear runtime gap.
-2. Add context/RAG policy evolution because it improves every agent path.
-3. Add MemGraphRAG-inspired memory-guided graph construction because it makes graph/RAG context globally consistent instead of chunk-local.
-4. Add tool-loop policy evolution because tool stalls are direct task blockers.
-5. Add budget allocation evolution because it controls spend across BES, VLM, verifiers, and swarm.
-6. Expand verifier selector and visual/VLM evolution together because they share evidence and safety thresholds.
+1. Implement the AB-MCTS adaptive search scheduler behind an advisory feature flag because it becomes the shared allocator for the rest of the expansion.
+2. Finish swarm evolution integration because it already has a dedicated plan and clear runtime gap.
+3. Add context/RAG policy evolution because it improves every agent path.
+4. Add MemGraphRAG-inspired memory-guided graph construction because it makes graph/RAG context globally consistent instead of chunk-local.
+5. Add tool-loop policy evolution because tool stalls are direct task blockers.
+6. Add budget allocation evolution because it controls spend across BES, VLM, verifiers, and swarm.
+7. Expand verifier selector and visual/VLM evolution together because they share evidence and safety thresholds.
+8. Add self-authored skill evolution once AB-MCTS and replay-backed promotion are stable enough to evaluate candidate skills safely.
 
 This roadmap should be revisited after each implementation wave. The question after each wave is simple: did the evolved policy improve held-out tasks without weakening safety?
