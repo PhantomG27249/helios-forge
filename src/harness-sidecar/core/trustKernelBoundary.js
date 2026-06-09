@@ -101,16 +101,17 @@ export function evaluateTrustKernelBoundary({
 } = {}) {
   const kind = proposal.kind || 'unknown';
   const reasons = [];
+  const paths = proposalPaths(proposal);
+
+  if ((kind === 'source_patch' || proposal.patch || proposal.sourcePatch) && paths.length === 0) {
+    return decision({
+      reason: 'missing_patch_paths',
+      reasons: ['missing_patch_paths'],
+    });
+  }
 
   if (workspaceRoot) {
     const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
-    const paths = proposalPaths(proposal);
-    if ((kind === 'source_patch' || proposal.patch || proposal.sourcePatch) && paths.length === 0) {
-      return decision({
-        reason: 'missing_patch_paths',
-        reasons: ['missing_patch_paths'],
-      });
-    }
     for (const proposalPath of paths) {
       const resolvedPath = resolveProposalPath(resolvedWorkspaceRoot, proposalPath);
       if (!isInsideRoot(resolvedWorkspaceRoot, resolvedPath)) {

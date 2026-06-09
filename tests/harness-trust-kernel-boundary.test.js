@@ -68,6 +68,19 @@ test('rejects source patches without explicit target paths', () => {
   assert.equal(decision.reason, 'missing_patch_paths');
 });
 
+test('rejects source patches without paths even without workspace root', () => {
+  const decision = evaluateTrustKernelBoundary({
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      patch: 'diff --git a/foo b/foo',
+    },
+  });
+
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, 'missing_patch_paths');
+});
+
 test('rejects top-level audit and secret redaction disables', () => {
   const audit = evaluateTrustKernelBoundary({
     proposal: { kind: 'policy', auditEnabled: false },
