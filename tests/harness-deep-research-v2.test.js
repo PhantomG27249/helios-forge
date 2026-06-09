@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { createAdaptiveSearchScheduler } from '../src/harness-sidecar/bes/adaptiveSearchScheduler.js';
 import { extractClaims } from '../src/harness-sidecar/research/claimExtractor.js';
 import { verifyEvidence } from '../src/harness-sidecar/research/evidenceVerifier.js';
 import { createDeepResearchV2Artifacts } from '../src/harness-sidecar/research/deepResearchManager.js';
@@ -428,5 +429,49 @@ test('deep research v2 manager writes production artifacts without external web'
     assert.match(recommendations, /Resolve unsupported high novelty claim c2/);
     assert.match(finalReport, /## Specialist Workers/);
     assert.match(finalReport, /## Production Artifacts/);
+  });
+});
+
+test('deep research v2 preserves disabled adaptive search behavior and reports enabled routing metadata', async () => {
+  await withTempWorkspace(async (workspaceRoot) => {
+    const disabled = await createDeepResearchV2Artifacts({
+      workspaceRoot,
+      runId: 'run_v2_adaptive_disabled',
+      question: 'What should production research include?',
+      sources: [{ sourceId: 'paper', title: 'Local paper', claims: [] }],
+      adaptiveSearch: { enabled: false },
+    });
+    const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.22 });
+    const enabled = await createDeepResearchV2Artifacts({
+      workspaceRoot,
+      runId: 'run_v2_adaptive_enabled',
+      question: 'What should production research include?',
+      sources: [
+        {
+          sourceId: 'paper',
+          title: 'Local paper',
+          claims: [{
+            claimId: 'c1',
+            sourceId: 'paper',
+            claim: 'Grounded claims require citations.',
+            evidence: [{ sourceId: 'paper' }],
+          }],
+        },
+      ],
+      contradictions: [{ contradictionId: 'contra_1', claimIds: ['c1'] }],
+      adaptiveSearch: {
+        enabled: true,
+        scheduler,
+        context: { taskId: 'research_route', synthesisConfidence: 0.3 },
+        budget: { pressure: 0.15 },
+      },
+    });
+
+    assert.equal(disabled.adaptiveSearch, undefined);
+    assert.equal(enabled.adaptiveSearch.action.trace.type, 'ab_mcts.action_selected');
+    assert.equal(enabled.adaptiveSearch.action.contextId, 'research_route');
+    assert.equal(enabled.adaptiveSearch.outcome.type, 'ab_mcts.outcome_recorded');
+    assert.equal(enabled.adaptiveSearch.outcome.evidence.runId, 'run_v2_adaptive_enabled');
+    assert.equal(enabled.artifacts.some((artifact) => artifact.name === 'final_report.md'), true);
   });
 });

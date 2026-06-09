@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { createAdaptiveSearchScheduler } from '../src/harness-sidecar/bes/adaptiveSearchScheduler.js';
 import { selectVerifiersForTask } from '../src/harness-sidecar/tools/verifierSelector.js';
 
 const registry = {
@@ -94,4 +95,32 @@ test('verifier selector falls back to smoke/default for unknown changes and rece
   assert.deepEqual(selected.map((verifier) => verifier.name), ['unit', 'release-smoke']);
   assert.equal(selected[0].reason, 'recent_failure');
   assert.equal(selected.some((verifier) => verifier.name === 'visual-ui'), false);
+});
+
+test('verifier selector preserves disabled adaptive search shape and annotates enabled routing', () => {
+  const disabled = selectVerifiersForTask({
+    task: { taskId: 'task_disabled', task: 'edit sidecar runtime' },
+    changedFiles: ['src/harness-sidecar/meta/besMetaOptimizer.js'],
+    registry,
+    adaptiveSearch: { enabled: false },
+  });
+  const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.31 });
+  const enabled = selectVerifiersForTask({
+    task: { taskId: 'task_enabled', task: 'edit sidecar runtime' },
+    changedFiles: ['src/harness-sidecar/meta/besMetaOptimizer.js'],
+    registry,
+    adaptiveSearch: {
+      enabled: true,
+      scheduler,
+      context: { verifierEvidence: [{ name: 'unit', passed: true, confidence: 0.8 }] },
+      budget: { pressure: 0.1 },
+    },
+  });
+
+  assert.equal(disabled.adaptiveSearch, undefined);
+  assert.equal(enabled.adaptiveSearch.action.trace.type, 'ab_mcts.action_selected');
+  assert.equal(enabled.adaptiveSearch.action.contextId, 'task_enabled');
+  assert.equal(enabled.adaptiveSearch.outcome.type, 'ab_mcts.outcome_recorded');
+  assert.equal(enabled.every((verifier) => verifier.adaptiveSearch?.actionId === 'adaptive_1'), true);
+  assert.equal(enabled.every((verifier) => verifier.adaptiveSearch?.advisory === true), true);
 });

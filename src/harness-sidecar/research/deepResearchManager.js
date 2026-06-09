@@ -1,6 +1,14 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  buildAdaptiveSearchContextForResearch,
+  normalizeAdaptiveSearchRewardForResearch,
+} from '../bes/adaptiveSearchAdapters.js';
+import {
+  recordAdaptiveSearchOutcome,
+  selectAdaptiveSearchAction,
+} from '../bes/adaptiveSearchScheduler.js';
 import { extractFigureCandidates } from './figureExtractor.js';
 import { assessNoveltyAndRisk } from './noveltyControls.js';
 import {
@@ -225,6 +233,54 @@ function renderFinalReport({
   ].join('\n');
 }
 
+function activeAdaptiveSearch(adaptiveSearch) {
+  if (adaptiveSearch?.enabled !== true || !adaptiveSearch.scheduler) return null;
+  return adaptiveSearch;
+}
+
+function selectResearchAdaptiveSearch({ adaptiveSearch, runId, question, sources, contradictions }) {
+  const activeSearch = activeAdaptiveSearch(adaptiveSearch);
+  if (!activeSearch) return null;
+  return selectAdaptiveSearchAction({
+    scheduler: activeSearch.scheduler,
+    context: buildAdaptiveSearchContextForResearch({
+      taskId: activeSearch.context?.taskId || runId,
+      question,
+      sources,
+      contradictions,
+      ...(activeSearch.context || {}),
+      budget: {
+        ...(activeSearch.context?.budget || {}),
+        ...(activeSearch.budget || {}),
+      },
+    }),
+  });
+}
+
+function recordResearchAdaptiveOutcome({ adaptiveSearch, action, result }) {
+  if (!action) return null;
+  const sourceCount = result.sourceMap?.sources?.length || 0;
+  const claimCount = result.claimEvidenceGraph?.claims?.length || 0;
+  const evidenceCount = result.claimEvidenceGraph?.evidenceEdges?.length || 0;
+  const riskLevel = result.noveltyControls?.riskLevel;
+  return recordAdaptiveSearchOutcome({
+    scheduler: adaptiveSearch.scheduler,
+    actionId: action.actionId,
+    reward: normalizeAdaptiveSearchRewardForResearch({
+      sourceQuality: sourceCount ? 0.64 : 0.35,
+      synthesisConfidence: claimCount ? 0.62 : 0.42,
+      citationCoverage: claimCount ? evidenceCount / Math.max(1, claimCount) : 0.4,
+      safetyRejected: riskLevel === 'high' && evidenceCount === 0,
+    }),
+    evidence: {
+      runId: result.runId,
+      sourceCount,
+      claimCount,
+      riskLevel,
+    },
+  });
+}
+
 async function writeArtifact({ artifactDir, name, content }) {
   const artifactPath = path.join(artifactDir, name);
   await writeFile(artifactPath, content, 'utf8');
@@ -242,8 +298,16 @@ export async function createDeepResearchV2Artifacts({
   contradictions = [],
   workers,
   researchPolicy = null,
+  adaptiveSearch,
 } = {}) {
   assertSafeRunId(runId);
+  const adaptiveAction = selectResearchAdaptiveSearch({
+    adaptiveSearch,
+    runId,
+    question,
+    sources,
+    contradictions,
+  });
 
   const artifactDir = path.join(workspaceRoot, '.harness', 'research', runId, 'artifacts');
   await mkdir(artifactDir, { recursive: true });
@@ -302,7 +366,7 @@ export async function createDeepResearchV2Artifacts({
     artifacts.push(await writeArtifact({ artifactDir, name, content }));
   }
 
-  return {
+  const result = {
     runId,
     artifactDir,
     artifacts,
@@ -311,5 +375,17 @@ export async function createDeepResearchV2Artifacts({
     figureCandidates,
     noveltyControls,
     subagentRun,
+  };
+  if (!adaptiveAction) return result;
+  return {
+    ...result,
+    adaptiveSearch: {
+      action: adaptiveAction,
+      outcome: recordResearchAdaptiveOutcome({
+        adaptiveSearch,
+        action: adaptiveAction,
+        result,
+      }),
+    },
   };
 }

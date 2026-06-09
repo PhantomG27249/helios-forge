@@ -1,3 +1,11 @@
+import {
+  buildAdaptiveSearchContextForContextMemory,
+  normalizeAdaptiveSearchRewardForContextMemory,
+} from '../bes/adaptiveSearchAdapters.js';
+import {
+  recordAdaptiveSearchOutcome,
+  selectAdaptiveSearchAction,
+} from '../bes/adaptiveSearchScheduler.js';
 import { buildContextPack } from './contextPackBuilder.js';
 
 const SOURCE_ORDER = ['workspace_rag', 'promoted_memory', 'graph_memory', 'memory_graph', 'knowledge_graph'];
@@ -165,6 +173,59 @@ function diversifyBySource(items) {
   return diversified;
 }
 
+function activeAdaptiveSearch(adaptiveSearch) {
+  if (adaptiveSearch?.enabled !== true || !adaptiveSearch.scheduler) return null;
+  return adaptiveSearch;
+}
+
+function selectContextAdaptiveSearch({ adaptiveSearch, taskId, normalized }) {
+  const activeSearch = activeAdaptiveSearch(adaptiveSearch);
+  if (!activeSearch) return null;
+  return selectAdaptiveSearchAction({
+    scheduler: activeSearch.scheduler,
+    context: buildAdaptiveSearchContextForContextMemory({
+      taskId: activeSearch.context?.taskId || taskId,
+      retrieval: {
+        items: normalized,
+        sourcePaths: [...new Set(normalized.map((item) => item.path || item.sourceLabel).filter(Boolean))],
+      },
+      graph: {
+        neighbors: normalized.filter((item) => item.source === 'knowledge_graph' || item.source === 'memory_graph'),
+      },
+      memoryCandidates: normalized.filter((item) => item.source === 'promoted_memory' || item.source === 'graph_memory'),
+      ...(activeSearch.context || {}),
+      budget: {
+        ...(activeSearch.context?.budget || {}),
+        ...(activeSearch.budget || {}),
+      },
+    }),
+  });
+}
+
+function recordContextAdaptiveOutcome({ adaptiveSearch, action, contextPack }) {
+  if (!action) return null;
+  const includedItems = contextPack.items?.length || 0;
+  const excludedItems = contextPack.excludedDueToBudget?.length || 0;
+  const sourceDiversity = new Set(contextPack.sourcePaths || []).size;
+  return recordAdaptiveSearchOutcome({
+    scheduler: adaptiveSearch.scheduler,
+    actionId: action.actionId,
+    reward: normalizeAdaptiveSearchRewardForContextMemory({
+      retrievalPrecision: includedItems ? 0.68 : 0.25,
+      sourceDiversity: Math.min(1, sourceDiversity / Math.max(1, includedItems)),
+      graphRelevance: contextPack.sources?.some((source) => /graph/.test(source)) ? 0.66 : 0.48,
+      memoryUsefulness: contextPack.sources?.some((source) => /memory/.test(source)) ? 0.66 : 0.48,
+      compactionLoss: excludedItems ? excludedItems / Math.max(1, includedItems + excludedItems) : 0,
+      budgetPressure: adaptiveSearch.budget?.pressure,
+    }),
+    evidence: {
+      includedItems,
+      excludedItems,
+      sourceDiversity,
+    },
+  });
+}
+
 export function composeUnifiedContext({
   taskId,
   profile = 'coding_small',
@@ -175,6 +236,7 @@ export function composeUnifiedContext({
   graphItems = [],
   maxTokens = 6000,
   sourceDiversity = true,
+  adaptiveSearch,
 } = {}) {
   const normalized = dedupeUnifiedItems([
     ...normalizeList(workspaceItems).map(normalizeWorkspaceItem),
@@ -183,6 +245,7 @@ export function composeUnifiedContext({
     ...normalizeList(memoryGraphItems).map(normalizeMemoryAwareGraphItem),
     ...normalizeList(graphItems).map(normalizeKnowledgeGraphItem),
   ]);
+  const adaptiveAction = selectContextAdaptiveSearch({ adaptiveSearch, taskId, normalized });
   const orderedItems = sourceDiversity ? diversifyBySource(normalized) : orderWithinSource(normalized);
   const contextPack = buildContextPack({
     taskId,
@@ -192,9 +255,21 @@ export function composeUnifiedContext({
     sourceDiversity: false,
   });
 
-  return {
+  const result = {
     ...contextPack,
     sourceLabels: contextPack.items.map((item) => item.sourceLabel),
     sources: [...new Set(contextPack.items.map((item) => item.source))],
+  };
+  if (!adaptiveAction) return result;
+  return {
+    ...result,
+    adaptiveSearch: {
+      action: adaptiveAction,
+      outcome: recordContextAdaptiveOutcome({
+        adaptiveSearch,
+        action: adaptiveAction,
+        contextPack: result,
+      }),
+    },
   };
 }

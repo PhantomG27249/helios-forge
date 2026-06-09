@@ -1,3 +1,12 @@
+import {
+  buildAdaptiveSearchContextForVerifier,
+  normalizeAdaptiveSearchRewardForVerifier,
+} from '../bes/adaptiveSearchAdapters.js';
+import {
+  recordAdaptiveSearchOutcome,
+  selectAdaptiveSearchAction,
+} from '../bes/adaptiveSearchScheduler.js';
+
 function normalizePath(filePath) {
   return String(filePath || '').replace(/\\/g, '/').replace(/^\.\//, '');
 }
@@ -72,6 +81,38 @@ function pushUnique(selected, verifier, reason) {
   selected.push(withReason(verifier, reason));
 }
 
+function activeAdaptiveSearch(adaptiveSearch) {
+  if (adaptiveSearch?.enabled !== true || !adaptiveSearch.scheduler) return null;
+  return adaptiveSearch;
+}
+
+function attachAdaptiveSearchMetadata(selected, adaptiveSearch, action) {
+  if (!action) return selected;
+  const annotated = selected.map((verifier) => ({
+    ...verifier,
+    adaptiveSearch: {
+      actionId: action.actionId,
+      arm: action.arm,
+      advisory: action.advisory,
+    },
+  }));
+  const outcome = recordAdaptiveSearchOutcome({
+    scheduler: adaptiveSearch.scheduler,
+    actionId: action.actionId,
+    reward: normalizeAdaptiveSearchRewardForVerifier({
+      passed: annotated.length > 0,
+      confidence: adaptiveSearch.context?.confidence ?? (annotated.length ? 0.62 : 0.25),
+      budgetPressure: adaptiveSearch.budget?.pressure,
+    }),
+    evidence: {
+      selectedCount: annotated.length,
+      verifierNames: annotated.map((verifier) => verifier.name).join(','),
+    },
+  });
+  annotated.adaptiveSearch = { action, outcome };
+  return annotated;
+}
+
 function findByName(registry, name) {
   return registry.byName?.[name] || registry.verifiers?.find((verifier) => verifier.name === name);
 }
@@ -88,11 +129,27 @@ export function selectVerifiersForTask({
   recentFailures = [],
   maxVerifiers = 4,
   visualPolicy = null,
+  adaptiveSearch,
 } = {}) {
   if (!registry?.verifiers?.length) return [];
   const selected = [];
   const normalizedChangedFiles = changedFiles.map(normalizePath).filter(Boolean);
   const changeClass = classifyChange(normalizedChangedFiles);
+  const activeSearch = activeAdaptiveSearch(adaptiveSearch);
+  const adaptiveAction = activeSearch ? selectAdaptiveSearchAction({
+    scheduler: activeSearch.scheduler,
+    context: buildAdaptiveSearchContextForVerifier({
+      task,
+      taskId: activeSearch.context?.taskId || task?.taskId,
+      changedFiles: normalizedChangedFiles,
+      recentFailures,
+      ...(activeSearch.context || {}),
+      budget: {
+        ...(activeSearch.context?.budget || {}),
+        ...(activeSearch.budget || {}),
+      },
+    }),
+  }) : null;
 
   for (const name of recentFailures) {
     pushUnique(selected, findByName(registry, name), 'recent_failure');
@@ -130,10 +187,10 @@ export function selectVerifiersForTask({
   }
 
   const sliced = selected.slice(0, Math.max(1, maxVerifiers));
-  if (!visualPolicy) return sliced;
-  return sliced.map((verifier) => (
+  const policyAnnotated = !visualPolicy ? sliced : sliced.map((verifier) => (
     verifier.kind === 'visual' || verifier.tags?.includes?.('visual') || verifier.tags?.includes?.('vlm')
       ? { ...verifier, policy: policyMetadata(visualPolicy) }
       : verifier
   ));
+  return attachAdaptiveSearchMetadata(policyAnnotated, activeSearch, adaptiveAction);
 }

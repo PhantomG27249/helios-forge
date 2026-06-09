@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { createAdaptiveSearchScheduler } from '../src/harness-sidecar/bes/adaptiveSearchScheduler.js';
 import { BesMetaOptimizer } from '../src/harness-sidecar/meta/besMetaOptimizer.js';
 import { HarnessOptimizer } from '../src/harness-sidecar/meta/harnessOptimizer.js';
 
@@ -231,4 +232,38 @@ test('BES meta optimizer emits full bidirectional and Shinka-style evolution con
   assert.equal(result.bes.evolution.runner, 'evolutionPopulationRunner.sync');
   assert.deepEqual(result.bes.evolution.evaluationContext.visualCases.map((item) => item.caseId), ['visual-layout']);
   assert.equal(result.candidates.every((candidate) => candidate.bes?.goalScore), true);
+});
+
+test('BES meta optimizer preserves disabled adaptive search behavior and routes enabled runs', () => {
+  const optimizer = new BesMetaOptimizer({
+    now: () => new Date('2026-06-08T12:34:56.000Z'),
+    idPrefix: 'adaptive_meta',
+    maxCandidates: 2,
+  });
+  const disabled = optimizer.propose({
+    traceSummary,
+    target: 'runtime_policy',
+    coreset,
+    adaptiveSearch: { enabled: false },
+  });
+  const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.4 });
+  const enabled = optimizer.propose({
+    traceSummary,
+    target: 'runtime_policy',
+    coreset,
+    adaptiveSearch: {
+      enabled: true,
+      scheduler,
+      context: { taskId: 'meta_runtime_route', confidence: 0.4 },
+      budget: { pressure: 0.2 },
+    },
+  });
+
+  assert.equal(disabled.adaptiveSearch, undefined);
+  assert.equal(enabled.adaptiveSearch.action.trace.type, 'ab_mcts.action_selected');
+  assert.equal(enabled.adaptiveSearch.action.contextId, 'meta_runtime_route');
+  assert.equal(enabled.adaptiveSearch.outcome.type, 'ab_mcts.outcome_recorded');
+  assert.equal(enabled.candidates.every((candidate) => candidate.adaptiveSearch?.actionId === 'adaptive_1'), true);
+  assert.equal(enabled.candidates.every((candidate) => candidate.status === 'approval_required'), true);
+  assert.equal(scheduler.history.map((event) => event.type).includes('ab_mcts.outcome_recorded'), true);
 });

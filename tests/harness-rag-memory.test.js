@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
+import { createAdaptiveSearchScheduler } from '../src/harness-sidecar/bes/adaptiveSearchScheduler.js';
 import { buildContextPack } from '../src/harness-sidecar/rag/contextPackBuilder.js';
 import { composeUnifiedContext } from '../src/harness-sidecar/rag/unifiedContextComposer.js';
 import { indexWorkspace } from '../src/harness-sidecar/rag/workspaceIndexer.js';
@@ -151,4 +152,44 @@ test('unified context composer combines workspace, memory, and graph sources det
   assert.equal(contextPack.items[1].provenance[0].taskId, 'task_memory');
   assert.equal(contextPack.excludedDueToBudget.length, 1);
   assert.equal(contextPack.excludedDueToBudget[0].chunkId, 'chunk_server_2');
+});
+
+test('unified context composer preserves disabled adaptive search shape and records enabled routing', () => {
+  const workspaceItems = [
+    {
+      chunkId: 'chunk_server_1',
+      path: 'src/server.js',
+      lineStart: 1,
+      lineEnd: 4,
+      snippet: 'startSidecarWebSocket opens the harness websocket',
+      score: 12,
+      reason: 'Matched websocket terms',
+      tokensEstimated: 10,
+    },
+  ];
+  const disabled = composeUnifiedContext({
+    taskId: 'task_adaptive_disabled',
+    maxTokens: 20,
+    workspaceItems,
+    adaptiveSearch: { enabled: false },
+  });
+  const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.18 });
+  const enabled = composeUnifiedContext({
+    taskId: 'task_adaptive_enabled',
+    maxTokens: 20,
+    workspaceItems,
+    adaptiveSearch: {
+      enabled: true,
+      scheduler,
+      context: { taskId: 'context_route', confidence: 0.42 },
+      budget: { pressure: 0.2 },
+    },
+  });
+
+  assert.equal(disabled.adaptiveSearch, undefined);
+  assert.equal(enabled.adaptiveSearch.action.trace.type, 'ab_mcts.action_selected');
+  assert.equal(enabled.adaptiveSearch.action.contextId, 'context_route');
+  assert.equal(enabled.adaptiveSearch.outcome.type, 'ab_mcts.outcome_recorded');
+  assert.equal(enabled.adaptiveSearch.outcome.evidence.includedItems, 1);
+  assert.deepEqual(enabled.sourceLabels, ['workspace:src/server.js']);
 });

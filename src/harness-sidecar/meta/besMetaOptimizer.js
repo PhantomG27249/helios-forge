@@ -6,6 +6,10 @@ import { runBidirectionalBes } from '../bes/bidirectionalSearchLoop.js';
 import { scoreGoalSatisfaction } from '../bes/goalSatisfactionScorer.js';
 import { proposeMutations } from '../bes/mutationPolicy.js';
 import { recombineAttempts } from '../bes/recombinationEngine.js';
+import {
+  recordAdaptiveSearchOutcome,
+  selectAdaptiveSearchAction,
+} from '../bes/adaptiveSearchScheduler.js';
 import { scoreSubgoals } from '../bes/subgoalScorer.js';
 import { seedAttemptStrategies } from '../bes/strategySeeder.js';
 import { createVerifierGenome, mutateVerifierGenome, validateVerifierGenome } from './verifierGenome.js';
@@ -228,6 +232,84 @@ function evidenceForGoalIds(goalIds) {
   return goalIds.map((goalId) => ({ goalId, passed: true }));
 }
 
+function activeAdaptiveSearch(adaptiveSearch) {
+  if (adaptiveSearch?.enabled !== true || !adaptiveSearch.scheduler) return null;
+  return adaptiveSearch;
+}
+
+function selectMetaAdaptiveSearch({ adaptiveSearch, traceSummary, target, coreset, parentCandidates }) {
+  const activeSearch = activeAdaptiveSearch(adaptiveSearch);
+  if (!activeSearch) return null;
+  return selectAdaptiveSearchAction({
+    scheduler: activeSearch.scheduler,
+    context: {
+      taskId: activeSearch.context?.taskId || `meta_optimizer_${safeIdPart(target)}`,
+      target,
+      evidence: collectCoresetItems(coreset).map((item) => ({
+        kind: item.source || item.kind || 'coreset_item',
+        id: item.id || item.taskId || item.caseId,
+      })),
+      evidenceCount: collectCoresetItems(coreset).length,
+      confidence: activeSearch.context?.confidence,
+      bestCandidate: activeSearch.context?.bestCandidate,
+      signals: {
+        failureModeCount: collectFailureModes(traceSummary, coreset).length,
+        parentCandidateCount: parentCandidates.length,
+      },
+      budget: {
+        ...(activeSearch.context?.budget || {}),
+        ...(activeSearch.budget || {}),
+      },
+      ...(activeSearch.context || {}),
+    },
+  });
+}
+
+function annotateCandidatesWithAdaptiveSearch(candidates, action) {
+  if (!action) return candidates;
+  return candidates.map((candidate) => ({
+    ...candidate,
+    adaptiveSearch: {
+      actionId: action.actionId,
+      arm: action.arm,
+      advisory: action.advisory,
+    },
+  }));
+}
+
+function recordMetaAdaptiveOutcome({ adaptiveSearch, action, result }) {
+  if (!action) return null;
+  const candidates = result.candidates || [];
+  const championScore = result.bes?.champion?.score ?? result.bes?.bidirectional?.bestCandidate?.goalScore?.score ?? 0.5;
+  return recordAdaptiveSearchOutcome({
+    scheduler: adaptiveSearch.scheduler,
+    actionId: action.actionId,
+    reward: {
+      bes: { goalSatisfaction: championScore },
+      score: candidates.length ? 0.62 : 0.35,
+    },
+    evidence: {
+      target: candidates[0]?.target,
+      candidateCount: candidates.length,
+    },
+  });
+}
+
+function withAdaptiveSearchResult({ result, adaptiveSearch, action }) {
+  if (!action) return result;
+  const annotated = {
+    ...result,
+    candidates: annotateCandidatesWithAdaptiveSearch(result.candidates || [], action),
+  };
+  return {
+    ...annotated,
+    adaptiveSearch: {
+      action,
+      outcome: recordMetaAdaptiveOutcome({ adaptiveSearch, action, result: annotated }),
+    },
+  };
+}
+
 function buildEvolutionSnapshot({ task, candidates, visualCases, coreset }) {
   return runEvolutionPopulationSync({
     task,
@@ -302,10 +384,18 @@ export class BesMetaOptimizer {
     coreset,
     parentCandidates = [],
     candidateRun,
+    adaptiveSearch,
   } = {}) {
     const normalizedTarget = DEFAULT_TARGETS.has(target) ? target : safeIdPart(target);
     const baseId = `${safeIdPart(this.idPrefix)}_${timestampPart(this.now)}`;
     const failureModes = collectFailureModes(traceSummary, coreset);
+    const adaptiveAction = selectMetaAdaptiveSearch({
+      adaptiveSearch,
+      traceSummary,
+      target: normalizedTarget,
+      coreset,
+      parentCandidates,
+    });
 
     if (normalizedTarget === 'verifier_policy') {
       const parents = parentCandidates.map(verifierGenomeFromParent).filter(Boolean);
@@ -350,14 +440,18 @@ export class BesMetaOptimizer {
         },
       }));
 
-      return {
+      return withAdaptiveSearchResult({
+        adaptiveSearch,
+        action: adaptiveAction,
+        result: {
         candidates,
         coreset,
         bes: {
           verifierGenomes,
           mutationTypes: verifierGenomes.map((genome) => genome.mutation.type),
         },
-      };
+        },
+      });
     }
 
     const subgoals = buildSubgoals({ target: normalizedTarget, failureModes, coreset });
@@ -479,7 +573,10 @@ export class BesMetaOptimizer {
       coreset,
     });
 
-    return {
+    return withAdaptiveSearchResult({
+      adaptiveSearch,
+      action: adaptiveAction,
+      result: {
       candidates,
       coreset,
       bes: {
@@ -490,6 +587,7 @@ export class BesMetaOptimizer {
         bidirectional,
         evolution,
       },
-    };
+      },
+    });
   }
 }
