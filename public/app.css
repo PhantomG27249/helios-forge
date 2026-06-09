@@ -2164,6 +2164,204 @@ body {
   margin-top: 3px;
 }
 
+.harness-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.harness-section-title-row.compact {
+  margin-bottom: 6px;
+}
+
+.harness-section-title-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-section-title-row span:last-child {
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.harness-adaptive-search,
+.harness-skill-candidate-review,
+.harness-abmcts-replay-results {
+  min-width: 0;
+  margin-top: 10px;
+  padding: 8px;
+  background: var(--tool-bg);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+}
+
+.harness-adaptive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.harness-status-cell {
+  min-width: 0;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid transparent;
+  border-radius: 5px;
+}
+
+.harness-status-cell span,
+.harness-status-cell strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-status-cell span {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.harness-status-cell strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.harness-muted-line {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-top: 7px;
+}
+
+.harness-skill-candidates,
+.harness-abmcts-decisions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.harness-skill-candidate,
+.harness-abmcts-decision {
+  min-width: 0;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--tool-border);
+  border-radius: var(--radius-xs);
+}
+
+.harness-skill-candidate-top,
+.harness-abmcts-decision-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.harness-skill-candidate-name,
+.harness-skill-candidate-meta,
+.harness-skill-candidate-summary,
+.harness-abmcts-decision-meta,
+.harness-abmcts-decision-reason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-skill-candidate-name {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.harness-skill-candidate-meta,
+.harness-abmcts-decision-meta {
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.harness-skill-candidate-summary,
+.harness-abmcts-decision-reason {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.harness-skill-candidate-actions {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.harness-skill-candidate-block {
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.harness-skill-candidate-block summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.harness-skill-candidate-block pre {
+  max-height: 160px;
+  overflow: auto;
+  margin-top: 5px;
+  padding: 7px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.harness-abmcts-decision-top span {
+  color: var(--text-tertiary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+}
+
+.harness-abmcts-decision-top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .harness-swarm-toolbar {
   display: flex;
   align-items: center;

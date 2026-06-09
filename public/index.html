@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250619">
+  <link rel="stylesheet" href="/app.css?v=20250620">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -160,6 +160,31 @@
               <input id="harness-task-input" class="harness-task-input" type="text" placeholder="Run a harness task..." />
               <button id="btn-harness-run" class="harness-run-btn">Run</button>
             </div>
+            <section id="harness-adaptive-search" class="harness-adaptive-search" aria-label="Adaptive Search status">
+              <div class="harness-section-title-row">
+                <span>Adaptive Search</span>
+                <button id="btn-harness-adaptive-refresh" class="harness-btn" type="button">Refresh</button>
+              </div>
+              <div class="harness-adaptive-grid">
+                <div class="harness-status-cell">
+                  <span>Selected Arm</span>
+                  <strong id="harness-adaptive-selected-arm">n/a</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Mode</span>
+                  <strong id="harness-adaptive-mode">unknown</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Recent Reward</span>
+                  <strong id="harness-adaptive-reward">n/a</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Arm Balance</span>
+                  <strong id="harness-adaptive-arm-balance">n/a</strong>
+                </div>
+              </div>
+              <div id="harness-adaptive-note" class="harness-muted-line">Waiting for adaptive-search status.</div>
+            </section>
           </div>
           <div id="harness-tab-deep-research" class="harness-tab-panel">
             <div class="harness-task-row">
@@ -191,6 +216,15 @@
               </div>
               <div id="capability-smithery-results" class="harness-smithery-results"></div>
             </div>
+            <section id="harness-skill-candidate-review" class="harness-skill-candidate-review" aria-label="Skill Candidate Review">
+              <div class="harness-section-title-row">
+                <span>Skill Candidate Review</span>
+                <button id="btn-harness-skill-candidates-refresh" class="harness-btn" type="button">Refresh</button>
+              </div>
+              <div id="harness-skill-candidates" class="harness-skill-candidates">
+                <div class="harness-empty compact">No skill candidates loaded</div>
+              </div>
+            </section>
             <div class="harness-capability-layout">
               <div class="harness-capability-sections">
                 <section class="harness-capability-section" data-capability-section="skill">
@@ -306,6 +340,15 @@
                   <button id="btn-harness-replay-next" class="harness-btn" type="button">Next</button>
                   <button id="btn-harness-replay-reset" class="harness-btn" type="button">Reset</button>
                 </div>
+                <section id="harness-abmcts-replay-results" class="harness-abmcts-replay-results" aria-label="AB-MCTS Replay Results">
+                  <div class="harness-section-title-row compact">
+                    <span>AB-MCTS Replay Results</span>
+                    <span id="harness-abmcts-replay-status">No replay decisions</span>
+                  </div>
+                  <div id="harness-abmcts-decisions" class="harness-abmcts-decisions">
+                    <div class="harness-empty compact">Prepare replay to inspect AB-MCTS decisions</div>
+                  </div>
+                </section>
                 <div id="harness-trace-events" class="harness-trace-events"></div>
               </div>
             </div>
@@ -452,6 +495,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250619"></script>
+  <script src="/app.js?v=20250620"></script>
 </body>
 </html>

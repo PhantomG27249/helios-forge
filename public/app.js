@@ -70,11 +70,18 @@ let harnessTraceState = {
   selectedTaskId: null,
   selectedTrace: null,
   replayEvents: [],
+  replayDecisions: [],
   replayCursor: 0,
   replayDone: true,
 };
 let harnessTracesLoaded = false;
 let harnessTracesRequestTimer = null;
+let harnessAdaptiveLoaded = false;
+let harnessAdaptiveRequestTimer = null;
+let harnessSkillCandidatesLoaded = false;
+let harnessSkillCandidatesRequestTimer = null;
+let harnessAdaptiveStatus = null;
+let harnessSkillCandidates = [];
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -184,6 +191,14 @@ const harnessTraceEvents = $('#harness-trace-events');
 const harnessTraceEventCount = $('#harness-trace-event-count');
 const harnessTraceCostCount = $('#harness-trace-cost-count');
 const harnessTraceContextCount = $('#harness-trace-context-count');
+const harnessAdaptiveSelectedArm = $('#harness-adaptive-selected-arm');
+const harnessAdaptiveMode = $('#harness-adaptive-mode');
+const harnessAdaptiveReward = $('#harness-adaptive-reward');
+const harnessAdaptiveArmBalance = $('#harness-adaptive-arm-balance');
+const harnessAdaptiveNote = $('#harness-adaptive-note');
+const harnessSkillCandidatesEl = $('#harness-skill-candidates');
+const harnessAbMctsReplayStatus = $('#harness-abmcts-replay-status');
+const harnessAbMctsDecisions = $('#harness-abmcts-decisions');
 const harnessSwarmStatus = $('#harness-swarm-status');
 const harnessSwarmActiveCount = $('#harness-swarm-active-count');
 const harnessSwarmAttempts = $('#harness-swarm-attempts');
@@ -484,6 +499,18 @@ function handleMessage(msg) {
     handleHarnessSmitheryResults(msg.data || msg);
     return;
   }
+  if (msg.type === 'harness_adaptive_search_status') {
+    handleHarnessAdaptiveSearchStatus(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_skill_candidates') {
+    handleHarnessSkillCandidates(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_skill_candidate_reviewed') {
+    handleHarnessSkillCandidateReviewed(msg.data || msg);
+    return;
+  }
   if (msg.type === 'harness_traces') {
     handleHarnessTraces(msg.data || msg);
     return;
@@ -493,6 +520,10 @@ function handleMessage(msg) {
     return;
   }
   if (msg.type === 'harness_trace_replay') {
+    handleHarnessTraceReplay(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_abmcts_replay') {
     handleHarnessTraceReplay(msg.data || msg);
     return;
   }
@@ -572,6 +603,9 @@ function handleHarnessEvent(event) {
   pruneHarnessSubagents();
   updateHarnessVerifierEvolution(event);
   updateHarnessPolicyEvolution(event);
+  updateHarnessAdaptiveSearch(event);
+  updateHarnessSkillCandidateEvents(event);
+  updateHarnessAbMctsReplayEvents(event);
 
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
@@ -1056,6 +1090,9 @@ function renderHarnessPanel() {
   harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
   renderHarnessVerifierEvolution();
+  renderHarnessAdaptiveSearch();
+  renderHarnessSkillCandidates();
+  renderHarnessAbMctsReplay();
   renderHarnessSubagents();
   renderHarnessSwarm();
   renderHarnessTraces();
@@ -1099,6 +1136,206 @@ function renderHarnessVerifierEvolution() {
   }
 }
 
+function requestHarnessAdaptiveSearchStatus() {
+  if (harnessAdaptiveNote) harnessAdaptiveNote.textContent = 'Refreshing adaptive-search status...';
+  if (harnessAdaptiveRequestTimer) clearTimeout(harnessAdaptiveRequestTimer);
+  harnessAdaptiveRequestTimer = setTimeout(() => {
+    if (harnessAdaptiveNote?.textContent === 'Refreshing adaptive-search status...') {
+      harnessAdaptiveNote.textContent = harnessAdaptiveLoaded
+        ? 'Adaptive-search status is current.'
+        : 'Adaptive-search status has not been returned by the sidecar yet.';
+    }
+  }, 2500);
+  send({ type: 'harness_adaptive_search_status_get', workspaceRoot: workspacePath || undefined });
+}
+
+function handleHarnessAdaptiveSearchStatus(payload) {
+  if (harnessAdaptiveRequestTimer) clearTimeout(harnessAdaptiveRequestTimer);
+  harnessAdaptiveLoaded = true;
+  harnessAdaptiveStatus = payload?.status || payload?.adaptiveSearch || payload || null;
+  renderHarnessAdaptiveSearch();
+}
+
+function updateHarnessAdaptiveSearch(event) {
+  if (!event?.type || !/adaptive[_-]?search|ab[_-]?mcts|arm[_-]?selected/i.test(event.type)) return;
+  const nextStatus = event.status || event.adaptiveSearch || event.details || event;
+  harnessAdaptiveLoaded = true;
+  harnessAdaptiveStatus = { ...(harnessAdaptiveStatus || {}), ...nextStatus, latestEventType: event.type };
+}
+
+function formatAdaptiveBalance(balance) {
+  if (!balance) return 'n/a';
+  if (Array.isArray(balance)) {
+    return balance.map(item => {
+      if (typeof item === 'string') return item;
+      const label = item.arm || item.name || item.id || 'arm';
+      const weight = item.weight ?? item.probability ?? item.visits ?? item.count ?? item.score;
+      return weight === undefined ? label : `${label}:${compactText(weight, String(weight))}`;
+    }).join(' | ');
+  }
+  if (typeof balance === 'object') {
+    return Object.entries(balance).map(([arm, value]) => `${arm}:${compactText(value, String(value))}`).join(' | ');
+  }
+  return String(balance);
+}
+
+function renderHarnessAdaptiveSearch() {
+  const status = harnessAdaptiveStatus || {};
+  const selectedArm = status.selectedArm || status.selected_arm || status.arm || status.currentArm || 'n/a';
+  const enabled = status.enabled === undefined ? 'unknown' : status.enabled ? 'enabled' : 'disabled';
+  const advisory = status.advisory === undefined ? '' : status.advisory ? 'advisory' : 'enforcing';
+  const modeParts = [status.mode || status.policyMode || 'unknown', advisory, enabled].filter(Boolean);
+  const recentReward = status.recentReward ?? status.reward ?? status.latestReward ?? status.lastReward;
+  const balance = status.armBalance || status.arm_balance || status.balance || status.arms;
+
+  if (harnessAdaptiveSelectedArm) harnessAdaptiveSelectedArm.textContent = compactText(selectedArm, 'n/a');
+  if (harnessAdaptiveMode) harnessAdaptiveMode.textContent = modeParts.join(' | ');
+  if (harnessAdaptiveReward) harnessAdaptiveReward.textContent = Number.isFinite(Number(recentReward)) ? Number(recentReward).toFixed(3) : compactText(recentReward, 'n/a');
+  if (harnessAdaptiveArmBalance) harnessAdaptiveArmBalance.textContent = formatAdaptiveBalance(balance);
+  if (harnessAdaptiveNote) {
+    harnessAdaptiveNote.textContent = harnessAdaptiveLoaded
+      ? compactText(status.reason || status.summary || status.latestEventType, 'Adaptive-search status is current.')
+      : 'Waiting for adaptive-search status.';
+  }
+}
+
+function requestHarnessSkillCandidates() {
+  if (harnessSkillCandidatesEl) harnessSkillCandidatesEl.innerHTML = '<div class="harness-empty compact">Refreshing skill candidates...</div>';
+  if (harnessSkillCandidatesRequestTimer) clearTimeout(harnessSkillCandidatesRequestTimer);
+  harnessSkillCandidatesRequestTimer = setTimeout(() => {
+    if (!harnessSkillCandidatesLoaded) renderHarnessSkillCandidates();
+  }, 2500);
+  send({ type: 'harness_skill_candidates_get', workspaceRoot: workspacePath || undefined, limit: 20 });
+}
+
+function handleHarnessSkillCandidates(payload) {
+  if (harnessSkillCandidatesRequestTimer) clearTimeout(harnessSkillCandidatesRequestTimer);
+  harnessSkillCandidatesLoaded = true;
+  harnessSkillCandidates = Array.isArray(payload?.candidates) ? payload.candidates
+    : Array.isArray(payload?.items) ? payload.items
+    : Array.isArray(payload) ? payload
+    : [];
+  renderHarnessSkillCandidates();
+}
+
+function handleHarnessSkillCandidateReviewed(payload) {
+  const candidateId = payload?.candidateId || payload?.id;
+  const decision = payload?.decision || payload?.status;
+  harnessSkillCandidates = harnessSkillCandidates.map(candidate => {
+    const id = candidate.candidateId || candidate.id || candidate.name;
+    return id === candidateId ? { ...candidate, status: decision || 'reviewed' } : candidate;
+  });
+  renderHarnessSkillCandidates();
+}
+
+function updateHarnessSkillCandidateEvents(event) {
+  if (!event?.type || !/skill[_-]?candidate/i.test(event.type)) return;
+  const candidate = event.candidate || event.details?.candidate || event.details || event;
+  const candidateId = candidate.candidateId || candidate.id || event.candidateId || event.actionId;
+  if (!candidateId) return;
+  harnessSkillCandidatesLoaded = true;
+  const normalized = { ...candidate, candidateId, status: candidate.status || event.status || 'pending' };
+  const existingIndex = harnessSkillCandidates.findIndex(item => (item.candidateId || item.id || item.name) === candidateId);
+  if (existingIndex >= 0) {
+    harnessSkillCandidates[existingIndex] = { ...harnessSkillCandidates[existingIndex], ...normalized };
+  } else {
+    harnessSkillCandidates = [normalized, ...harnessSkillCandidates].slice(0, 20);
+  }
+}
+
+function reviewHarnessSkillCandidate(candidateId, decision) {
+  if (!candidateId || !decision) return;
+  send({ type: 'harness_skill_candidate_review', candidateId, decision, workspaceRoot: workspacePath || undefined });
+  harnessSkillCandidates = harnessSkillCandidates.map(candidate => {
+    const id = candidate.candidateId || candidate.id || candidate.name;
+    return id === candidateId ? { ...candidate, status: `${decision}_requested` } : candidate;
+  });
+  renderHarnessSkillCandidates();
+}
+
+function renderCandidateBlock(title, value) {
+  if (!value) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  return `
+    <details class="harness-skill-candidate-block">
+      <summary>${esc(title)}</summary>
+      <pre>${esc(text)}</pre>
+    </details>
+  `;
+}
+
+function renderHarnessSkillCandidates() {
+  if (!harnessSkillCandidatesEl) return;
+  if (!harnessSkillCandidatesLoaded) {
+    harnessSkillCandidatesEl.innerHTML = '<div class="harness-empty compact">Skill candidate review is waiting for the sidecar.</div>';
+    return;
+  }
+  harnessSkillCandidatesEl.innerHTML = harnessSkillCandidates.map(candidate => {
+    const candidateId = candidate.candidateId || candidate.id || candidate.name || 'candidate';
+    const title = candidate.title || candidate.name || candidate.skillName || candidateId;
+    const status = candidate.status || candidate.reviewStatus || 'pending';
+    const skillMd = candidate.skillMd || candidate.generatedSkillMd || candidate.generatedSkill || candidate.files?.['SKILL.md'];
+    return `
+      <article class="harness-skill-candidate" data-skill-candidate-id="${escAttr(candidateId)}">
+        <div class="harness-skill-candidate-top">
+          <div>
+            <div class="harness-skill-candidate-name">${esc(title)}</div>
+            <div class="harness-skill-candidate-meta">${esc(candidateId)} | ${esc(status)}</div>
+          </div>
+          <div class="harness-skill-candidate-actions">
+            <button class="harness-btn" type="button" data-skill-candidate-action="reject" data-candidate-id="${escAttr(candidateId)}">Reject</button>
+            <button class="harness-run-btn" type="button" data-skill-candidate-action="approve" data-candidate-id="${escAttr(candidateId)}">Approve</button>
+          </div>
+        </div>
+        ${candidate.summary ? `<div class="harness-skill-candidate-summary">${esc(candidate.summary)}</div>` : ''}
+        ${renderCandidateBlock('Generated SKILL.md', skillMd)}
+        ${renderCandidateBlock('Evaluation', candidate.evaluation || candidate.eval || candidate.scores)}
+        ${renderCandidateBlock('Safety', candidate.safety || candidate.safetyReview || candidate.risk)}
+        ${renderCandidateBlock('Rollback', candidate.rollback || candidate.rollbackPlan || candidate.revert)}
+      </article>
+    `;
+  }).join('') || '<div class="harness-empty compact">No skill candidates available for review</div>';
+}
+
+function extractAbMctsDecisions(payload, events = []) {
+  const direct = payload?.decisions || payload?.abMctsDecisions || payload?.abmctsDecisions || payload?.summary?.decisions;
+  if (Array.isArray(direct)) return direct;
+  return events.filter(event => /ab[_-]?mcts|adaptive[_-]?search|selected[_-]?arm|tree[_-]?policy/i.test(event?.type || ''));
+}
+
+function updateHarnessAbMctsReplayEvents(event) {
+  if (!event?.type || !/ab[_-]?mcts|adaptive[_-]?search|selected[_-]?arm|tree[_-]?policy/i.test(event.type)) return;
+  harnessTraceState.replayDecisions = [event, ...harnessTraceState.replayDecisions].slice(0, 25);
+}
+
+function renderHarnessAbMctsReplay() {
+  if (!harnessAbMctsDecisions) return;
+  const decisions = harnessTraceState.replayDecisions || [];
+  if (harnessAbMctsReplayStatus) {
+    harnessAbMctsReplayStatus.textContent = decisions.length
+      ? `${decisions.length} decision${decisions.length === 1 ? '' : 's'}`
+      : 'No replay decisions';
+  }
+  harnessAbMctsDecisions.innerHTML = decisions.map((decision, index) => {
+    const selectedArm = decision.selectedArm || decision.selected_arm || decision.arm || decision.action || decision.choice || 'n/a';
+    const reward = decision.reward ?? decision.recentReward ?? decision.value ?? decision.score;
+    const balance = decision.armBalance || decision.arm_balance || decision.balance || decision.arms;
+    const reason = decision.reason || decision.summary || decision.rationale || decision.type || '';
+    return `
+      <div class="harness-abmcts-decision">
+        <div class="harness-abmcts-decision-top">
+          <span>${index + 1}</span>
+          <strong>${esc(selectedArm)}</strong>
+        </div>
+        <div class="harness-abmcts-decision-meta">
+          ${reward === undefined ? 'reward n/a' : `reward ${esc(compactText(reward, String(reward)))}`} | ${esc(formatAdaptiveBalance(balance))}
+        </div>
+        ${reason ? `<div class="harness-abmcts-decision-reason">${esc(reason)}</div>` : ''}
+      </div>
+    `;
+  }).join('') || '<div class="harness-empty compact">Prepare replay to inspect AB-MCTS decisions</div>';
+}
+
 function switchHarnessTab(tabId) {
   activeHarnessTab = tabId || 'run';
   document.querySelectorAll('.harness-tab').forEach(tab => {
@@ -1110,8 +1347,14 @@ function switchHarnessTab(tabId) {
   if (activeHarnessTab === 'capabilities' && !harnessCapabilitiesLoaded) {
     requestHarnessCapabilities();
   }
+  if (activeHarnessTab === 'capabilities' && !harnessSkillCandidatesLoaded) {
+    requestHarnessSkillCandidates();
+  }
   if (activeHarnessTab === 'traces' && !harnessTracesLoaded) {
     requestHarnessTraces();
+  }
+  if (activeHarnessTab === 'run' && !harnessAdaptiveLoaded) {
+    requestHarnessAdaptiveSearchStatus();
   }
 }
 
@@ -1805,6 +2048,7 @@ function handleHarnessTraces(payload) {
     harnessTraceState.selectedTaskId = harnessTraceState.traces[0]?.taskId || null;
     harnessTraceState.selectedTrace = null;
     harnessTraceState.replayEvents = [];
+    harnessTraceState.replayDecisions = [];
     harnessTraceState.replayCursor = 0;
     harnessTraceState.replayDone = true;
   }
@@ -1818,6 +2062,7 @@ function requestHarnessTrace(taskId) {
   if (!taskId) return;
   harnessTraceState.selectedTaskId = taskId;
   harnessTraceState.replayEvents = [];
+  harnessTraceState.replayDecisions = [];
   harnessTraceState.replayCursor = 0;
   harnessTraceState.replayDone = true;
   if (harnessTraceStatus) harnessTraceStatus.textContent = `Loading ${taskId}...`;
@@ -1829,6 +2074,7 @@ function handleHarnessTrace(payload) {
   harnessTraceState.selectedTrace = payload || null;
   harnessTraceState.selectedTaskId = payload?.taskId || harnessTraceState.selectedTaskId;
   harnessTraceState.replayEvents = [];
+  harnessTraceState.replayDecisions = [];
   harnessTraceState.replayCursor = 0;
   harnessTraceState.replayDone = true;
   renderHarnessTraces();
@@ -1840,6 +2086,7 @@ function prepareHarnessTraceReplay({ next = false } = {}) {
   const cursor = next ? harnessTraceState.replayCursor : 0;
   if (!next) {
     harnessTraceState.replayEvents = [];
+    harnessTraceState.replayDecisions = [];
     harnessTraceState.replayCursor = 0;
     harnessTraceState.replayDone = true;
   }
@@ -1850,6 +2097,7 @@ function prepareHarnessTraceReplay({ next = false } = {}) {
 
 function resetHarnessTraceReplay() {
   harnessTraceState.replayEvents = [];
+  harnessTraceState.replayDecisions = [];
   harnessTraceState.replayCursor = 0;
   harnessTraceState.replayDone = true;
   renderHarnessTraces();
@@ -1863,6 +2111,10 @@ function handleHarnessTraceReplay(payload) {
   harnessTraceState.replayEvents = harnessTraceState.replayCursor > 0
     ? [...harnessTraceState.replayEvents, ...events]
     : events;
+  const decisions = extractAbMctsDecisions(payload, events);
+  harnessTraceState.replayDecisions = harnessTraceState.replayCursor > 0
+    ? [...harnessTraceState.replayDecisions, ...decisions]
+    : decisions;
   harnessTraceState.replayCursor = Number.isFinite(payload?.nextCursor) ? payload.nextCursor : harnessTraceState.replayEvents.length;
   harnessTraceState.replayDone = payload?.done !== false;
   if (payload?.summary && harnessTraceState.selectedTrace) {
@@ -1957,6 +2209,7 @@ function renderHarnessTraces() {
   }
 
   const events = harnessTraceState.replayEvents.length ? harnessTraceState.replayEvents : (selectedTrace?.events || []);
+  renderHarnessAbMctsReplay();
   harnessTraceEvents.innerHTML = events.map(renderTraceEventRow).join('')
     || '<div class="harness-empty compact">Select a trace to inspect events</div>';
 }
@@ -1995,6 +2248,12 @@ function handleHarnessPanelClick(event) {
     return;
   }
 
+  const skillCandidateAction = event.target.closest('[data-skill-candidate-action]');
+  if (skillCandidateAction) {
+    reviewHarnessSkillCandidate(skillCandidateAction.dataset.candidateId, skillCandidateAction.dataset.skillCandidateAction);
+    return;
+  }
+
   const actionButton = event.target.closest('[data-capability-action]');
   if (!actionButton) return;
   const capabilityId = actionButton.dataset.capabilityId;
@@ -2006,7 +2265,9 @@ function toggleHarnessPanel() {
   harnessPanel.classList.toggle('hidden');
   if (!harnessPanel.classList.contains('hidden')) {
     send({ type: 'harness_status' });
+    if (activeHarnessTab === 'run') requestHarnessAdaptiveSearchStatus();
     if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
+    if (activeHarnessTab === 'capabilities') requestHarnessSkillCandidates();
     if (activeHarnessTab === 'traces') requestHarnessTraces();
   }
 }
@@ -3068,7 +3329,9 @@ $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
 if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick);
 $('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
+$('#btn-harness-adaptive-refresh')?.addEventListener('click', requestHarnessAdaptiveSearchStatus);
 $('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
+$('#btn-harness-skill-candidates-refresh')?.addEventListener('click', requestHarnessSkillCandidates);
 $('#btn-capability-search')?.addEventListener('click', requestSmitherySearch);
 $('#btn-capability-install-quick')?.addEventListener('click', installCapabilityFromQuickSource);
 $('#btn-harness-capability-reset')?.addEventListener('click', resetHarnessCapabilityForm);

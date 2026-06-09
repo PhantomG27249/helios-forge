@@ -34,6 +34,41 @@ test('harness controls expose trace replay as a compact toolbar and tab surface'
   assert.match(serverJs, /case 'harness_trace_replay_prepare'/);
 });
 
+test('harness panel exposes AB-MCTS adaptive search, skill review, and replay surfaces', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+  const css = await readFile('public/app.css', 'utf8');
+
+  assert.match(html, /id="harness-adaptive-search"/);
+  assert.match(html, /Adaptive Search/);
+  assert.match(html, /id="harness-adaptive-selected-arm"/);
+  assert.match(html, /id="harness-adaptive-mode"/);
+  assert.match(html, /id="harness-adaptive-reward"/);
+  assert.match(html, /id="harness-adaptive-arm-balance"/);
+  assert.match(html, /id="harness-skill-candidate-review"/);
+  assert.match(html, /Skill Candidate Review/);
+  assert.match(html, /id="harness-skill-candidates"/);
+  assert.match(html, /id="harness-abmcts-replay-results"/);
+  assert.match(html, /AB-MCTS Replay Results/);
+  assert.match(html, /id="harness-abmcts-decisions"/);
+
+  assert.match(appJs, /harness_adaptive_search_status_get/);
+  assert.match(appJs, /harness_adaptive_search_status/);
+  assert.match(appJs, /harness_skill_candidates_get/);
+  assert.match(appJs, /harness_skill_candidates/);
+  assert.match(appJs, /harness_skill_candidate_review/);
+  assert.match(appJs, /harness_abmcts_replay/);
+  assert.match(appJs, /renderHarnessAdaptiveSearch/);
+  assert.match(appJs, /renderHarnessSkillCandidates/);
+  assert.match(appJs, /renderHarnessAbMctsReplay/);
+  assert.match(appJs, /data-skill-candidate-action="approve"/);
+  assert.match(appJs, /data-skill-candidate-action="reject"/);
+
+  assert.match(css, /\.harness-adaptive-search/);
+  assert.match(css, /\.harness-skill-candidate/);
+  assert.match(css, /\.harness-abmcts-decision/);
+});
+
 test('harness tools live in a persistent left side panel outside the chat feed', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const css = await readFile('public/app.css', 'utf8');
@@ -192,6 +227,6 @@ test('harness panel exposes verifier evolution operator visibility', async () =>
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250619/);
-  assert.match(html, /app\.js\?v=20250619/);
+  assert.match(html, /app\.css\?v=20250620/);
+  assert.match(html, /app\.js\?v=20250620/);
 });
