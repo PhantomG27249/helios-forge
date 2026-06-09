@@ -22,6 +22,7 @@ import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
 import { archiveChampion, createChampionArchive, selectBestChampion } from './bes/championArchive.js';
 import { createAttemptGenome } from './bes/attemptGenome.js';
+import { replayAdaptiveSearchSelection, summarizeAdaptiveSearchEvents } from './bes/adaptiveSearchApi.js';
 import { createDiversityTracker } from './bes/diversityTracker.js';
 import { runBidirectionalBes } from './bes/bidirectionalSearchLoop.js';
 import { runEvolutionPopulationSync } from './bes/evolutionPopulationRunner.js';
@@ -94,6 +95,13 @@ import { createScreenshotArtifact } from './vlm/screenshotTool.js';
 import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
 import { runVisualModelObservation } from './vlm/visualModelRunner.js';
+import { listSkillCandidates, readSkillCandidate } from './skills/skillCandidateStore.js';
+import {
+  approveSkillCandidateForReview,
+  redactSkillCandidatePayload,
+  rejectSkillCandidateForReview,
+  summarizeSkillCandidate,
+} from './skills/skillCandidateReview.js';
 
 const VERSION = '0.1.0';
 const CAPABILITY_STORE_MODULE = './capabilities/capabilityStore.js';
@@ -2291,6 +2299,65 @@ export function createHarnessSidecar({
     };
   }
 
+  async function getAdaptiveSearchStatus({ taskId, limit } = {}) {
+    if (taskId) {
+      const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId });
+      return summarizeAdaptiveSearchEvents({
+        taskId: trace.taskId,
+        events: trace.events,
+        limit,
+      });
+    }
+
+    const traces = await listTraces({ workspaceRoot: resolvedWorkspaceRoot });
+    const summaries = [];
+    for (const traceEntry of traces.slice(0, Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 25)) {
+      const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId: traceEntry.taskId });
+      const summary = summarizeAdaptiveSearchEvents({
+        taskId: trace.taskId,
+        events: trace.events,
+        limit: 5,
+      });
+      if (summary.eventCount > 0) summaries.push(summary);
+    }
+    return {
+      taskId: null,
+      traceCount: summaries.length,
+      summaries,
+    };
+  }
+
+  async function prepareAdaptiveSearchReplay(body = {}) {
+    let events = Array.isArray(body.events) ? body.events : [];
+    let taskId = body.taskId || body.context?.taskId || null;
+    if (taskId) {
+      const trace = await readTrace({ workspaceRoot: resolvedWorkspaceRoot, taskId });
+      events = events.length ? events : trace.events;
+      taskId = trace.taskId;
+    }
+    return replayAdaptiveSearchSelection({
+      events,
+      taskId,
+      context: body.context || {},
+      evidence: body.evidence,
+      schedulerState: body.scheduler,
+      policy: body.policy,
+      rng: () => 0,
+    });
+  }
+
+  async function listSkillCandidateSummaries() {
+    const candidates = await listSkillCandidates({ workspaceRoot: resolvedWorkspaceRoot });
+    return {
+      candidates: candidates.map((candidate) => summarizeSkillCandidate(candidate)),
+    };
+  }
+
+  async function getSkillCandidateReviewDetail(candidateId) {
+    const candidate = await readSkillCandidate({ workspaceRoot: resolvedWorkspaceRoot, candidateId });
+    return redactSkillCandidatePayload(candidate);
+  }
+
   async function handleRequest(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
@@ -2379,6 +2446,86 @@ export function createHarnessSidecar({
         try {
           const body = await readJsonBody(req);
           const result = await prepareTraceReplay(decodeURIComponent(traceReplayMatch[1]), body);
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/adaptive-search/status') {
+        try {
+          const result = await getAdaptiveSearchStatus({
+            taskId: url.searchParams.get('taskId'),
+            limit: Number(url.searchParams.get('limit')),
+          });
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/adaptive-search/replay') {
+        try {
+          const body = await readJsonBody(req);
+          const result = await prepareAdaptiveSearchReplay(body);
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/skill-candidates') {
+        try {
+          const result = await listSkillCandidateSummaries();
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      const skillCandidateMatch = url.pathname.match(/^\/v1\/skill-candidates\/([^/]+)$/);
+      if (req.method === 'GET' && skillCandidateMatch) {
+        try {
+          const result = await getSkillCandidateReviewDetail(decodeURIComponent(skillCandidateMatch[1]));
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      const skillCandidateApproveMatch = url.pathname.match(/^\/v1\/skill-candidates\/([^/]+)\/approve$/);
+      if (req.method === 'POST' && skillCandidateApproveMatch) {
+        try {
+          const body = await readJsonBody(req);
+          const result = await approveSkillCandidateForReview({
+            workspaceRoot: resolvedWorkspaceRoot,
+            candidateId: decodeURIComponent(skillCandidateApproveMatch[1]),
+            approver: body.approver || body.reviewer || 'human',
+            baselineFrontier: body.baselineFrontier || [],
+            skillPolicy: body.skillPolicy || {},
+          });
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      const skillCandidateRejectMatch = url.pathname.match(/^\/v1\/skill-candidates\/([^/]+)\/reject$/);
+      if (req.method === 'POST' && skillCandidateRejectMatch) {
+        try {
+          const body = await readJsonBody(req);
+          const result = await rejectSkillCandidateForReview({
+            workspaceRoot: resolvedWorkspaceRoot,
+            candidateId: decodeURIComponent(skillCandidateRejectMatch[1]),
+            reviewer: body.reviewer || body.approver || 'human',
+            reason: body.reason,
+          });
           sendJson(res, 200, result);
         } catch (error) {
           sendBadRequest(res, error);
