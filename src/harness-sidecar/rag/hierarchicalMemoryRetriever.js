@@ -1,3 +1,5 @@
+import { retrieveMemoryAwareGraphContext } from './memoryAwareGraphRetriever.js';
+
 export const HIERARCHICAL_MEMORY_RETRIEVER_SCHEMA_VERSION = 1;
 
 function normalizeList(value) {
@@ -43,7 +45,17 @@ function factId(fact = {}) {
 }
 
 function itemSort(left, right) {
-  const priority = { active_fact: 0, stable_schema: 1, passage: 2, pending_fact: 3 };
+  const priority = {
+    active_fact: 0,
+    stable_schema: 1,
+    passage: 2,
+    graph_summary: 3,
+    bridge: 4,
+    graph_fact: 5,
+    graph_schema: 6,
+    graph_passage: 7,
+    pending_fact: 8,
+  };
   return (
     (priority[left.kind] ?? 9) - (priority[right.kind] ?? 9)
     || right.score - left.score
@@ -107,22 +119,71 @@ function graphSummaryItem(graph = {}, terms) {
   };
 }
 
+function graphContextKind(item = {}) {
+  if (item.kind === 'entity' || item.reasons?.includes('bridge_only')) return 'bridge';
+  if (item.kind === 'fact') return 'graph_fact';
+  if (item.kind === 'schema') return 'graph_schema';
+  if (item.kind === 'passage') return 'graph_passage';
+  return `graph_${item.kind || item.type || 'item'}`;
+}
+
+function graphContextText(item = {}) {
+  return item.summary || item.label || item.text || item.sourceLabel || item.id || '';
+}
+
+function graphContextItem(item = {}) {
+  return {
+    id: item.sourceLabel || item.id,
+    kind: graphContextKind(item),
+    score: Number(item.score) || 0,
+    text: graphContextText(item),
+    provenance: uniqueSorted(item.provenance),
+    source: item.source,
+    sourceLabel: item.sourceLabel,
+    reasons: normalizeList(item.reasons),
+    status: item.status,
+  };
+}
+
+function resolveLayersAndGraph({ layers, graph, snapshot }) {
+  return {
+    layers: layers || snapshot?.layers || snapshot?.globalLayers || {},
+    graph: graph || snapshot?.graph || snapshot?.memoryGraph || {},
+  };
+}
+
 export function retrieveHierarchicalMemoryContext({
   query,
-  layers = {},
-  graph = {},
+  layers,
+  graph,
+  snapshot,
   maxItems = 8,
+  budgets = {},
 } = {}) {
   const terms = queryTerms(query);
   const limit = Math.max(0, Math.floor(Number(maxItems) || 8));
-  const schemas = normalizeList(layers.schemas);
-  const facts = normalizeList(layers.facts);
-  const passages = normalizeList(layers.passages);
+  const resolved = resolveLayersAndGraph({ layers, graph, snapshot });
+  const schemas = normalizeList(resolved.layers.schemas);
+  const facts = normalizeList(resolved.layers.facts);
+  const passages = normalizeList(resolved.layers.passages);
+  const graphItemLimit = Math.max(0, Math.floor(Number(budgets.graphItems ?? budgets.maxGraphItems ?? 4) || 4));
+  const graphItems = retrieveMemoryAwareGraphContext({
+    graph: resolved.graph,
+    query,
+    maxItems: Math.max(graphItemLimit, limit, 8),
+    restartProbability: budgets.restartProbability,
+    iterations: budgets.iterations,
+    maxBridgeItems: budgets.maxBridgeItems,
+  })
+    .map(graphContextItem)
+    .sort(itemSort)
+    .slice(0, graphItemLimit);
   const items = [
     ...facts.map((fact) => factItem(fact, terms)),
     ...schemas.filter((schema) => schema.status === 'stable').map((schema) => schemaItem(schema, terms)),
     ...passages.map((passage) => passageItem(passage, terms)),
-    graphSummaryItem(graph, terms),
+    graphSummaryItem(resolved.graph, terms),
+    ...graphItems,
   ]
     .filter((item) => item.score > 0)
     .sort(itemSort)
@@ -138,9 +199,10 @@ export function retrieveHierarchicalMemoryContext({
       schemaCount: schemas.length,
       stableSchemaCount: schemas.filter((schema) => schema.status === 'stable').length,
       factCount: facts.length,
-      activeFactCount: graph.stats?.activeFactCount ?? activeFactCount,
+      activeFactCount: resolved.graph.stats?.activeFactCount ?? activeFactCount,
       passageCount: passages.length,
-      graphStats: graph.stats || {},
+      bridgeCount: resolved.graph.stats?.bridgeCount ?? 0,
+      graphStats: resolved.graph.stats || {},
     },
   };
 }

@@ -11,6 +11,7 @@ import {
   upsertPassage,
   upsertSchema,
 } from '../src/harness-sidecar/memory/globalMemoryLayers.js';
+import { constructMemoryGuidedGraph } from '../src/harness-sidecar/memory/memoryGraphConstructor.js';
 import {
   addLocalObservation,
   createLocalMemoryGraph,
@@ -147,4 +148,40 @@ test('hierarchical memory retriever returns active facts passages and summary co
   assert.equal(context.items.some((item) => item.kind === 'passage'), true);
   assert.equal(context.items.some((item) => item.kind === 'graph_summary'), true);
   assert.equal(context.summary.activeFactCount, 1);
+});
+
+test('hierarchical memory retriever accepts snapshots budgets and graph bridge context', () => {
+  const layers = createGlobalMemoryLayers();
+  upsertPassage(layers, { passageId: 'p1', text: 'Module A requires feature B.' });
+  upsertPassage(layers, { passageId: 'p2', text: 'Module C requires feature B.' });
+  upsertSchema(layers, { headType: 'module', relation: 'requires', tailType: 'feature', frequency: 2 });
+  upsertFact(layers, {
+    subject: 'Module A',
+    subjectType: 'module',
+    relation: 'requires',
+    object: 'Feature B',
+    objectType: 'feature',
+    passageIds: ['p1'],
+  });
+  upsertFact(layers, {
+    subject: 'Module C',
+    subjectType: 'module',
+    relation: 'requires',
+    object: 'Feature B',
+    objectType: 'feature',
+    passageIds: ['p2'],
+  });
+  activateStableSchemas({ layers, schemaThreshold: 2 });
+  const graph = constructMemoryGuidedGraph({ layers });
+
+  const context = retrieveHierarchicalMemoryContext({
+    query: 'Module A requires Feature B',
+    snapshot: { layers, graph },
+    maxItems: 8,
+    budgets: { graphItems: 3, maxBridgeItems: 2, iterations: 8 },
+  });
+
+  assert.equal(context.items.some((item) => item.kind === 'bridge'), true);
+  assert.equal(context.items.some((item) => item.source === 'memory_graph'), true);
+  assert.equal(context.summary.bridgeCount >= 1, true);
 });
