@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Expand BES optimization from the current meta/verifier spine into every existing harness evolution layer while keeping all durable application behind RHO replay, global experiment evidence, trust-kernel checks, and operator approval.
+**Goal:** Expand BES optimization into a nested swarm-of-swarms and harness-of-harnesses architecture where every agent, SwarmCell, swarm, local harness, and global harness can evolve through shared optimization effects while remaining linked by A2A envelopes and Memory Graph RAG layers.
 
-**Architecture:** Add one shared BES lane runtime adapter that wraps lane contracts, bidirectional BES, population evolution, dense subgoal verification, lineage, and optional RHO replay evidence. Existing shadow policy evolvers stay responsible for domain-specific candidate generation, while the new adapter gives each layer a common optimization/evidence envelope. Promotion authority remains centralized: local and lane-level BES can propose, score, and archive candidates, but only global experiments plus trust gates can promote or apply them.
+**Architecture:** Treat Helios Forge as a recursive evolving harness mesh. Agents form SwarmCells; SwarmCells form swarms; swarms run local harnesses; local harnesses report into global harnesses; harnesses can themselves be candidates optimized by higher-level harnesses. A2A-style envelopes carry task, evidence, lineage, and candidate messages between these layers, while local, SwarmCell, and global Memory Graph RAG layers preserve context and hard-case memory. A shared BES lane runtime becomes the optimization substrate inside each layer, wrapping RHO, bidirectional BES, population evolution, adaptive search, ToolTree planning, trajectory operators, dense subgoals, champion archives, Pareto/frontier scoring, and verifier-genome evolution into promotion-safe evidence envelopes. Promotion authority remains centralized: local and lane-level BES can propose, score, replay, and archive candidates, but only global experiments plus trust gates can promote or apply them.
 
-**Tech Stack:** Node.js ESM, built-in `node:test`, existing Helios Forge sidecar modules under `src/harness-sidecar/{bes,meta,memory,rho,skills,swarm,research,tools,budget,vlm,core}`, workspace-local `.harness` artifacts, PowerShell on Windows.
+**Tech Stack:** Node.js ESM, built-in `node:test`, existing Helios Forge sidecar modules under `src/harness-sidecar/{bes,meta,memory,rho,skills,swarm,research,tools,budget,vlm,core,interop,rag}`, workspace-local `.harness` artifacts, PowerShell on Windows.
 
 ---
 
@@ -28,6 +28,13 @@ Read these first:
 - `src/harness-sidecar/rho/replayBatchRunner.js`
 - `src/harness-sidecar/meta/harnessExperimentRunner.js`
 - `src/harness-sidecar/core/trustKernelBoundary.js`
+- `src/harness-sidecar/interop/a2aSwarmEnvelope.js`
+- `src/harness-sidecar/interop/agentRouter.js`
+- `src/harness-sidecar/interop/externalAgentGateway.js`
+- `src/harness-sidecar/memory/localMemoryGraph.js`
+- `src/harness-sidecar/memory/swarmCellMemoryGraph.js`
+- `src/harness-sidecar/memory/memoryGraphRuntime.js`
+- `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`
 
 ## Coordination Rules For Subagents
 
@@ -41,6 +48,8 @@ Read these first:
 - Prefer new small modules over inflating `src/harness-sidecar/server.js` or existing domain evolvers.
 - Preserve the existing shadow-only behavior of domain policy candidates.
 - BES lane output may request evaluation or promotion, but it must not mark itself applied, approved, or trusted.
+- A2A envelopes are transport and provenance records only. They must not grant authority, bypass trust gates, or turn external agent claims into accepted facts.
+- Memory Graph RAG layers are context and evidence routing layers only. Global memory promotion still requires provenance, conflict checks, and approval policy.
 - Do not add package dependencies or network calls.
 - Do not stage unrelated dirty files. At plan creation time, `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md` may already be dirty from prior work; leave it alone unless the operator explicitly scopes it in.
 - Commit after each chunk with the commit messages listed below.
@@ -53,6 +62,42 @@ Recommended commit messages:
 - `feat: surface bes lane evolution evidence`
 - `fix: harden bes lane promotion boundaries`
 
+## System Vision: Nested Evolving Swarm Mesh
+
+The target shape is an evolving swarm of swarms with evolving harnesses attached at multiple levels:
+
+1. **Agent level:** a single worker can record hard cases, local evidence, candidate improvements, and lineage.
+2. **SwarmCell level:** a role-bound group of agents maintains local memory, local BES/RHO evidence, and local evolution proposals.
+3. **Swarm level:** a coordinated set of SwarmCells optimizes role assignment, handoff contracts, retry strategy, budget, and verification coverage.
+4. **Local harness level:** a local meta-harness evaluates SwarmCell and swarm candidates against local hard cases, then emits evidence-only candidates.
+5. **Global harness level:** the global meta-harness compares candidates across swarms, runs RHO replay and harness experiments, updates frontiers, and prepares promotion evidence.
+6. **Harness-of-harnesses level:** harness configurations, verifier genomes, memory policies, research policies, skill policies, tool policies, and coordination policies are themselves candidates that can be optimized by the same BES lane runtime.
+
+The layers communicate through A2A-style envelopes and Memory Graph RAG:
+
+- A2A envelopes carry task intent, candidate summaries, evidence references, lineage, trust metadata, and required verification contracts.
+- Local memory graphs capture short-lived agent and SwarmCell context.
+- SwarmCell memory graphs merge local evidence into role-specific hard-case memory.
+- Global Memory Graph RAG promotes stable, provenance-backed facts and retrieves cross-swarm lessons for future tasks.
+- RHO coresets are built from hard cases found at any layer.
+- BES lane runtime consumes the hard cases, memory graph context, A2A lineage, and domain evaluator outputs to produce evidence-only candidates.
+
+## Optimization Effects Covered
+
+This plan must treat these as first-class optimization effects, not background implementation details:
+
+- **RHO coreset and replay:** hard-case mining, grouped replay, self-validation, self-consistency, and self-preference.
+- **Bidirectional BES:** forward candidate generation plus backward goal/subgoal pressure.
+- **Population evolution:** mutation, recombination, diversity tracking, island/frontier behavior, and champion archive metadata.
+- **AB-MCTS/adaptive search:** scheduler actions, search-policy outcomes, and budget-aware exploration/exploitation decisions.
+- **ToolTree planning:** tool/path planning candidates where task execution or recovery depends on tool sequences.
+- **Shinka-style trajectory operators:** expansion, deletion, translocation, crossover, and recombination provenance.
+- **Dense subgoal verification:** per-lane subgoals used as structured evidence, not only aggregate scores.
+- **Verifier-genome evolution:** rubric, threshold, selector, timeout, VLM, and evidence-case mutations.
+- **Pareto/frontier scoring:** global comparison across quality, safety, reliability, cost, latency, maintainability, and trust risk.
+- **Memory Graph RAG effects:** graph construction, conflict adjudication, bridge/retrieval tuning, promotion policy, and hierarchical retrieval context.
+- **A2A interop effects:** external/internal agent routing, delegated evidence, lineage preservation, and trust metadata propagation.
+
 ## Safety Invariants
 
 Every chunk must preserve these invariants:
@@ -60,6 +105,8 @@ Every chunk must preserve these invariants:
 - Local SwarmCell BES outputs are proposals only.
 - Lane BES outputs are candidates only.
 - Memory, research, skill, swarm, tool, context, budget, visual, and MCP trust lanes remain `shadow_only` unless a separate promotion path approves them.
+- A2A-provided claims are untrusted until independently validated or backed by accepted memory/provenance.
+- Memory Graph RAG can retrieve and route evidence, but cannot promote memories without provenance and conflict adjudication.
 - Source patch candidates must include file path metadata before trust-kernel evaluation.
 - Candidate evidence must include at least one of: dense subgoal result, RHO replay result, domain evaluator result, or harness experiment comparison.
 - Failed RHO validation, missing provenance, or trust-kernel boundary violations block promotion evidence.
@@ -70,7 +117,7 @@ Every chunk must preserve these invariants:
 ### New Files
 
 - `src/harness-sidecar/bes/laneRuntime.js`
-  - Shared BES lane adapter. Normalizes lane inputs, runs BES/evolution, scores dense subgoals, records lineage, attaches optional RHO replay evidence, and returns promotion-safe candidate envelopes.
+  - Shared BES lane adapter. Normalizes lane inputs, reads optional A2A lineage and Memory Graph RAG context, runs BES/evolution effects, scores dense subgoals, records lineage, attaches optional RHO replay evidence, and returns promotion-safe candidate envelopes.
 - `src/harness-sidecar/bes/laneEvidence.js`
   - Small helpers for evidence normalization, required evidence checks, and blocked/passing evidence summaries.
 - `tests/harness-bes-lane-runtime.test.js`
@@ -81,6 +128,8 @@ Every chunk must preserve these invariants:
   - Memory/research/skill/swarm lane tests.
 - `tests/harness-bes-lane-visibility.test.js`
   - Server/UI/status payload tests for lane visibility.
+- `tests/harness-bes-nested-swarm-mesh.test.js`
+  - Cross-layer tests proving A2A envelopes, Memory Graph RAG context, RHO replay, and BES lane evidence can flow through agent, SwarmCell, swarm, local harness, and global harness layers without granting apply authority.
 
 ### Existing Files To Modify
 
@@ -110,6 +159,13 @@ Every chunk must preserve these invariants:
   - Add optional BES lane evaluation hooks for memory and research candidates.
 - `src/harness-sidecar/server.js`
   - Surface lane runtime output in status/events without taking promotion authority.
+- `src/harness-sidecar/interop/a2aSwarmEnvelope.js`
+  - Preserve BES lane, RHO, memory graph, and trust metadata in A2A envelopes.
+- `src/harness-sidecar/interop/agentRouter.js`
+- `src/harness-sidecar/interop/externalAgentGateway.js`
+  - Route nested harness/swarm messages without converting external claims into accepted evidence.
+- `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`
+  - Provide lane runtime context from local, SwarmCell, and global memory graph layers.
 - `docs/architecture/hierarchical-self-modifying-swarm-synthesis.md`
 - `docs/architecture/feature-architecture-map.md`
 - `docs/architecture/paper-implementation-alignment.md`
@@ -225,8 +281,16 @@ export function normalizeLaneEvidence({
   rhoReplay = null,
   domainEvaluation = null,
   harnessExperiment = null,
+  adaptiveSearch = null,
+  toolTree = null,
+  trajectoryOperators = [],
+  championArchive = null,
+  frontier = null,
+  verifierGenome = null,
+  memoryGraph = null,
+  a2a = null,
 } = {}) {
-  // returns { sources, hasPassingEvidence, blockedReasons, denseSubgoals, rhoReplay, domainEvaluation, harnessExperiment }
+  // returns { sources, hasPassingEvidence, blockedReasons, denseSubgoals, rhoReplay, domainEvaluation, harnessExperiment, adaptiveSearch, toolTree, trajectoryOperators, championArchive, frontier, verifierGenome, memoryGraph, a2a }
 }
 
 export function blocksFromCandidateAuthority(candidate = {}) {
@@ -242,6 +306,8 @@ Rules:
 
 - `hasPassingEvidence` is true when at least one evidence source passes.
 - A failed `rhoReplay.validation.passed === false` must add `rho_validation_failed`.
+- A2A evidence is a reference source only; it must not count as passing evidence unless backed by domain, RHO, harness experiment, dense subgoal, or accepted memory graph evidence.
+- Memory graph evidence counts only when it includes provenance or a promotion record.
 - `candidate.applied === true`, `candidate.durableApplyApproved === true`, `candidate.promotion?.allowed === true`, or `candidate.status` of `approved`/`applied` must add `lane_candidate_cannot_self_apply`.
 - MCP trust candidates that lower trust, widen permissions, or disable poisoning checks must add `trust_boundary_violation` unless the domain evaluator explicitly blocks them first.
 - Promotion summary must always return `allowed: false`; this adapter is evidence-only.
@@ -271,6 +337,9 @@ export function runBesLaneRuntime({
   hardCases = [],
   baselinePolicy = {},
   parentCandidates = [],
+  a2aEnvelope = null,
+  memoryGraphContext = null,
+  optimizationEffects = {},
   evaluator,
   replayRunner,
   maxCandidates = 4,
@@ -284,14 +353,24 @@ Implementation requirements:
 
 - Call `getBesLaneContract(lane)` to validate the lane.
 - Build subgoals from hard-case reasons and target.
+- Accept optional A2A lineage, delegated evidence references, and memory graph context without treating them as trusted facts by default.
+- Accept optional optimization effect summaries:
+  - `adaptiveSearch`
+  - `toolTree`
+  - `trajectoryOperators`
+  - `championArchive`
+  - `frontier`
+  - `verifierGenome`
 - For each candidate:
   - preserve `candidateId`, `status`, `target`, and existing domain fields;
   - evaluate with the provided `evaluator` if present;
   - run optional `replayRunner` if present;
   - call `verifyDenseSubgoals` or `scoreSubgoals` with evidence derived from domain/RHO results;
   - record lineage with `recordLineage`;
-  - attach `bes`, `evidence`, `lineage`, and `promotion` fields.
+  - attach `bes`, `evidence`, `lineage`, `a2a`, `memoryGraph`, `optimizationEffects`, and `promotion` fields.
 - Run `runBidirectionalBes` and `runEvolutionPopulationSync` only as lightweight optimization summaries; do not require these to generate domain candidates.
+- Preserve Shinka/trajectory operator provenance when candidate ancestry includes expansion, deletion, translocation, crossover, or recombination.
+- Preserve champion archive, adaptive search, ToolTree, verifier genome, and Pareto/frontier metadata when provided by callers.
 - Return no more than `maxCandidates` candidate envelopes.
 - Empty candidate lists should return a valid lane result with `candidates: []`, not throw.
 
@@ -739,7 +818,12 @@ git commit -m "feat: expand bes lanes to memory research skill and swarm"
 **Files:**
 
 - Create: `tests/harness-bes-lane-visibility.test.js`
+- Create: `tests/harness-bes-nested-swarm-mesh.test.js`
 - Modify: `src/harness-sidecar/server.js`
+- Modify: `src/harness-sidecar/interop/a2aSwarmEnvelope.js`
+- Modify: `src/harness-sidecar/interop/agentRouter.js`
+- Modify: `src/harness-sidecar/interop/externalAgentGateway.js`
+- Modify: `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`
 - Modify: `docs/architecture/hierarchical-self-modifying-swarm-synthesis.md`
 - Modify: `docs/architecture/feature-architecture-map.md`
 - Modify: `docs/architecture/paper-implementation-alignment.md`
@@ -830,12 +914,131 @@ node --test tests/harness-bes-lane-visibility.test.js tests/harness-ui-discovera
 
 Expected: PASS.
 
-### Task 3: Update Architecture Docs
+### Task 3: Add Nested Swarm Mesh Regression
+
+- [ ] **Step 1: Write failing mesh test**
+
+Create `tests/harness-bes-nested-swarm-mesh.test.js`:
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createA2aSwarmEnvelope } from '../src/harness-sidecar/interop/a2aSwarmEnvelope.js';
+import { runBesLaneRuntime } from '../src/harness-sidecar/bes/laneRuntime.js';
+
+test('A2A and Memory Graph RAG context flow through a BES lane without granting authority', () => {
+  const envelope = createA2aSwarmEnvelope({
+    taskId: 'task-nested-mesh',
+    from: { type: 'swarmcell', id: 'cell-research' },
+    to: { type: 'global_harness', id: 'global-meta' },
+    payload: {
+      candidateRef: 'candidate-1',
+      evidenceRefs: ['rho-case-1', 'memory-fact-1'],
+      lineage: { parents: ['agent-1', 'agent-2'] },
+      trust: { external: false, verified: false },
+    },
+  });
+
+  const result = runBesLaneRuntime({
+    lane: 'research',
+    taskId: 'task-nested-mesh',
+    a2aEnvelope: envelope,
+    memoryGraphContext: {
+      local: { nodeIds: ['local-hard-case-1'] },
+      swarmCell: { nodeIds: ['cell-lesson-1'] },
+      global: { nodeIds: ['global-pattern-1'], provenance: ['trace-1'] },
+    },
+    candidates: [{ candidateId: 'candidate-1', status: 'shadow_only' }],
+    hardCases: [{ caseId: 'rho-case-1', reasons: ['citation_gap'] }],
+    evaluator: () => ({
+      score: 0.75,
+      reasons: ['citation_gap_addressed'],
+      safetyStatus: 'shadow_only',
+    }),
+  });
+
+  assert.equal(result.candidates[0].promotion.allowed, false);
+  assert.equal(result.candidates[0].a2a.payload.candidateRef, 'candidate-1');
+  assert.deepEqual(result.candidates[0].memoryGraph.global.nodeIds, ['global-pattern-1']);
+  assert.ok(result.candidates[0].lineage.candidateId);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run:
+
+```powershell
+node --test tests/harness-bes-nested-swarm-mesh.test.js
+```
+
+Expected: FAIL until A2A envelope metadata and lane runtime context preservation are implemented.
+
+- [ ] **Step 3: Preserve A2A lane metadata**
+
+Modify `a2aSwarmEnvelope.js`, `agentRouter.js`, and `externalAgentGateway.js` so nested harness/swarm messages can carry:
+
+```js
+{
+  besLane,
+  rhoCaseIds,
+  memoryGraphRefs,
+  candidateRef,
+  lineage,
+  trust,
+  requiredVerification,
+}
+```
+
+Rules:
+
+- The envelope can carry references, not full raw patches, secrets, raw prompts, or untrusted webpage/model text.
+- External A2A claims must be tagged as untrusted until verified.
+- Missing `requiredVerification` should keep candidates visible but not promotable.
+- Routing must preserve lineage across agent, SwarmCell, swarm, local harness, and global harness hops.
+
+- [ ] **Step 4: Preserve Memory Graph RAG context**
+
+Modify `hierarchicalMemoryRetriever.js` so lane runtime callers can request a compact context packet:
+
+```js
+{
+  local,
+  swarmCell,
+  global,
+  provenance,
+  conflicts,
+  retrievalTrace,
+}
+```
+
+Rules:
+
+- Context packets should be bounded and summary-oriented.
+- Conflict flags must be preserved.
+- Provenance must travel with global facts.
+- The lane runtime may use this as evidence context, but memory promotion remains separate.
+
+- [ ] **Step 5: Run mesh tests**
+
+Run:
+
+```powershell
+node --test tests/harness-bes-nested-swarm-mesh.test.js tests/harness-agent-interop.test.js tests/harness-local-global-memory-graph.test.js tests/harness-hierarchical-swarm-integration.test.js
+```
+
+Expected: PASS.
+
+### Task 4: Update Architecture Docs
 
 - [ ] **Step 1: Update `hierarchical-self-modifying-swarm-synthesis.md`**
 
 Add a subsection under evolutionary loops:
 
+- "Nested Evolving Swarm Mesh"
+  - explain agent -> SwarmCell -> swarm -> local harness -> global harness -> harness-of-harnesses recursion
+  - explain that harnesses are themselves evolvable candidates
+  - explain that A2A envelopes and Memory Graph RAG are the connective tissue between levels
 - "BES Lane Expansion"
 - list all lanes and sublanes:
   - code
@@ -860,6 +1063,9 @@ Add rows for:
 - policy-evolver BES lane wrappers
 - domain BES lane wrappers
 - lane visibility/events
+- nested swarm/harness mesh
+- A2A envelope metadata for BES/RHO/memory graph lineage
+- Memory Graph RAG context packets for lane runtime
 
 - [ ] **Step 3: Update `paper-implementation-alignment.md`**
 
@@ -867,12 +1073,13 @@ Clarify that this is still a deterministic first-pass implementation:
 
 - BES lane runtime exists.
 - Domain lanes are candidates/evidence, not autonomous self-modification.
+- A2A plus Memory Graph RAG links the evolving harness layers, but external claims remain untrusted until verified.
 - Paper-grade multi-agent societies and learned optimizers remain future work unless separately implemented.
 
 - [ ] **Step 4: Commit**
 
 ```powershell
-git add src/harness-sidecar/server.js tests/harness-bes-lane-visibility.test.js docs/architecture/hierarchical-self-modifying-swarm-synthesis.md docs/architecture/feature-architecture-map.md docs/architecture/paper-implementation-alignment.md
+git add src/harness-sidecar/server.js src/harness-sidecar/interop/a2aSwarmEnvelope.js src/harness-sidecar/interop/agentRouter.js src/harness-sidecar/interop/externalAgentGateway.js src/harness-sidecar/rag/hierarchicalMemoryRetriever.js tests/harness-bes-lane-visibility.test.js tests/harness-bes-nested-swarm-mesh.test.js docs/architecture/hierarchical-self-modifying-swarm-synthesis.md docs/architecture/feature-architecture-map.md docs/architecture/paper-implementation-alignment.md
 git commit -m "feat: surface bes lane evolution evidence"
 ```
 
@@ -892,6 +1099,7 @@ git commit -m "feat: surface bes lane evolution evidence"
 - Modify: `tests/harness-rho-replay-batch.test.js`
 - Modify: `tests/harness-bes-policy-lanes.test.js`
 - Modify: `tests/harness-bes-domain-lanes.test.js`
+- Modify: `tests/harness-bes-nested-swarm-mesh.test.js`
 
 ### Task 1: Add Boundary Regression Cases
 
@@ -937,12 +1145,21 @@ Expected: candidate remains visible but blocked.
 
 In `tests/harness-trust-kernel-boundary.test.js`, ensure a code lane candidate without source patch path metadata cannot create promotion evidence.
 
+- [ ] **Step 5: Add A2A and memory graph trust regression**
+
+In `tests/harness-bes-nested-swarm-mesh.test.js`, add cases proving:
+
+- an external A2A envelope cannot become passing evidence by itself;
+- a memory graph fact without provenance cannot unlock promotion evidence;
+- conflict flags from Memory Graph RAG stay visible in the lane envelope;
+- lineage survives multiple hops without granting apply authority.
+
 ### Task 2: Run Focused Regression
 
 - [ ] **Step 1: Run BES lane tests**
 
 ```powershell
-node --test tests/harness-bes-lane-runtime.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js tests/harness-bes-lane-contracts.test.js
+node --test tests/harness-bes-lane-runtime.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js tests/harness-bes-nested-swarm-mesh.test.js tests/harness-bes-lane-contracts.test.js
 ```
 
 Expected: PASS.
@@ -966,7 +1183,7 @@ Expected: PASS.
 - [ ] **Step 4: Run broad sidecar sweep**
 
 ```powershell
-node --test tests/harness-swarm-runtime.test.js tests/harness-swarm-model-worker.test.js tests/harness-swarm-pi-native-worker.test.js tests/harness-local-meta-harness.test.js tests/harness-local-global-memory-graph.test.js tests/harness-hierarchical-swarm-integration.test.js tests/harness-ui-discoverability.test.js tests/harness-sidecar.test.js
+node --test tests/harness-swarm-runtime.test.js tests/harness-swarm-model-worker.test.js tests/harness-swarm-pi-native-worker.test.js tests/harness-local-meta-harness.test.js tests/harness-local-global-memory-graph.test.js tests/harness-hierarchical-swarm-integration.test.js tests/harness-agent-interop.test.js tests/harness-ui-discoverability.test.js tests/harness-sidecar.test.js
 ```
 
 Expected: PASS.
@@ -990,7 +1207,7 @@ Expected: PASS, except any pre-existing unrelated failure must be documented wit
 - [ ] **Step 7: Commit**
 
 ```powershell
-git add tests/harness-bes-lane-runtime.test.js tests/harness-trust-kernel-boundary.test.js tests/harness-meta-experiment-runs.test.js tests/harness-rho-replay-batch.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js
+git add tests/harness-bes-lane-runtime.test.js tests/harness-trust-kernel-boundary.test.js tests/harness-meta-experiment-runs.test.js tests/harness-rho-replay-batch.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js tests/harness-bes-nested-swarm-mesh.test.js
 git commit -m "fix: harden bes lane promotion boundaries"
 ```
 
@@ -1001,9 +1218,12 @@ git commit -m "fix: harden bes lane promotion boundaries"
 - `runBesLaneRuntime` exists and is covered by tests.
 - Existing shadow policy evolvers can emit BES lane envelopes.
 - Memory, research, skill, and swarm layers can emit BES lane envelopes.
-- BES lane candidates include dense subgoal, domain, RHO, lineage, and promotion summary fields where available.
+- BES lane candidates include dense subgoal, domain, RHO, adaptive search, ToolTree, trajectory operator, champion archive, frontier, verifier genome, A2A, memory graph, lineage, and promotion summary fields where available.
 - BES lane candidates cannot self-apply or self-promote.
 - Failed RHO validation blocks promotion evidence.
+- A2A envelopes link agents, SwarmCells, swarms, local harnesses, and global harnesses without granting authority.
+- Memory Graph RAG context flows into BES lanes with provenance and conflict flags intact.
+- Harnesses themselves can be represented as candidates optimized by higher-level harnesses.
 - MCP trust, source patch, memory provenance, and approval boundaries remain intact.
 - Operator-visible status shows lane evolution evidence without leaking raw prompts, patches, secrets, or untrusted external content.
 - Architecture docs clearly answer: every layer can use BES optimization capabilities, but durable application remains gated.
@@ -1013,7 +1233,7 @@ git commit -m "fix: harden bes lane promotion boundaries"
 Run:
 
 ```powershell
-node --test tests/harness-bes-lane-runtime.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js tests/harness-bes-lane-visibility.test.js tests/harness-bes-lane-contracts.test.js
+node --test tests/harness-bes-lane-runtime.test.js tests/harness-bes-policy-lanes.test.js tests/harness-bes-domain-lanes.test.js tests/harness-bes-nested-swarm-mesh.test.js tests/harness-bes-lane-visibility.test.js tests/harness-bes-lane-contracts.test.js
 ```
 
 Expected: PASS.
@@ -1029,7 +1249,7 @@ Expected: PASS.
 Run:
 
 ```powershell
-node --test tests/harness-trust-kernel-boundary.test.js tests/harness-rho-replay-batch.test.js tests/harness-meta-experiment-runs.test.js tests/harness-local-meta-harness.test.js tests/harness-local-global-memory-graph.test.js tests/harness-hierarchical-swarm-integration.test.js tests/harness-ui-discoverability.test.js tests/harness-sidecar.test.js
+node --test tests/harness-trust-kernel-boundary.test.js tests/harness-rho-replay-batch.test.js tests/harness-meta-experiment-runs.test.js tests/harness-local-meta-harness.test.js tests/harness-local-global-memory-graph.test.js tests/harness-hierarchical-swarm-integration.test.js tests/harness-agent-interop.test.js tests/harness-ui-discoverability.test.js tests/harness-sidecar.test.js
 ```
 
 Expected: PASS.
