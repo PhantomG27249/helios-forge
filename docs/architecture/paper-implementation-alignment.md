@@ -10,8 +10,8 @@ This note compares the current Helios Forge implementation against four papers t
 The purpose is to separate what Helios actually implements from what it borrows conceptually. The short version:
 
 - Helios implements a workspace-local agent harness with sidecar orchestration, traces, RAG, graph/memory primitives, verifiers, swarms, policy evolution, approval gates, and safe apply.
-- Helios implements deterministic, testable first-pass versions of the local/global memory loop, local meta-harness loop, RHO grouped replay signals, BES lane contracts, global harness experiment records, and trust-kernel boundaries.
-- Helios does not yet reproduce the full paper systems end to end. The largest remaining gaps are paper-grade model-assisted graph construction, large-scale RHO diversity selection, full autonomous Meta-Harness code-space search over many runnable harness variants, complete trajectory-level BES semantics in every lane, and durable A2A peer transport.
+- Helios implements deterministic, testable first-pass versions of the local/global memory loop, local meta-harness loop, RHO grouped replay signals, BES lane contracts, global harness experiment records, trust-kernel boundaries, policy evolvers, skill evolution, adaptive search, and local A2A-shaped interop.
+- Helios does not yet reproduce the full paper systems end to end. The largest remaining gaps are paper-grade model-assisted graph construction, large-scale RHO diversity selection, full autonomous Meta-Harness code-space search over many runnable harness variants, a shared BES lane runtime across every subsystem, complete trajectory-level BES semantics in every lane, a concrete harness-of-harnesses candidate schema, and durable A2A peer transport.
 
 ## Status Legend
 
@@ -36,7 +36,7 @@ Helios Forge is not a direct clone of any one paper. It combines ideas from all 
 
 Current implementation update:
 
-The hierarchical swarm meta-harness pass adds the missing sidecar-local skeleton for several loops that this document previously marked as only planned:
+As of June 9, 2026, the hierarchical swarm meta-harness pass adds the missing sidecar-local skeleton for several loops that this document previously marked as only planned:
 
 - `memoryGraphRuntime.js`, `memoryExtractionSociety.js`, local memory graphs, SwarmCell graph merge, global memory promotion, and `hierarchicalMemoryRetriever.js`;
 - `localMetaHarness.js`, local candidate archive, local evolution loop, and local promotion blocker;
@@ -44,6 +44,7 @@ The hierarchical swarm meta-harness pass adds the missing sidecar-local skeleton
 - BES lane contracts, trajectory operators, dense subgoal verifier, and global lineage tracker;
 - harness run store, experiment runner, frontier update, and trust-kernel boundary evaluator;
 - sidecar/runtime/UI event wiring for `local_meta.completed`, `local_memory.proposed`, and experiment visibility.
+- A2A-shaped interop modules, agent routing, external gateway scaffolding, and delegated capability tokens.
 
 These modules intentionally remain deterministic and policy-gated. They close the repo-level "missing module" gaps, but they do not by themselves make Helios a full autonomous reproduction of the research systems.
 
@@ -55,6 +56,27 @@ Primary orientation files:
 - `docs/architecture/rho-bes-evolution-expansion-roadmap.md`
 - `docs/architecture/swarm-evolution-integration-plan.md`
 - `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`
+- `docs/superpowers/plans/2026-06-09-hierarchical-swarm-meta-harness-implementation.md`
+- `docs/superpowers/plans/2026-06-09-bes-lane-expansion-for-harness-layers.md`
+
+## Current Codebase Snapshot
+
+The current codebase has moved from "paper-shaped notes" into a broad deterministic harness substrate. The main implemented clusters are:
+
+| Cluster | Current code anchors | Status |
+| --- | --- | --- |
+| Swarm and SwarmCell loop | `src/harness-sidecar/swarm/swarmCellContracts.js`, `swarmCellRuntime.js`, `swarmOrchestrator.js`, `evolutionSwarmPlanner.js`, `evolutionBudgetAllocator.js` | Implemented deterministic loop with local proposal contracts. |
+| Local meta-harness | `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, `localCandidateArchive.js`, `localPromotionBlocker.js` | Implemented local evidence/proposal loop; no durable apply authority. |
+| Global meta-harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records and frontier comparison; not full autonomous code-space search. |
+| Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton; not yet paper-grade model-assisted graph society. |
+| RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented structured replay evidence; not large-scale learned self-preference optimization. |
+| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives; shared all-lane runtime is planned, not implemented. |
+| Policy evolution | `src/harness-sidecar/meta/contextPolicyEvolution.js`, `compactionPolicyEvolution.js`, `toolLoopPolicyEvolution.js`, `budgetPolicyEvolution.js`, `visualPolicyEvolution.js`, `memoryPolicyEvolution.js`, `mcpTrustEvolution.js`, `researchPolicyEvolution.js` | Implemented shadow-policy generators/evaluators; BES lane wrapping is planned. |
+| Skill evolution | `src/harness-sidecar/skills/skillNeedMiner.js`, `skillEvolution.js`, `skillEvolutionScheduler.js`, `skillCandidateStore.js`, `skillCandidateEvaluator.js`, `skillCandidateApply.js` | Implemented workspace-local skill candidate lifecycle. |
+| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentCards.js`, `agentRouter.js`, `externalAgentGateway.js`, `delegatedCapabilityTokens.js` | Local interop contract and routing scaffolding; not durable peer transport. |
+| Trust kernel and safety | `src/harness-sidecar/core/trustKernelBoundary.js`, `approvalResume.js`, `src/harness-sidecar/security/*`, MCP policy modules | Implemented approval/safety boundaries; optimizers cannot self-authorize durable mutation. |
+
+The newest BES mesh plan should be read as the next composition layer over this substrate. It should not be counted as implemented until `runBesLaneRuntime`, lane evidence wrappers, nested A2A/memory graph tests, and harness-of-harnesses candidate schemas land in code.
 
 ## MemGraphRAG Alignment
 
@@ -99,6 +121,9 @@ Implemented:
   - `src/harness-sidecar/memory/memoryGraphRuntime.js`
 - Hierarchical retrieval:
   - `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`
+- Memory eval and policy evolution surfaces:
+  - `src/harness-sidecar/memory/memoryEvals.js`
+  - `src/harness-sidecar/meta/memoryPolicyEvolution.js`
 - Focused tests:
   - `tests/harness-memgraphrag-construction.test.js`
   - `tests/harness-memory-aware-graph-retriever.test.js`
@@ -112,11 +137,12 @@ Not yet paper-complete:
 - Layer persistence and graph snapshot loading exist, but production memory maintenance still needs broader migration/versioning and larger eval coverage.
 - Hierarchical retrieval exists, including active facts, passages, graph summary, and bridge context, but it still needs deeper task-startup policy tuning.
 - Memory graph evals are not yet implemented for conflict quality, active fact precision, evidence coverage, connectivity, retrieval hit rate, and budget efficiency.
-- RHO/BES/adaptive search do not yet tune schema thresholds, conflict policies, bridge thresholds, or hierarchical retrieval budgets from memory graph evals.
+- RHO/BES/adaptive search do not yet tune schema thresholds, conflict policies, bridge thresholds, or hierarchical retrieval budgets through a shared lane runtime.
+- Memory Graph RAG context is not yet a standardized input packet for every BES lane.
 
 Best next step:
 
-Harden the runtime completion work in `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`. The repo has the runtime skeleton; it now needs broader task-startup integration, eval feedback, migration/versioning coverage, and guarded model-assisted conflict adjudication.
+Harden the runtime completion work in `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`, then connect memory graph context to the BES lane expansion plan. The repo has the runtime skeleton; it now needs broader task-startup integration, eval feedback, migration/versioning coverage, guarded model-assisted conflict adjudication, and lane-runtime context packets that preserve provenance and conflict flags.
 
 ## Meta-Harness Alignment
 
@@ -151,6 +177,15 @@ Implemented:
 - Self-authored skill candidate lifecycle:
   - `src/harness-sidecar/skills/*`
   - `tests/harness-skill-*.test.js`
+- Local and global harness experiment records:
+  - `src/harness-sidecar/meta/localMetaHarness.js`
+  - `src/harness-sidecar/meta/localCandidateArchive.js`
+  - `src/harness-sidecar/meta/harnessRunStore.js`
+  - `src/harness-sidecar/meta/harnessExperimentRunner.js`
+  - `src/harness-sidecar/meta/harnessFrontier.js`
+- Trust-kernel boundary evaluator:
+  - `src/harness-sidecar/core/trustKernelBoundary.js`
+  - `tests/harness-trust-kernel-boundary.test.js`
 
 Not yet paper-complete:
 
@@ -160,10 +195,11 @@ Not yet paper-complete:
 - There is no broad Pareto frontier over full harness implementations evaluated against a stable benchmark suite.
 - The proposer is not yet allowed to inspect arbitrary prior candidate source and trace directories as its primary optimization interface.
 - Current safe-apply policy deliberately prevents self-authorized mutation of active source code.
+- Harness-of-harnesses candidates are currently a planned schema, not an implemented runtime path.
 
 Best next step:
 
-Extend the workspace-local harness experiment abstraction under `.harness/meta/harness-runs/<run-id>/` into larger benchmark sweeps. The run store exists; the next step is to run more candidates against held-out tasks, include richer source/config variants, and keep apply gated.
+Extend the workspace-local harness experiment abstraction under `.harness/meta/harness-runs/<run-id>/` into larger benchmark sweeps, then represent harness policies/configurations as candidates in the BES lane expansion plan. The run store exists; the next step is to run more candidates against held-out tasks, include richer source/config variants, preserve lineage, and keep apply gated.
 
 ## RHO Alignment
 
@@ -197,6 +233,9 @@ Implemented:
   - `src/harness-sidecar/rho/selfConsistency.js`
   - `src/harness-sidecar/rho/selfPreferenceJudge.js`
   - `tests/harness-rho-replay-batch.test.js`
+- Failed validation evidence is explicitly blocking in the hierarchical implementation:
+  - `tests/harness-rho-replay-batch.test.js`
+  - `tests/harness-meta-experiment-runs.test.js`
 
 Not yet paper-complete:
 
@@ -206,6 +245,7 @@ Not yet paper-complete:
 - Candidate harness updates are not generated as N full alternatives and re-solved across the coreset.
 - Pairwise self-preference exists as evidence, but it is not the sole promotion mechanism.
 - Human approval and deterministic promotion gates replace the paper's freer self-preference acceptance loop.
+- RHO hard cases do not yet flow through a unified lane envelope across every subsystem and A2A route.
 
 Best next step:
 
@@ -215,6 +255,7 @@ Scale the RHO replay batch runner:
 - run larger grouped attempts over held-out trace cases;
 - compare baseline/candidate families, not only single candidates;
 - feed self-validation, self-consistency, and self-preference into BES/meta candidate generation;
+- feed RHO evidence into the shared BES lane runtime once implemented;
 - preserve human/validator promotion gates for durable changes.
 
 ## BES Alignment
@@ -259,12 +300,19 @@ Implemented:
   - `src/harness-sidecar/bes/denseSubgoalVerifier.js`
   - `src/harness-sidecar/bes/globalLineageTracker.js`
   - `tests/harness-bes-lane-contracts.test.js`
+- ToolTree, verifier genome, and verifier evolution surfaces:
+  - `src/harness-sidecar/bes/toolTreePlanner.js`
+  - `src/harness-sidecar/meta/verifierGenome.js`
+  - `src/harness-sidecar/meta/verifierEvolutionLoop.js`
+  - `tests/harness-verifier-evolution-loop.test.js`
 
 Not yet paper-complete:
 
 - Helios now has deterministic trajectory operators, but they are adapted to harness candidates, policies, skills, verifier configs, and swarm attempts rather than reproducing the full paper formalism over model trajectory sequences.
 - Dense subgoal verification is mostly heuristic/deterministic by subsystem, not a general learned verifier per subgoal.
 - The forward and backward searches are not yet fused into every runtime lane. Some lanes use BES metadata, some only record evidence for later.
+- There is no shared `src/harness-sidecar/bes/laneRuntime.js` yet; the BES mesh plan adds it.
+- Optimization metadata from adaptive search, ToolTree, trajectory operators, champion archives, verifier genomes, and frontier scoring is not yet consistently attached to every candidate.
 - Post-training and model self-improvement are out of scope for this repo. Helios uses BES ideas for inference-time harness behavior and candidate generation.
 
 Best next step:
@@ -278,12 +326,16 @@ Keep BES as a harness-level search abstraction, but make each lane declare its c
 - memory graph policy;
 - research policy;
 - tool-loop policy.
+- MCP trust policy;
+- compaction policy;
+- visual policy;
+- harness configuration.
 
 That will make the adaptation honest without pretending each subsystem is a mathematical trajectory from the paper.
 
 ## A2A and Swarm Interop
 
-A2A is not one of the four cited papers, but it matters because the MemGraphRAG paper frames graph construction as a multi-agent society.
+A2A is not one of the four cited papers, but it matters because the MemGraphRAG paper frames graph construction as a multi-agent society and the current Helios architecture now treats nested agents, SwarmCells, swarms, local harnesses, and global harnesses as linked layers.
 
 Current Helios status: **Partial local contract, not full agent network.**
 
@@ -300,8 +352,12 @@ Implemented:
   - `src/harness-sidecar/interop/externalAgentGateway.js`
   - `src/harness-sidecar/interop/delegatedCapabilityTokens.js`
   - `tests/harness-agent-interop.test.js`
+- SwarmCell and local meta-harness records that can carry evolution output upward:
+  - `src/harness-sidecar/swarm/swarmCellRuntime.js`
+  - `src/harness-sidecar/swarm/swarmCellContracts.js`
+  - `src/harness-sidecar/meta/localMetaHarness.js`
 
-Not implemented:
+Not yet implemented:
 
 - persistent A2A server endpoints per agent;
 - peer discovery;
@@ -309,10 +365,12 @@ Not implemented:
 - durable inbox/outbox;
 - message correlation, retries, cancellation, and progress protocol;
 - independent subagent-to-subagent negotiation.
+- tested A2A metadata for BES lane, RHO case IDs, memory graph references, candidate lineage, and required verification;
+- nested harness mesh regression tests proving A2A claims cannot grant promotion authority.
 
 Implication for MemGraphRAG:
 
-The extraction society should initially run as sidecar-local roles, not independent networked agents. Promote those roles into separate A2A agents only after the transport and durable message layer exists.
+The extraction society should initially run as sidecar-local roles, not independent networked agents. Promote those roles into separate A2A agents only after the transport and durable message layer exists. The BES lane expansion plan should add a narrower intermediate step first: preserve A2A lineage and memory graph references in candidate envelopes while treating external claims as untrusted until separately verified.
 
 ## Safety Differences From The Papers
 
@@ -341,7 +399,8 @@ This is why Helios should be described as "paper-inspired, safety-gated local ha
 | MemGraphRAG | Shared three-layer memory for graph construction and memory-aware retrieval | Global memory layers, conflict adjudicator, memory graph constructor, memory-aware and hierarchical retrievers, memory graph runtime | Partial to strong skeleton | Missing paper-grade extraction society, model-assisted adjudication, large eval loop |
 | Meta-Harness | Agentic code-space search over harnesses using filesystem traces and scores | Trace/artifact store, candidate archive, harness run store, experiment runner, frontier store, promotion loop, policy candidates | Partial | Missing full outer loop over many evaluated runnable harness variants |
 | RHO | Retrospective hard-case coreset, group rollout, self-validation, self-consistency, self-preference | Coreset builder, hard-case mining, replay batch runner, self-validation, self-consistency, self-preference, swarm outcome feedback | Partial | Missing DPP embeddings, large grouped rerolls, promotion driven primarily by pairwise preference |
-| BES | Forward evolutionary candidate search plus backward goal decomposition | Subgoal planning/scoring, bidirectional loop, mutation/recombination, population archive, lane contracts, trajectory operators, dense verifier, lineage | Partial to strong | Missing full paper trajectory formalism and fully fused forward/backward search in all lanes |
+| BES | Forward evolutionary candidate search plus backward goal decomposition | Subgoal planning/scoring, bidirectional loop, mutation/recombination, population archive, lane contracts, trajectory operators, dense verifier, lineage, adaptive search, ToolTree, verifier genomes | Partial to strong | Missing shared lane runtime and full paper trajectory formalism across all lanes |
+| A2A / multi-agent society bridge | Not a cited paper target, but needed to link nested swarms and harnesses | A2A envelope, agent cards, router, external gateway, delegated tokens, SwarmCell evolution output | Partial local contract | Missing durable peer transport and tested BES/RHO/memory lineage metadata |
 
 ## Recommended Execution Order
 
@@ -351,29 +410,38 @@ This is why Helios should be described as "paper-inspired, safety-gated local ha
    - Broaden hierarchical memory retriever task-startup integration and evals.
    - Add migration/versioning coverage for persisted global layers.
 
-2. Scale the RHO replay batch runner.
+2. Implement the BES lane expansion composition layer.
+   - Add shared `runBesLaneRuntime`.
+   - Wrap policy evolvers, memory, research, skill, swarm, verifier, tool, budget, visual, compaction, and MCP trust lanes.
+   - Preserve RHO, adaptive search, ToolTree, trajectory operator, champion archive, frontier, verifier genome, A2A, and memory graph metadata.
+
+3. Scale the RHO replay batch runner.
    - Select hard cases with richer difficulty and diversity metadata.
    - Run larger grouped attempts across held-out traces.
    - Feed self-validation, self-consistency, and self-preference records into candidate generation.
 
-3. Scale Meta-Harness-style experiment directories.
+4. Scale Meta-Harness-style experiment directories.
    - Use the existing run folders for repeated benchmark sweeps.
    - Store richer candidate source patches, configs, traces, metrics, and promotion decisions.
    - Keep active workspace apply gated.
 
-4. Deepen BES lane contracts.
+5. Deepen BES lane contracts and harness-of-harnesses candidates.
    - Exercise candidate unit, mutation operators, verifier, archive, and promotion rule in every runtime lane.
+   - Represent harness policies/configurations as candidates that can be compared by a higher-level harness.
 
-5. Promote A2A from local envelope to durable transport only after the sidecar-local extraction society works.
+6. Promote A2A from local envelope to durable transport only after the sidecar-local extraction society works.
+   - Before durable peer transport, add tested A2A lineage/reference metadata for BES lanes.
+   - Keep external A2A claims untrusted until backed by accepted memory, replay, or verifier evidence.
 
 ## Bottom Line
 
-Helios Forge already has more than surface-level inspiration from the papers. The repo contains real modules for traces, candidate archives, coreset mining, subgoal scoring, population evolution, memory graph construction, skill evolution, verifier evolution, adaptive search, and approval-gated apply.
+Helios Forge already has more than surface-level inspiration from the papers. The repo contains real modules for traces, candidate archives, coreset mining, replay evidence, subgoal scoring, population evolution, memory graph construction, local/global meta-harness records, skill evolution, verifier evolution, adaptive search, A2A-shaped interop, and approval-gated apply.
 
 The honest distinction is this:
 
 - Helios has implemented many **paper-shaped primitives**.
 - Helios has partially implemented several **paper-shaped loops**.
+- Helios is now planning the **composition layer** that lets those loops behave like an evolving swarm of swarms and harnesses of harnesses.
 - Helios has not yet implemented the full **paper-grade experimental systems** end to end.
 
-That is a healthy place to be. The architecture is broad but testable, and the remaining work is mostly about wiring the existing primitives into runtime loops with eval feedback and clear feature status instead of adding yet another isolated clever subsystem.
+That is a healthy place to be. The architecture is broad but testable, and the remaining work is mostly about wiring the existing primitives into runtime loops with eval feedback, A2A/memory lineage, and clear feature status instead of adding yet another isolated clever subsystem.
