@@ -64,6 +64,28 @@ test('browser harness prompt routing recognizes installed slash commands safely'
   assert.equal(appJs.includes('data-task-id="${escAttr(trace.taskId)}"'), true);
 });
 
+test('session sidebar uses safe data attributes for Pi session ids', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+  const renderItemStart = appJs.indexOf('function renderSessionItem(s)');
+  const renderItemEnd = appJs.indexOf('function togglePin(id)', renderItemStart);
+  const renderPiStart = appJs.indexOf('function renderPiSessions(sessionFiles)');
+  const renderPiEnd = appJs.indexOf('renderSessions();', renderPiStart);
+  const renderItem = appJs.slice(renderItemStart, renderItemEnd);
+  const renderPiSessions = appJs.slice(renderPiStart, renderPiEnd);
+
+  assert.match(appJs, /function attachSessionEventListeners\(\)/);
+  assert.match(renderItem, /data-session-id="\$\{sessionId\}"/);
+  assert.match(renderItem, /class="session-action-btn session-pin-btn"/);
+  assert.match(renderItem, /class="session-action-btn session-delete-btn"/);
+  assert.match(renderItem, /const sessionId = escAttr\(s\.id\)/);
+  assert.doesNotMatch(renderItem, /onclick="selectSession/);
+  assert.doesNotMatch(renderItem, /onclick="event\.stopPropagation\(\);togglePin/);
+  assert.doesNotMatch(renderItem, /onclick="event\.stopPropagation\(\);deleteSession/);
+  assert.match(renderPiSessions, /const shortId = s\.id \|\| String\(s\.path \|\| ''\)\.split\('\/'\)\.pop\(\)\.split\('\\\\'\)\.pop\(\)\.replace\(\/\\\.jsonl\$\/i, ''\)/);
+  assert.match(renderPiSessions, /id: `pi_\$\{shortId\}`/);
+  assert.doesNotMatch(renderPiSessions, /id: 'pi_' \+ s\.path/);
+});
+
 test('capabilities UI exposes package templates and slash commands', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');

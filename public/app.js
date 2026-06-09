@@ -2899,19 +2899,42 @@ function addSession(name) {
 function renderSessions() {
   pinnedList.innerHTML = sessions.filter(s => s.pinned).map(renderSessionItem).join('');
   recentsList.innerHTML = sessions.filter(s => !s.pinned).map(renderSessionItem).join('');
+  attachSessionEventListeners();
+}
+
+function attachSessionEventListeners() {
+  document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
+    el.addEventListener('click', (event) => {
+      if (event.target.closest('.session-action-btn')) return;
+      selectSession(el.dataset.sessionId);
+    });
+  });
+  document.querySelectorAll('.session-pin-btn[data-session-id]').forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      togglePin(button.dataset.sessionId);
+    });
+  });
+  document.querySelectorAll('.session-delete-btn[data-session-id]').forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      deleteSession(button.dataset.sessionId);
+    });
+  });
 }
 
 function renderSessionItem(s) {
+  const sessionId = escAttr(s.id);
   return `
-    <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" onclick="selectSession('${s.id}')">
+    <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${sessionId}">
       <span class="session-name">${esc(s.name)}</span>
       <div class="session-actions">
-        <button class="session-action-btn" title="${s.pinned ? 'Unpin' : 'Pin'}" onclick="event.stopPropagation();togglePin('${s.id}')">
+        <button class="session-action-btn session-pin-btn" title="${s.pinned ? 'Unpin' : 'Pin'}" data-session-id="${sessionId}">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="${s.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
             <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
           </svg>
         </button>
-        <button class="session-action-btn" title="Delete" onclick="event.stopPropagation();deleteSession('${s.id}')">
+        <button class="session-action-btn session-delete-btn" title="Delete" data-session-id="${sessionId}">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
           </svg>
@@ -2980,8 +3003,9 @@ function renderPiSessions(sessionFiles) {
     const alreadyExists = sessions.find(existing => existing.path === s.path);
     
     if (!alreadyExists) {
+      const shortId = s.id || String(s.path || '').split('/').pop().split('\\').pop().replace(/\.jsonl$/i, '');
       sessions.push({
-        id: 'pi_' + s.path,
+        id: `pi_${shortId}`,
         name: sessionName,
         pinned: false,
         path: s.path,
