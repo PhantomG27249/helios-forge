@@ -1198,6 +1198,20 @@ function stripTrailingUrlPunctuation(value) {
   return String(value || '').replace(/[),.;]+$/g, '');
 }
 
+function commandTokens(value) {
+  return Array.from(String(value || '').trim().matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g))
+    .map(match => match[1] || match[2] || match[3])
+    .filter(Boolean);
+}
+
+function displayNameFromLocation(value) {
+  const input = String(value || '').trim();
+  const parsed = safeUrl(input);
+  const raw = parsed ? parsed.pathname : input;
+  const parts = raw.replace(/^\/+|\/+$/g, '').split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || parsed?.hostname || input || 'capability';
+}
+
 function smitherySkillQualifiedNameFromInput(value) {
   const input = String(value || '').trim();
   if (!input) return '';
@@ -1231,6 +1245,28 @@ function remoteUrlFromInput(value) {
   return input;
 }
 
+function codexSkillQualifiedNameFromInput(value) {
+  const input = String(value || '').trim();
+  const urlMatch = input.match(/https?:\/\/codex\.openai\.com\/marketplace\/skills\/[^\s"'<>]+/i);
+  const parsed = safeUrl(stripTrailingUrlPunctuation(urlMatch?.[0] || input));
+  if (parsed?.hostname === 'codex.openai.com') {
+    const parts = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/');
+    const skillsIndex = parts.findIndex(part => part.toLowerCase() === 'skills');
+    if (skillsIndex >= 0 && parts.length >= skillsIndex + 3) {
+      return `${parts[skillsIndex + 1]}/${parts[skillsIndex + 2]}`;
+    }
+  }
+  const bareMatch = input.match(/(?:^|\s)@?([a-z0-9_.-]+\/[a-z0-9_.-]+)(?:\s|$)/i);
+  return bareMatch ? bareMatch[1] : '';
+}
+
+function codexSkillUrlFromInput(value) {
+  const installUrl = remoteUrlFromInput(value);
+  if (/^https?:\/\/codex\.openai\.com\/marketplace\/skills\//i.test(installUrl)) return installUrl;
+  const qualifiedName = codexSkillQualifiedNameFromInput(value);
+  return qualifiedName ? `https://codex.openai.com/marketplace/skills/${qualifiedName.replace(/^@/, '')}` : '';
+}
+
 function mcpNameFromUrl(value) {
   const input = remoteUrlFromInput(value);
   const parsed = safeUrl(input);
@@ -1239,6 +1275,136 @@ function mcpNameFromUrl(value) {
     return pathName || parsed.hostname;
   }
   return input.replace(/^@/, '');
+}
+
+function buildCodexSkillInstallRecord(input) {
+  const qualifiedName = codexSkillQualifiedNameFromInput(input);
+  const installUrl = codexSkillUrlFromInput(input);
+  const displayName = qualifiedName || displayNameFromLocation(installUrl);
+  return {
+    id: `codex:skill:${slugText(qualifiedName || displayName) || 'skill'}`,
+    type: 'skill',
+    name: qualifiedName || displayName,
+    enabled: true,
+    pathOrCommandOrUrl: installUrl,
+    url: installUrl,
+    command: 'npx',
+    args: ['-y', 'codex', 'skills', 'add', installUrl],
+    approvalMode: 'inherit',
+    notes: 'Installed from Codex marketplace skill link.',
+    metadata: {
+      source: 'codex_marketplace',
+      kind: 'skill',
+      qualifiedName,
+      installCommand: `npx -y codex skills add ${installUrl}`,
+    },
+  };
+}
+
+function buildCodexPluginInstallRecord(input) {
+  const parsed = safeUrl(input);
+  const pluginRef = parsed?.protocol === 'codex:' && parsed.hostname === 'plugins'
+    ? parsed.pathname.replace(/^\/+|\/+$/g, '')
+    : commandTokens(input).at(-1);
+  const [pluginName = pluginRef || 'plugin', marketplace = 'default'] = String(pluginRef || '').split('@');
+  const location = parsed?.protocol === 'codex:' ? String(input || '').trim() : `codex://plugins/${pluginName}@${marketplace}`;
+  return {
+    id: `codex:plugin:${slugText(`${pluginName}-${marketplace}`) || 'plugin'}`,
+    type: 'skill',
+    name: `${pluginName}@${marketplace}`,
+    enabled: true,
+    pathOrCommandOrUrl: location,
+    url: location,
+    approvalMode: 'inherit',
+    notes: 'Install/use Codex plugin from the Codex marketplace.',
+    metadata: {
+      source: 'codex_marketplace',
+      kind: 'plugin',
+      pluginName,
+      marketplace,
+      installSurface: 'codex_app',
+      deepLink: location,
+    },
+  };
+}
+
+function buildClaudeInstallRecord(input) {
+  const tokens = commandTokens(input);
+  const commandIndex = tokens.findIndex(token => token.toLowerCase() === 'claude');
+  const args = commandIndex >= 0 ? tokens.slice(commandIndex + 1) : [];
+  const mode = args[0]?.toLowerCase();
+  if (mode === 'plugin') {
+    const pluginRef = args.find(arg => arg.includes('@')) || args.at(-1) || 'plugin';
+    const [pluginName = pluginRef, marketplace = 'default'] = pluginRef.split('@');
+    return {
+      id: `claude:plugin:${slugText(`${pluginName}-${marketplace}`) || 'plugin'}`,
+      type: 'skill',
+      name: pluginRef,
+      enabled: true,
+      pathOrCommandOrUrl: pluginRef,
+      command: 'claude',
+      args,
+      approvalMode: 'inherit',
+      notes: 'Installed from Claude Code marketplace plugin command.',
+      metadata: {
+        source: 'claude_code_marketplace',
+        kind: 'plugin',
+        pluginName,
+        marketplace,
+        installCommand: ['claude', ...args].join(' '),
+        activationCommand: '/reload-plugins',
+      },
+    };
+  }
+  const isMcp = mode === 'mcp';
+  const installUrl = remoteUrlFromInput(input);
+  const mcpName = isMcp ? args.find(arg => arg !== 'mcp' && arg !== 'add' && !/^https?:\/\//i.test(arg)) : '';
+  const name = isMcp ? (mcpName || displayNameFromLocation(installUrl)) : displayNameFromLocation(installUrl || args.at(-1));
+  return {
+    id: `claude:${isMcp ? 'mcp' : 'skill'}:${slugText(name) || (isMcp ? 'server' : 'skill')}`,
+    type: isMcp ? 'mcp' : 'skill',
+    name,
+    enabled: true,
+    transport: isMcp && /^https?:\/\//i.test(installUrl) ? 'http' : undefined,
+    pathOrCommandOrUrl: installUrl || args.join(' '),
+    url: /^https?:\/\//i.test(installUrl) ? installUrl : undefined,
+    command: 'claude',
+    args,
+    approvalMode: 'inherit',
+    notes: isMcp ? 'Installed from Claude Code MCP command.' : 'Installed from Claude Code marketplace skill command.',
+    metadata: {
+      source: 'claude_code_marketplace',
+      kind: isMcp ? 'mcp' : 'skill',
+      qualifiedName: name,
+      installCommand: ['claude', ...args].join(' '),
+    },
+  };
+}
+
+function buildPiExtensionInstallRecord(input) {
+  const tokens = commandTokens(input);
+  const commandIndex = tokens.findIndex(token => /^pi(?:\.cmd|\.ps1)?$/i.test(token) || token.toLowerCase() === 'pi-agent');
+  const args = commandIndex >= 0 ? tokens.slice(commandIndex + 1) : [];
+  const location = remoteUrlFromInput(input);
+  const name = displayNameFromLocation(location);
+  return {
+    id: `pi_extension:${slugText(name) || 'extension'}`,
+    type: 'pi_extension',
+    name,
+    enabled: true,
+    pathOrCommandOrUrl: location,
+    url: /^https?:\/\//i.test(location) ? location : undefined,
+    command: args.length ? tokens[commandIndex] : undefined,
+    args,
+    approvalMode: 'inherit',
+    notes: 'Installed from Pi Agent extension source.',
+    metadata: {
+      source: 'pi_agent_extension',
+      kind: 'pi_extension',
+      installTarget: 'pi_agent_extensions',
+      installCommand: args.length ? [tokens[commandIndex], ...args].join(' ') : undefined,
+    },
+  };
 }
 
 function buildSmitherySkillInstallRecord(input, skill = null) {
@@ -1294,6 +1460,23 @@ function buildMcpInstallRecord(input, server = null) {
 function parseCapabilityInstallInput(value) {
   const input = String(value || '').trim();
   if (!input) return { kind: 'empty', value: '' };
+  if (/^codex:\/\/plugins\/[^?\s]+/i.test(input) || /(?:^|\s)codex\s+plugin\s+(?:install|marketplace\s+add)\s+/i.test(input)) {
+    return { kind: 'codex-plugin', value: input };
+  }
+  if (/(?:^|\s)codex\s+skills?\s+add\s+/i.test(input) || /https?:\/\/codex\.openai\.com\/marketplace\/skills\//i.test(input)) {
+    return {
+      kind: 'codex-skill',
+      value: input,
+      qualifiedName: codexSkillQualifiedNameFromInput(input),
+      installUrl: codexSkillUrlFromInput(input),
+    };
+  }
+  if (/(?:^|\s)claude\s+(?:skill|skills|mcp)\s+add\s+/i.test(input) || /(?:^|\s)claude\s+plugin\s+(?:install|marketplace\s+add)\s+/i.test(input) || /https?:\/\/(?:www\.)?(?:anthropic\.com|claude\.ai)\/[^\s"'<>]*(?:skill|mcp|marketplace)/i.test(input)) {
+    return { kind: 'claude', value: input };
+  }
+  if (/(?:^|\s)pi(?:\.cmd|\.ps1)?\s+(?:extension|extensions)\s+add\s+/i.test(input) || /(?:^|\s)pi-agent\s+(?:extension|extensions)\s+add\s+/i.test(input) || /(?:^|[\\/])\.pi[\\/]agent[\\/]extensions[\\/]/i.test(input)) {
+    return { kind: 'pi-extension', value: input };
+  }
   if (/(?:^|\s)skills\s+add\s+/i.test(input) || /https?:\/\/smithery\.ai\/skills\//i.test(input)) {
     return {
       kind: 'skill',
@@ -1319,6 +1502,7 @@ function parseCapabilityInstallInput(value) {
 function searchQueryFromCapabilityInput(value) {
   const parsed = parseCapabilityInstallInput(value);
   if (parsed.kind === 'skill') return parsed.qualifiedName || parsed.value;
+  if (parsed.kind === 'codex-skill') return parsed.qualifiedName || parsed.value;
   if (parsed.kind === 'mcp') return parsed.qualifiedName || parsed.value;
   return parsed.value || '';
 }
@@ -1326,6 +1510,10 @@ function searchQueryFromCapabilityInput(value) {
 function buildCapabilityRecordFromInstallInput(value) {
   const parsed = parseCapabilityInstallInput(value);
   if (parsed.kind === 'skill') return buildSmitherySkillInstallRecord(parsed.value);
+  if (parsed.kind === 'codex-plugin') return buildCodexPluginInstallRecord(parsed.value);
+  if (parsed.kind === 'codex-skill') return buildCodexSkillInstallRecord(parsed.value);
+  if (parsed.kind === 'claude') return buildClaudeInstallRecord(parsed.value);
+  if (parsed.kind === 'pi-extension') return buildPiExtensionInstallRecord(parsed.value);
   if (parsed.kind === 'mcp') return buildMcpInstallRecord(parsed.installUrl || parsed.value);
   if (parsed.kind === 'local-skill') {
     return {

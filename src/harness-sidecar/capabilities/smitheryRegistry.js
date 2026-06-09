@@ -1,6 +1,7 @@
 const SMITHERY_API_BASE = 'https://api.smithery.ai';
 const SMITHERY_SERVER_BASE = 'https://server.smithery.ai';
 const SMITHERY_SKILL_BASE = 'https://smithery.ai/skills';
+const CODEX_SKILL_BASE = 'https://codex.openai.com/marketplace/skills';
 
 function normalizeString(value) {
   return String(value || '').trim();
@@ -57,10 +58,77 @@ function skillInstallUrlFromInput(input) {
   return smitherySkillUrlFromQualifiedName(skillQualifiedNameFromInput(text));
 }
 
+function commandTokens(input) {
+  return Array.from(normalizeString(input).matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g))
+    .map((match) => match[1] || match[2] || match[3])
+    .filter(Boolean);
+}
+
+function firstUrlFromInput(input) {
+  const match = normalizeString(input).match(/https?:\/\/[^\s"'<>]+/i);
+  return match ? match[0].replace(/[),.;]+$/g, '') : '';
+}
+
+function displayNameFromLocation(value) {
+  const text = normalizeString(value);
+  const parsed = safeUrl(text);
+  const raw = parsed ? parsed.pathname : text;
+  const parts = raw.replace(/^\/+|\/+$/g, '').split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || parsed?.hostname || text || 'capability';
+}
+
 function isSmitherySkillInput(input) {
   const text = normalizeString(input);
   return /(?:^|\s)skills\s+add\s+/i.test(text)
     || /https?:\/\/smithery\.ai\/skills\//i.test(text);
+}
+
+function codexSkillQualifiedNameFromInput(input) {
+  const text = normalizeString(input);
+  const urlMatch = text.match(/https?:\/\/codex\.openai\.com\/marketplace\/skills\/[^\s"'<>]+/i);
+  const parsed = safeUrl(urlMatch?.[0] || text);
+  if (parsed?.hostname === 'codex.openai.com') {
+    const parts = parsed.pathname.replace(/^\/+|\/+$/g, '').split('/');
+    const skillsIndex = parts.findIndex((part) => part.toLowerCase() === 'skills');
+    if (skillsIndex >= 0 && parts.length >= skillsIndex + 3) {
+      return `${parts[skillsIndex + 1]}/${parts[skillsIndex + 2]}`;
+    }
+  }
+  const bareMatch = text.match(/(?:^|\s)@?([a-z0-9_.-]+\/[a-z0-9_.-]+)(?:\s|$)/i);
+  return bareMatch ? bareMatch[1] : '';
+}
+
+function codexSkillUrlFromInput(input) {
+  const url = firstUrlFromInput(input);
+  if (/^https?:\/\/codex\.openai\.com\/marketplace\/skills\//i.test(url)) return url;
+  const qualifiedName = codexSkillQualifiedNameFromInput(input);
+  return qualifiedName ? `${CODEX_SKILL_BASE}/${qualifiedName}` : '';
+}
+
+function isCodexSkillInput(input) {
+  const text = normalizeString(input);
+  return /https?:\/\/codex\.openai\.com\/marketplace\/skills\//i.test(text)
+    || /(?:^|\s)codex\s+skills?\s+add\s+/i.test(text);
+}
+
+function isCodexPluginInput(input) {
+  const text = normalizeString(input);
+  return /^codex:\/\/plugins\/[^?\s]+/i.test(text)
+    || /(?:^|\s)codex\s+plugin\s+(?:install|marketplace\s+add)\s+/i.test(text);
+}
+
+function isClaudeInput(input) {
+  const text = normalizeString(input);
+  return /(?:^|\s)claude\s+(?:skill|skills|mcp)\s+add\s+/i.test(text)
+    || /(?:^|\s)claude\s+plugin\s+(?:install|marketplace\s+add)\s+/i.test(text)
+    || /https?:\/\/(?:www\.)?(?:anthropic\.com|claude\.ai)\/[^\s"'<>]*(?:skill|mcp|marketplace)/i.test(text);
+}
+
+function isPiExtensionInput(input) {
+  const text = normalizeString(input);
+  return /(?:^|\s)pi(?:\.cmd|\.ps1)?\s+(?:extension|extensions)\s+add\s+/i.test(text)
+    || /(?:^|\s)pi-agent\s+(?:extension|extensions)\s+add\s+/i.test(text)
+    || /(?:^|[\\/])\.pi[\\/]agent[\\/]extensions[\\/]/i.test(text);
 }
 
 function mcpInstallUrlFromInput(input) {
@@ -290,6 +358,139 @@ export function buildSmitheryCapabilityRecord(server = {}) {
   };
 }
 
+export function buildCodexSkillCapabilityRecord(input) {
+  const installUrl = codexSkillUrlFromInput(input);
+  const qualifiedName = codexSkillQualifiedNameFromInput(input) || displayNameFromLocation(installUrl);
+  return {
+    id: `codex:skill:${slugPart(qualifiedName) || 'skill'}`,
+    type: 'skill',
+    name: qualifiedName,
+    enabled: true,
+    url: installUrl,
+    pathOrCommandOrUrl: installUrl,
+    command: 'npx',
+    args: ['-y', 'codex', 'skills', 'add', installUrl],
+    approvalMode: 'inherit',
+    notes: 'Installed from Codex marketplace skill link.',
+    metadata: {
+      source: 'codex_marketplace',
+      kind: 'skill',
+      qualifiedName,
+      installCommand: `npx -y codex skills add ${installUrl}`,
+    },
+  };
+}
+
+export function buildCodexPluginCapabilityRecord(input) {
+  const text = normalizeString(input);
+  const parsed = safeUrl(text);
+  const pluginRef = parsed?.protocol === 'codex:' && parsed.hostname === 'plugins'
+    ? parsed.pathname.replace(/^\/+|\/+$/g, '')
+    : commandTokens(text).at(-1);
+  const [pluginName = pluginRef || 'plugin', marketplace = 'default'] = normalizeString(pluginRef).split('@');
+  const location = parsed?.protocol === 'codex:' ? text : `codex://plugins/${pluginName}@${marketplace}`;
+  return {
+    id: `codex:plugin:${slugPart(`${pluginName}-${marketplace}`) || 'plugin'}`,
+    type: 'skill',
+    name: `${pluginName}@${marketplace}`,
+    enabled: true,
+    url: location,
+    pathOrCommandOrUrl: location,
+    approvalMode: 'inherit',
+    notes: 'Install/use Codex plugin from the Codex marketplace.',
+    metadata: {
+      source: 'codex_marketplace',
+      kind: 'plugin',
+      pluginName,
+      marketplace,
+      installSurface: 'codex_app',
+      deepLink: location,
+    },
+  };
+}
+
+export function buildClaudeCapabilityRecord(input) {
+  const tokens = commandTokens(input);
+  const commandIndex = tokens.findIndex((token) => token.toLowerCase() === 'claude');
+  const commandArgs = commandIndex >= 0 ? tokens.slice(commandIndex + 1) : [];
+  const mode = commandArgs[0]?.toLowerCase();
+  if (mode === 'plugin') {
+    const pluginRef = commandArgs.find((arg) => arg.includes('@')) || commandArgs.at(-1) || 'plugin';
+    const [pluginName = pluginRef, marketplace = 'default'] = pluginRef.split('@');
+    return {
+      id: `claude:plugin:${slugPart(`${pluginName}-${marketplace}`) || 'plugin'}`,
+      type: 'skill',
+      name: pluginRef,
+      enabled: true,
+      pathOrCommandOrUrl: pluginRef,
+      command: 'claude',
+      args: commandArgs,
+      approvalMode: 'inherit',
+      notes: 'Installed from Claude Code marketplace plugin command.',
+      metadata: {
+        source: 'claude_code_marketplace',
+        kind: 'plugin',
+        pluginName,
+        marketplace,
+        installCommand: ['claude', ...commandArgs].join(' '),
+        activationCommand: '/reload-plugins',
+      },
+    };
+  }
+  const installUrl = firstUrlFromInput(input);
+  const isMcp = mode === 'mcp';
+  const mcpName = isMcp
+    ? commandArgs.find((arg) => arg !== 'mcp' && arg !== 'add' && !/^https?:\/\//i.test(arg))
+    : '';
+  const skillName = displayNameFromLocation(installUrl || commandArgs.at(-1));
+  const name = isMcp ? (mcpName || displayNameFromLocation(installUrl)) : skillName;
+  return {
+    id: `claude:${isMcp ? 'mcp' : 'skill'}:${slugPart(name) || (isMcp ? 'server' : 'skill')}`,
+    type: isMcp ? 'mcp' : 'skill',
+    name,
+    enabled: true,
+    transport: isMcp && installUrl ? 'http' : undefined,
+    url: installUrl || undefined,
+    pathOrCommandOrUrl: installUrl || commandArgs.join(' '),
+    command: 'claude',
+    args: commandArgs.length ? commandArgs : [isMcp ? 'mcp' : 'skill', 'add', installUrl].filter(Boolean),
+    approvalMode: 'inherit',
+    notes: isMcp ? 'Installed from Claude Code MCP command.' : 'Installed from Claude Code marketplace skill command.',
+    metadata: {
+      source: 'claude_code_marketplace',
+      kind: isMcp ? 'mcp' : 'skill',
+      qualifiedName: name,
+      installCommand: ['claude', ...(commandArgs.length ? commandArgs : [])].join(' '),
+    },
+  };
+}
+
+export function buildPiExtensionCapabilityRecord(input) {
+  const tokens = commandTokens(input);
+  const commandIndex = tokens.findIndex((token) => /^pi(?:\.cmd|\.ps1)?$/i.test(token) || token.toLowerCase() === 'pi-agent');
+  const commandArgs = commandIndex >= 0 ? tokens.slice(commandIndex + 1) : [];
+  const location = firstUrlFromInput(input) || normalizeString(input);
+  const name = displayNameFromLocation(location);
+  return {
+    id: `pi_extension:${slugPart(name) || 'extension'}`,
+    type: 'pi_extension',
+    name,
+    enabled: true,
+    url: /^https?:\/\//i.test(location) ? location : undefined,
+    pathOrCommandOrUrl: location,
+    command: commandArgs.length ? tokens[commandIndex] : undefined,
+    args: commandArgs,
+    approvalMode: 'inherit',
+    notes: 'Installed from Pi Agent extension source.',
+    metadata: {
+      source: 'pi_agent_extension',
+      kind: 'pi_extension',
+      installTarget: 'pi_agent_extensions',
+      installCommand: commandArgs.length ? [tokens[commandIndex], ...commandArgs].join(' ') : undefined,
+    },
+  };
+}
+
 export function buildCapabilityRecordFromSmitheryInstallInput(input) {
   const text = normalizeString(input);
   if (!text) return null;
@@ -312,4 +513,17 @@ export function buildCapabilityRecordFromSmitheryInstallInput(input) {
     installUrl,
     description: 'Installed from Smithery MCP URL.',
   });
+}
+
+export function buildCapabilityRecordFromInstallInput(input) {
+  const text = normalizeString(input);
+  if (!text) return null;
+  if (isCodexPluginInput(text)) return buildCodexPluginCapabilityRecord(text);
+  if (isCodexSkillInput(text)) return buildCodexSkillCapabilityRecord(text);
+  if (isClaudeInput(text)) return buildClaudeCapabilityRecord(text);
+  if (isPiExtensionInput(text)) return buildPiExtensionCapabilityRecord(text);
+  if (isSmitherySkillInput(text) || /https?:\/\/(?:mcp\.)?smithery\.run\//i.test(text) || /https?:\/\/server\.smithery\.ai\//i.test(text)) {
+    return buildCapabilityRecordFromSmitheryInstallInput(text);
+  }
+  return null;
 }

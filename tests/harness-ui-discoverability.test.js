@@ -4,9 +4,15 @@ import { test } from 'node:test';
 
 test('harness controls expose deep research and capabilities as first-class toolbar actions', async () => {
   const html = await readFile('public/index.html', 'utf8');
+  const css = await readFile('public/app.css', 'utf8');
 
   assert.match(html, /id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research"/);
   assert.match(html, /id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs"/);
+  assert.match(html, /<div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">/);
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*fixed/s);
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*left:\s*16px/s);
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*bottom:\s*16px/s);
+  assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
   assert.doesNotMatch(html, /topbar-text-btn/);
 });
 
@@ -70,6 +76,9 @@ test('capabilities UI exposes package templates and slash commands', async () =>
   assert.match(html, /id="capability-install-query"/);
   assert.doesNotMatch(html, /id="capability-install-source"/);
   assert.match(html, /npx -y skills add https:\/\/smithery\.ai\/skills\/anthropics\/skill-creator/);
+  assert.match(html, /https:\/\/codex\.openai\.com\/marketplace\/skills\/openai\/code-review/);
+  assert.match(html, /claude mcp add/);
+  assert.match(html, /pi extension add/);
   assert.match(html, /id="btn-capability-search"/);
   assert.match(html, /id="btn-capability-install-quick"/);
   assert.match(html, /id="capability-smithery-results"/);
