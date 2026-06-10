@@ -219,6 +219,76 @@ test('emits BES lane lifecycle events around runtime execution', async () => {
   assert.deepEqual(events[1].evidenceSources, ['domain_eval']);
 });
 
+test('attaches lane-specific dense verifier units and trajectory provenance', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'code',
+    taskId: 'task-code-provenance',
+    candidates: [
+      {
+        candidateId: 'code_candidate_1',
+        parents: ['seed_a'],
+        trajectory: {
+          operator: 'crossover',
+          donorCandidateId: 'seed_b',
+          trajectory: ['read', 'patch', 'npm test'],
+        },
+      },
+    ],
+    denseSubgoals: [
+      { id: 'code-tests', lane: 'code', requiredEvidence: 'npm test' },
+      { id: 'memory-promotion', lane: 'memory', requiredEvidence: 'graph delta' },
+    ],
+    evaluator: () => ({ score: 0.8, reasons: ['npm test passed for patch trajectory'] }),
+  });
+
+  const candidate = result.candidates[0];
+  assert.equal(candidate.bes.denseSubgoals.total, 1);
+  assert.equal(candidate.bes.denseSubgoals.verifierUnit, 'test_eval');
+  assert.deepEqual(candidate.bes.denseSubgoals.satisfiedSubgoalIds, ['code-tests']);
+  assert.deepEqual(candidate.bes.denseSubgoals.verifierUnits, [
+    {
+      lane: 'code',
+      verifierUnit: 'test_eval',
+      subgoalIds: ['code-tests'],
+      satisfiedSubgoalIds: ['code-tests'],
+      missingSubgoalIds: [],
+    },
+  ]);
+  assert.equal(candidate.bes.trajectoryOperators[0].operator, 'crossover');
+  assert.equal(candidate.bes.trajectoryOperators[0].source, 'candidate.trajectory');
+  assert.deepEqual(candidate.bes.trajectoryOperators[0].parents, ['seed_a', 'seed_b']);
+  assert.equal(candidate.evidence.sources.includes('trajectory_operator'), true);
+});
+
+test('bridges champion archive records to frontier evidence without promotion authority', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'harness',
+    taskId: 'task-frontier-bridge',
+    candidates: [{ candidateId: 'champion_candidate', status: 'shadow_only' }],
+    championArchive: {
+      champions: [
+        {
+          attemptId: 'champion_candidate',
+          score: 0.91,
+          metadata: { compatibleFamily: 'harness-routing' },
+        },
+      ],
+    },
+    frontier: {
+      records: [
+        { frontierId: 'frontier_1', candidateId: 'champion_candidate', score: 0.91 },
+      ],
+    },
+  });
+
+  const bridge = result.candidates[0].bes.championFrontierBridge;
+  assert.equal(bridge.evidenceOnly, true);
+  assert.equal(bridge.promotionAuthority, false);
+  assert.deepEqual(bridge.championIds, ['champion_candidate']);
+  assert.deepEqual(bridge.frontierRecordIds, ['frontier_1']);
+  assert.deepEqual(bridge.compatibleFamilies, ['harness-routing']);
+});
+
 test('emits a blocked BES lane event when runtime execution fails', async () => {
   const events = [];
 

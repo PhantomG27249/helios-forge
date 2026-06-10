@@ -301,3 +301,37 @@ test('annotates selected traces with replay difficulty diversity heldout and lin
     trace: { traceId: 'trace_hard', runId: 'run_hard' },
   });
 });
+
+test('uses precomputed embeddings to avoid near-duplicate hard cases', () => {
+  const coreset = buildRhoCoreset({
+    traces: [
+      { taskId: 'cluster-a', status: 'failed', failureModes: ['same'], embedding: [1, 0] },
+      { taskId: 'cluster-a-copy', status: 'failed', failureModes: ['same'], embedding: [0.99, 0.01] },
+      { taskId: 'cluster-b', status: 'failed', failureModes: ['same'], embedding: [0, 1] },
+      { taskId: 'cluster-c', status: 'failed', failureModes: ['same'], embedding: [-1, 0] },
+    ],
+    limit: 3,
+  });
+
+  assert.equal(coreset.selectedCount, 3);
+  assert.equal(coreset.items.some((item) => item.taskId === 'cluster-a-copy'), false);
+  assert.deepEqual(
+    coreset.items.map((item) => item.metadata.diversity.embeddingAvailable),
+    [true, true, true],
+  );
+  assert.equal(coreset.selection?.strategy, 'embedding_dpp_like');
+});
+
+test('uses verifier case embeddings when selecting DPP-like replay cases', () => {
+  const coreset = buildRhoCoreset({
+    verifierCases: [
+      { caseId: 'verifier-a', classification: 'falseNegative', embedding: [1, 0] },
+      { caseId: 'verifier-a-copy', classification: 'falseNegative', embedding: [0.98, 0.02] },
+      { caseId: 'verifier-c', classification: 'falseNegative', embedding: [-1, 0] },
+    ],
+    limit: 2,
+  });
+
+  assert.deepEqual(coreset.items.map((item) => item.caseId), ['verifier-a', 'verifier-c']);
+  assert.equal(coreset.items.every((item) => item.metadata.diversity.embeddingAvailable), true);
+});

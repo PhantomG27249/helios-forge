@@ -38,6 +38,33 @@ test('visual candidates tune thresholds and route workers by task', () => {
   assert.deepEqual(candidate.routes.diff, ['screenshot', 'diff']);
 });
 
+test('visual candidates expose budget-aware VLM routing for benchmark cases', () => {
+  const [candidate] = proposeVisualPolicies({
+    coreset: [{
+      caseId: 'chart_case',
+      reason: 'visual_false_negative',
+      visualCase: {
+        caseId: 'visual_case:task:chart',
+        benchmarkKind: 'chart',
+        confidenceSignals: { lowConfidence: true, verifierConfidence: 0.33 },
+        budget: { tokensEstimated: 2400 },
+      },
+      budget: { pressure: 0.93, remainingVisionTokens: 1200 },
+    }],
+    baselinePolicy: {
+      routes: {
+        chart: ['chart', 'vlm_high_accuracy'],
+      },
+    },
+  });
+
+  assert.equal(candidate.vlmRouting.mode, 'budget_aware_shadow');
+  assert.equal(candidate.vlmRouting.budgetMode, 'downshift');
+  assert.deepEqual(candidate.vlmRouting.routeByCaseKind.chart, ['chart', 'vlm_fast']);
+  assert.equal(candidate.vlmRouting.cases[0].caseId, 'visual_case:task:chart');
+  assert.equal(candidate.vlmRouting.cases[0].budget.pressure, 0.93);
+});
+
 test('visual evaluator penalizes vlm-only pass without artifact support', () => {
   const decision = evaluateVisualPolicyCandidate({
     candidate: { scoreThreshold: 0.75, confidenceThreshold: 0.65, routes: {}, status: 'shadow_only' },

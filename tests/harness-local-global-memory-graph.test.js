@@ -130,6 +130,53 @@ test('memory extraction society uses guarded injected model hooks only when enab
   assert.deepEqual(enabled.hookTrace, ['extractFacts']);
 });
 
+test('memory extraction society guards role outputs with passage provenance', () => {
+  const result = runMemoryExtractionSociety({
+    observations: [{ text: 'MemGraphRAG uses guarded extraction roles.', source: 'trace-role-1' }],
+    modelAssistance: { enabled: true },
+    roleHandlers: {
+      passage_collector: () => [{ passageId: 'trace-role-1', text: 'MemGraphRAG uses guarded extraction roles.' }],
+      fact_extractor: () => [
+        {
+          subject: 'MemGraphRAG',
+          subjectType: 'system',
+          relation: 'uses',
+          object: 'guarded extraction roles',
+          objectType: 'capability',
+          passageIds: ['trace-role-1'],
+          confidence: 0.93,
+        },
+        {
+          subject: 'MemGraphRAG',
+          subjectType: 'system',
+          relation: 'promotes',
+          object: 'unsupported claims',
+          objectType: 'risk',
+          passageIds: ['missing-passage'],
+          confidence: 0.99,
+        },
+      ],
+      evaluator: ({ facts }) => [{ metric: 'guardedFacts', value: facts.length }],
+    },
+  });
+
+  assert.deepEqual(result.roles, [
+    'passage_collector',
+    'schema_proposer',
+    'fact_extractor',
+    'contradiction_critic',
+    'merge_planner',
+    'graph_constructor',
+    'retriever',
+    'evaluator',
+  ]);
+  assert.deepEqual(result.facts.map((fact) => fact.object), ['guarded extraction roles']);
+  assert.deepEqual(result.rejectedFacts.map((fact) => fact.object), ['unsupported claims']);
+  assert.deepEqual(result.rejectedFacts[0].guard.reasons, ['missing_passage_support']);
+  assert.equal(result.roleOutputs.evaluator[0].metric, 'guardedFacts');
+  assert.deepEqual(result.roleTrace, ['evaluator', 'fact_extractor', 'passage_collector']);
+});
+
 test('memory graph runtime persists promoted global layers and constructed graph', async () => {
   await makeTempWorkspace(async (workspaceRoot) => {
     const runtime = createMemoryGraphRuntime({ workspaceRoot });
@@ -142,6 +189,50 @@ test('memory graph runtime persists promoted global layers and constructed graph
 
     assert.equal(result.layers.facts.length, 1);
     assert.equal(result.graph.stats.passageCount, 1);
+  });
+});
+
+test('memory graph runtime adjudicates conflicts against retrieved provenance passages', async () => {
+  await makeTempWorkspace(async (workspaceRoot) => {
+    const runtime = createMemoryGraphRuntime({
+      workspaceRoot,
+      schemaThreshold: 1,
+      conflictPolicy: { requirePassageSupport: true },
+    });
+
+    await runtime.ingestPromotion({
+      passages: [{ passageId: 'passage_old', text: 'The retriever uses lexical search for startup context.' }],
+      schemas: [{ headType: 'service', relation: 'uses', tailType: 'backend', frequency: 1 }],
+      facts: [{
+        subject: 'retriever',
+        subjectType: 'service',
+        relation: 'uses',
+        object: 'lexical search',
+        objectType: 'backend',
+        passageIds: ['passage_old'],
+        confidence: 0.8,
+      }],
+    });
+
+    const result = await runtime.ingestPromotion({
+      passages: [{ passageId: 'passage_new', text: 'The current retriever uses graph search for startup context.' }],
+      schemas: [{ headType: 'service', relation: 'uses', tailType: 'backend', frequency: 1 }],
+      facts: [{
+        subject: 'retriever',
+        subjectType: 'service',
+        relation: 'uses',
+        object: 'graph search',
+        objectType: 'backend',
+        passageIds: ['passage_new'],
+        confidence: 0.8,
+      }],
+    });
+
+    assert.equal(result.conflictDecisions[0].action, 'discard');
+    assert.equal(result.conflictDecisions[0].targetFactId.includes('lexical_search'), true);
+    assert.equal(result.conflictDecisions[0].reasons.includes('retrieved_passage_supports_new_fact'), true);
+    assert.equal(result.layers.facts.find((fact) => fact.object === 'lexical search').status, 'discarded');
+    assert.equal(result.layers.facts.find((fact) => fact.object === 'graph search').status, 'active');
   });
 });
 
@@ -181,10 +272,14 @@ test('memory graph runtime composes extraction society into local cell and globa
     });
 
     assert.deepEqual(result.extraction.roles, [
-      'passage_extractor',
-      'schema_inducer',
+      'passage_collector',
+      'schema_proposer',
       'fact_extractor',
-      'contradiction_checker',
+      'contradiction_critic',
+      'merge_planner',
+      'graph_constructor',
+      'retriever',
+      'evaluator',
     ]);
     assert.equal(result.localGraph.agentId, 'memory.impl');
     assert.equal(result.cellGraph.cellId, 'memory');

@@ -11,7 +11,7 @@ The purpose is to separate what Helios actually implements from what it borrows 
 
 - Helios implements a workspace-local agent harness with sidecar orchestration, traces, RAG, graph/memory primitives, verifiers, swarms, policy evolution, approval gates, and safe apply.
 - Helios implements deterministic, testable first-pass versions of the local/global memory loop, local meta-harness loop, RHO grouped replay signals, BES lane contracts, global harness experiment records, trust-kernel boundaries, policy evolvers, skill evolution, adaptive search, and local A2A-shaped interop.
-- Helios does not yet reproduce the full paper systems end to end. The largest remaining gaps are production model-assisted graph construction, production-scale RHO diversity selection over large held-out suites, full autonomous Meta-Harness code-space search over many runnable harness variants, complete trajectory-level BES semantics in every lane, longitudinal frontier dashboards, and external long-lived A2A peer transport.
+- Helios does not yet reproduce the full paper systems end to end. The largest remaining gaps are production model-assisted graph construction, production-scale replay over large held-out suites, full autonomous Meta-Harness code-space search over many executable harness variants, complete trajectory-level BES semantics in every live lane, persisted operator dashboards over longitudinal frontier history, and external long-lived A2A peer transport.
 
 ## Status Legend
 
@@ -43,8 +43,9 @@ As of June 9, 2026, the hierarchical swarm meta-harness pass adds the missing si
 - RHO replay batch runner, self-validation, self-consistency, and self-preference judge;
 - BES lane contracts, trajectory operators, dense subgoal verifier, and global lineage tracker;
 - harness run store, experiment runner, frontier update, and trust-kernel boundary evaluator;
+- longitudinal benchmark frontier history and isolated harness variant workspaces;
 - sidecar/runtime/UI event wiring for `local_meta.completed`, `local_memory.proposed`, and experiment visibility.
-- A2A-shaped interop modules, agent routing, external gateway scaffolding, and delegated capability tokens.
+- A2A-shaped interop modules, agent routing, external gateway scaffolding, endpoint registry, negotiation envelopes, and delegated capability tokens.
 
 These modules intentionally remain deterministic and policy-gated. They close the repo-level "missing module" gaps, but they do not by themselves make Helios a full autonomous reproduction of the research systems.
 
@@ -67,13 +68,13 @@ The current codebase has moved from "paper-shaped notes" into a broad determinis
 | --- | --- | --- |
 | Swarm and SwarmCell loop | `src/harness-sidecar/swarm/swarmCellContracts.js`, `swarmCellRuntime.js`, `swarmOrchestrator.js`, `evolutionSwarmPlanner.js`, `evolutionBudgetAllocator.js` | Implemented deterministic loop with local proposal contracts. |
 | Local meta-harness | `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, `localCandidateArchive.js`, `localPromotionBlocker.js` | Implemented local evidence/proposal loop; no durable apply authority. |
-| Global meta-harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records and frontier comparison; not full autonomous code-space search. |
+| Global meta-harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js`, `harnessVariantWorkspace.js`, `longitudinalFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records, isolated variant manifests, repeated variant cycles, and longitudinal frontier evidence; not full autonomous code-space search. |
 | Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton with runtime extraction composition, guarded extraction/adjudication hooks, provenance support, eval hooks, migrations, decay, and consolidation; not yet production model-assisted graph society. |
-| RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented structured replay evidence; not large-scale learned self-preference optimization. |
-| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime; paper-grade trajectory semantics remain partial. |
+| RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented structured replay evidence with deterministic embedding-aware DPP-like selection and aggregate candidate-family promotion/blocking evidence; not large-scale learned self-preference optimization. |
+| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime, lane-specific verifier metadata, trajectory provenance, and champion-to-frontier evidence bridge; paper-grade trajectory semantics remain partial. |
 | Policy evolution | `src/harness-sidecar/meta/contextPolicyEvolution.js`, `compactionPolicyEvolution.js`, `toolLoopPolicyEvolution.js`, `budgetPolicyEvolution.js`, `visualPolicyEvolution.js`, `memoryPolicyEvolution.js`, `mcpTrustEvolution.js`, `researchPolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers. |
 | Skill evolution | `src/harness-sidecar/skills/skillNeedMiner.js`, `skillEvolution.js`, `skillEvolutionScheduler.js`, `skillCandidateStore.js`, `skillCandidateEvaluator.js`, `skillCandidateApply.js` | Implemented workspace-local skill candidate lifecycle. |
-| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentCards.js`, `agentRouter.js`, `externalAgentGateway.js`, `delegatedCapabilityTokens.js` | Durable local inbox/outbox, retry/progress/cancel, streaming envelope, peer discovery, restart-hydratable descriptors, stable secret/store adapters, multi-hop lineage, and scoped delegated trust; not external long-lived peer transport. |
+| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentCards.js`, `agentRouter.js`, `externalAgentGateway.js`, `a2aEndpointRegistry.js`, `delegatedCapabilityTokens.js` | Durable local inbox/outbox, retry/progress/cancel, streaming envelope, peer discovery, restart-hydratable descriptors, endpoint registry, negotiation envelopes, stable secret/store adapters, multi-hop lineage, and scoped delegated trust; not external long-lived peer transport. |
 | Trust kernel and safety | `src/harness-sidecar/core/trustKernelBoundary.js`, `approvalResume.js`, `src/harness-sidecar/security/*`, MCP policy modules | Implemented approval/safety boundaries; optimizers cannot self-authorize durable mutation. |
 
 The newest BES mesh passes add the first shared composition layer over this substrate. `runBesLaneRuntime` and lane evidence normalization now wrap shadow candidates in non-promotable BES envelopes; context, compaction, tool-loop, budget, visual, memory, MCP-trust, research, skill, swarm, and harness lanes can emit lane evidence while preserving existing public APIs. The live sidecar runtime now emits `bes_lane.started`, `bes_lane.completed`, `bes_lane.blocked`, and `harness_status.updated` events for representative runtime lanes. A2A envelopes preserve reference metadata for BES lane, RHO cases, memory graph refs, candidate refs, lineage, trust, and required verification; Memory Graph RAG can produce compact lane context packets; and operator status helpers summarize lane evidence without exposing raw prompts, patches, secrets, or untrusted external content.
@@ -194,10 +195,10 @@ Not yet paper-complete:
 - No single outer-loop agent currently searches freely over full harness code variants the way Meta-Harness does.
 - Candidate proposals are constrained by local modules and generated artifacts rather than full candidate harness directories with independent runnable source trees.
 - The repo does not yet run a repeated evaluate-log-propose loop over dozens of complete harness candidates.
-- There is no broad Pareto frontier over full harness implementations evaluated against a stable benchmark suite, although run records now preserve lineage, trace manifests, metric lineage, replay evidence, and sweep metadata.
+- There is now an advisory longitudinal frontier record over locked held-out suites and the full paper-grade dimensions, but it is not yet a broad operator dashboard over full harness implementations.
 - The proposer is not yet allowed to inspect arbitrary prior candidate source and trace directories as its primary optimization interface.
 - Current safe-apply policy deliberately prevents self-authorized mutation of active source code.
-- Harness-of-harnesses candidates have lineage/artifact storage support, but they are not yet implemented as full independent runnable source-tree variants.
+- Harness-of-harnesses candidates have lineage/artifact storage support and isolated variant manifests, but they are not yet implemented as full independent executable source-tree variants.
 
 Best next step:
 
@@ -241,9 +242,9 @@ Implemented:
 
 Not yet paper-complete:
 
-- Coreset selection is not a full DPP over embedding similarity and difficulty scores.
-- The grouped replay stage now compares candidate families over held-out variants, but it is still a deterministic harness runner rather than a large-scale model-judged rollout system.
-- Self-validation and self-consistency exist as structured deterministic signals, not as a general learned trajectory-ranking judge.
+- Coreset selection now supports precomputed embedding-aware DPP-like diversity with deterministic fallback; it is not yet a full learned embedding service over production trajectories.
+- The grouped replay stage now compares candidate families over held-out variants and emits aggregate evidence-only promotion/blocking summaries, but it is still a deterministic harness runner rather than a large-scale model-judged rollout system.
+- Self-validation and self-consistency exist as structured deterministic signals, including aggregate family evidence, not as a general learned trajectory-ranking judge.
 - Candidate harness updates are not yet generated as N full source-tree alternatives and re-solved across the coreset.
 - Pairwise self-preference exists as evidence, but it is not the sole promotion mechanism.
 - Human approval and deterministic promotion gates replace the paper's freer self-preference acceptance loop.
@@ -310,8 +311,8 @@ Implemented:
 
 Not yet paper-complete:
 
-- Helios now has deterministic trajectory operators, but they are adapted to harness candidates, policies, skills, verifier configs, and swarm attempts rather than reproducing the full paper formalism over model trajectory sequences.
-- Dense subgoal verification is mostly heuristic/deterministic by subsystem, not a general learned verifier per subgoal.
+- Helios now has deterministic trajectory operators with per-candidate provenance in lane runtime output, but they are adapted to harness candidates, policies, skills, verifier configs, and swarm attempts rather than reproducing the full paper formalism over model trajectory sequences.
+- Dense subgoal verification is mostly heuristic/deterministic by subsystem, now with lane-specific verifier-unit metadata, not a general learned verifier per subgoal.
 - The forward and backward searches are not yet fused into every runtime lane. Some lanes use BES metadata, some now emit live lane envelopes and future-hard-case records, and some only record evidence for later.
 - A shared `src/harness-sidecar/bes/laneRuntime.js` now exists and wraps candidates/evidence across lanes; the sidecar emits live lane events for representative runtime lanes, but full forward/backward trajectory semantics are still not uniformly fused into every live runtime path.
 - Optimization metadata from adaptive search, ToolTree, trajectory operators, champion archives, verifier genomes, and frontier scoring is not yet consistently attached to every candidate, though adaptive search now traces text/tool/swarm/visual/replay/verifier allocation.
@@ -372,7 +373,7 @@ Not yet implemented:
 
 - persistent A2A server endpoints per agent;
 - production-wired restart-persistent queues and stable delegated-token issuer secrets;
-- independent subagent-to-subagent negotiation.
+- independent subagent-to-subagent negotiation over real transports. A local endpoint registry and negotiation envelope now exist for testable contracts.
 
 Implication for MemGraphRAG:
 
@@ -403,10 +404,10 @@ This is why Helios should be described as "paper-inspired, safety-gated local ha
 | Paper | Core idea | Helios implementation | Status | Main gap |
 | --- | --- | --- | --- | --- |
 | MemGraphRAG | Shared three-layer memory for graph construction and memory-aware retrieval | Global memory layers, guarded extraction/adjudication hooks, conflict adjudicator, memory graph constructor, memory-aware and hierarchical retrievers, memory graph runtime, eval metrics | Strong deterministic skeleton | Missing production extraction society, learned adjudication, large eval loop |
-| Meta-Harness | Agentic code-space search over harnesses using filesystem traces and scores | Trace/artifact store, candidate archive, harness run store with lineage/replay artifacts, experiment runner, frontier store, promotion loop, policy candidates | Partial | Missing full outer loop over many evaluated runnable harness variants |
-| RHO | Retrospective hard-case coreset, group rollout, self-validation, self-consistency, self-preference | Coreset builder with difficulty/diversity metadata, hard-case mining, candidate-family replay batch runner, self-validation, self-consistency, self-preference, swarm outcome feedback | Partial to strong deterministic | Missing DPP embeddings, large grouped rerolls, promotion driven primarily by pairwise preference |
-| BES | Forward evolutionary candidate search plus backward goal decomposition | Subgoal planning/scoring, bidirectional loop, mutation/recombination, population archive, lane contracts, trajectory operators, dense verifier, lineage, adaptive search across action types, ToolTree, verifier genomes, live lane events, future hard cases | Partial to strong | Missing full paper trajectory formalism across all lanes |
-| A2A / multi-agent society bridge | Not a cited paper target, but needed to link nested swarms and harnesses | A2A envelope, agent cards, router, durable local gateway, scoped delegated tokens, stable secret/store adapters, streaming envelope, SwarmCell evolution output | Partial durable local contract | Missing external long-lived peer transport |
+| Meta-Harness | Agentic code-space search over harnesses using filesystem traces and scores | Trace/artifact store, candidate archive, harness run store with lineage/replay artifacts, isolated harness variant manifests, repeated variant cycles, longitudinal frontier, promotion loop, policy candidates | Partial | Missing full outer loop over many evaluated executable harness variants |
+| RHO | Retrospective hard-case coreset, group rollout, self-validation, self-consistency, self-preference | Coreset builder with difficulty/diversity metadata, embedding-aware DPP-like selection, hard-case mining, candidate-family replay batch runner, aggregate evidence, self-validation, self-consistency, self-preference, swarm outcome feedback | Partial to strong deterministic | Missing production embedding service, large grouped rerolls, promotion driven primarily by pairwise preference |
+| BES | Forward evolutionary candidate search plus backward goal decomposition | Subgoal planning/scoring, bidirectional loop, mutation/recombination, population archive, lane contracts, trajectory operators, dense verifier, lane-specific verifier metadata, trajectory provenance, lineage, adaptive search across action types, ToolTree, verifier genomes, live lane events, future hard cases | Partial to strong | Missing full paper trajectory formalism across all live lanes |
+| A2A / multi-agent society bridge | Not a cited paper target, but needed to link nested swarms and harnesses | A2A envelope, agent cards, router, durable local gateway, endpoint registry, negotiation envelope, scoped delegated tokens, stable secret/store adapters, streaming envelope, SwarmCell evolution output | Partial durable local contract | Missing external long-lived peer transport |
 
 ## Recommended Execution Order
 

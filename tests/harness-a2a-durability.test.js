@@ -9,6 +9,7 @@ import {
   createDelegatedCapabilityToken,
   verifyDelegatedCapabilityToken,
 } from '../src/harness-sidecar/interop/delegatedCapabilityTokens.js';
+import { A2AEndpointRegistry } from '../src/harness-sidecar/interop/a2aEndpointRegistry.js';
 import { ExternalAgentGateway } from '../src/harness-sidecar/interop/externalAgentGateway.js';
 
 test('gateway durably records outbound A2A work and retries it with stable correlation metadata', async () => {
@@ -566,4 +567,109 @@ test('delegated capability tokens bind signed trust to scopes as well as capabil
     }).reasons,
     ['invalid_signature'],
   );
+});
+
+test('A2A endpoint registry persists external peer endpoints without live socket handles', () => {
+  let persisted = null;
+  const durableStore = {
+    load: () => persisted,
+    save: (state) => {
+      persisted = state;
+    },
+  };
+  const registry = new A2AEndpointRegistry({
+    durableStore,
+    endpoints: [{
+      id: 'agent.endpoint',
+      name: 'Endpoint Agent',
+      protocol: 'a2a',
+      endpoint: {
+        url: 'https://endpoint.example.test/a2a',
+        socket: 'must-not-persist',
+        headers: { Authorization: 'Bearer should-redact' },
+      },
+      capabilities: ['repo.read', 'visual.verify'],
+      trustLevel: 'verified',
+      queueId: 'queue-endpoint',
+      issuerKeyRef: 'issuer:endpoint',
+      supportsStreaming: true,
+    }],
+  });
+
+  registry.persist();
+
+  const restored = new A2AEndpointRegistry({ durableStore });
+  const peers = restored.discover({
+    capabilities: ['visual.verify'],
+    minTrustLevel: 'verified',
+    requireStreaming: true,
+  });
+
+  assert.equal(peers.length, 1);
+  assert.equal(peers[0].id, 'agent.endpoint');
+  assert.equal(peers[0].endpoint.url, 'https://endpoint.example.test/a2a');
+  assert.equal(peers[0].endpoint.socket, undefined);
+  assert.equal(peers[0].endpoint.headers.Authorization, '[redacted]');
+  assert.equal(peers[0].queueId, 'queue-endpoint');
+  assert.equal(persisted.endpoints[0].issuerKeyRef, 'issuer:endpoint');
+});
+
+test('A2A negotiation envelopes preserve multi-hop lineage while denying authority', () => {
+  const registry = new A2AEndpointRegistry({
+    now: () => 7_000,
+    endpoints: [{
+      id: 'agent.negotiator',
+      name: 'Negotiator',
+      protocol: 'a2a',
+      endpoint: { url: 'https://negotiator.example.test/a2a' },
+      capabilities: ['repo.read', 'patch.apply'],
+      trustLevel: 'internal',
+      queueId: 'queue-negotiator',
+    }],
+  });
+
+  const envelope = registry.buildNegotiationEnvelope({
+    from: 'agent.parent',
+    toAgentId: 'agent.negotiator',
+    parentMessageId: 'msg-parent',
+    rootMessageId: 'msg-root',
+    lineage: [
+      { messageId: 'msg-root', from: 'helios.sidecar', to: 'agent.parent' },
+      { messageId: 'msg-parent', from: 'agent.parent', to: 'agent.negotiator' },
+    ],
+    task: {
+      id: 'task-negotiate',
+      correlationId: 'corr-negotiate',
+      mutation: true,
+      requiredCapabilities: ['repo.read', 'patch.apply'],
+      requiredScopes: ['files:src/**'],
+      prompt: 'Read context and propose a patch. token=ghp_secret password=hunter2 OPENAI_API_KEY=plainsecret',
+      context: {
+        'repo.read': { files: ['README.md'], note: 'password=hunter2', apiKey: 'sk-secret' },
+        'patch.apply': { diff: 'diff --git a/x b/x' },
+        ignored: { secret: 'do-not-send' },
+      },
+    },
+  });
+
+  assert.equal(envelope.message.kind, 'delegation_negotiation');
+  assert.equal(envelope.durable.parentMessageId, 'msg-parent');
+  assert.equal(envelope.durable.rootMessageId, 'msg-root');
+  assert.equal(envelope.durable.queueId, 'queue-negotiator');
+  assert.deepEqual(envelope.durable.lineage.map((hop) => hop.messageId), [
+    'msg-root',
+    'msg-parent',
+    'neg_corr-negotiate_1',
+  ]);
+  assert.equal(envelope.message.negotiation.mutation, true);
+  assert.equal(envelope.message.negotiation.approvalRequired, true);
+  assert.equal(envelope.message.negotiation.trust.external, true);
+  assert.equal(envelope.message.negotiation.trust.verified, false);
+  assert.equal(envelope.message.negotiation.authority.canPromote, false);
+  assert.equal(envelope.message.negotiation.authority.canMutateWorkspace, false);
+  assert.deepEqual(Object.keys(envelope.message.task.context), ['repo.read', 'patch.apply']);
+  assert.equal(JSON.stringify(envelope).includes('ghp_secret'), false);
+  assert.equal(JSON.stringify(envelope).includes('sk-secret'), false);
+  assert.equal(JSON.stringify(envelope).includes('hunter2'), false);
+  assert.equal(JSON.stringify(envelope).includes('plainsecret'), false);
 });

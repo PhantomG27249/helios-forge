@@ -61,10 +61,12 @@ function normalizeCandidateFamily({ candidateFamily, candidateRunner, candidate 
 function summarizeValidation(rollouts) {
   const results = rollouts.map(scoreSelfValidation);
   const passedCount = results.filter((result) => result.passed).length;
+  const total = rollouts.length;
   return {
-    passed: rollouts.length > 0 && passedCount === rollouts.length,
+    passed: total > 0 && passedCount === total,
     passedCount,
-    total: rollouts.length,
+    total,
+    passRate: total > 0 ? Number((passedCount / total).toFixed(12)) : 0,
     score: passedCount,
     results,
   };
@@ -89,6 +91,8 @@ async function runVariant({ item, itemIndex, groupSize, variant, runner, heldout
     variant,
     candidateId: candidate?.candidateId,
     heldoutVariants,
+    heldoutVariantCount: heldoutVariants.length,
+    rerollCount: rollouts.length,
     rollouts,
     validation: summarizeValidation(rollouts),
     consistency: scoreSelfConsistency({ rollouts }),
@@ -102,6 +106,43 @@ function blockingEvidence(summary) {
   return blockers;
 }
 
+function replayAggregate(summary = {}) {
+  return {
+    rerollCount: Number(summary.rerollCount ?? summary.rollouts?.length ?? 0),
+    heldoutVariantCount: Number(summary.heldoutVariantCount ?? summary.heldoutVariants?.length ?? 0),
+    validationPassedCount: Number(summary.validation?.passedCount ?? 0),
+    validationTotal: Number(summary.validation?.total ?? 0),
+    validationPassRate: Number(summary.validation?.passRate ?? 0),
+    consistencyScore: Number(summary.consistency?.score ?? 0),
+    consistencyMajorityCount: Number(summary.consistency?.majorityCount ?? 0),
+    consistencyTotal: Number(summary.consistency?.total ?? 0),
+    consistent: summary.consistency?.consistent === true,
+  };
+}
+
+function aggregatePromotionEvidence(entry) {
+  const evidence = [];
+  if (entry.caseCount > 0 && entry.preferredCount > entry.caseCount / 2) {
+    evidence.push('candidate_family_majority_preferred');
+  }
+  if (entry.scoreDelta > 0) {
+    evidence.push('positive_self_preference_delta');
+  }
+  if (entry.rerollCount >= Math.max(2, entry.caseCount * 2)) {
+    evidence.push('grouped_reroll_evidence');
+  }
+  if (entry.heldoutVariantIds.size > 1) {
+    evidence.push('heldout_variant_coverage');
+  }
+  if (entry.validationTotal > 0 && entry.validationPassedCount === entry.validationTotal) {
+    evidence.push('self_validation_all_passed');
+  }
+  if (entry.caseCount > 0 && entry.consistencyScoreTotal / entry.caseCount > 0.5) {
+    evidence.push('self_consistency_signal');
+  }
+  return evidence.sort();
+}
+
 function summarizeFamily(preferences) {
   const aggregates = new Map();
   for (const preference of preferences) {
@@ -112,22 +153,67 @@ function summarizeFamily(preferences) {
       candidateScore: 0,
       scoreDelta: 0,
       blockingEvidence: new Set(),
+      rerollCount: 0,
+      heldoutVariantIds: new Set(),
+      validationPassedCount: 0,
+      validationTotal: 0,
+      consistencyScoreTotal: 0,
+      consistentCaseCount: 0,
     };
+    const aggregate = preference.aggregate ?? {};
     current.caseCount += 1;
     if (preference.preferred === 'candidate') current.preferredCount += 1;
     current.candidateScore += Number(preference.candidateScore || 0);
     current.scoreDelta += Number(preference.scoreDelta || 0);
     for (const blocker of preference.blockingEvidence || []) current.blockingEvidence.add(blocker);
+    current.rerollCount += Number(aggregate.rerollCount || 0);
+    current.validationPassedCount += Number(aggregate.validationPassedCount || 0);
+    current.validationTotal += Number(aggregate.validationTotal || 0);
+    current.consistencyScoreTotal += Number(aggregate.consistencyScore || 0);
+    if (aggregate.consistent === true) current.consistentCaseCount += 1;
+    for (const variant of preference.heldoutVariants || []) {
+      current.heldoutVariantIds.add(String(variant.variantId ?? variant.id ?? variant));
+    }
     aggregates.set(preference.candidateId, current);
   }
   const ranked = [...aggregates.values()]
-    .map((entry) => ({
-      ...entry,
-      preferred: entry.preferredCount > 0 ? 'candidate' : 'baseline',
-      candidateScore: Number(entry.candidateScore.toFixed(12)),
-      scoreDelta: Number(entry.scoreDelta.toFixed(12)),
-      blockingEvidence: [...entry.blockingEvidence].sort(),
-    }))
+    .map((entry) => {
+      const blockingEvidence = [...entry.blockingEvidence];
+      if (entry.validationTotal > 0 && entry.validationPassedCount < entry.validationTotal) {
+        blockingEvidence.push('aggregate_validation_failed');
+      }
+      if (entry.caseCount > 0 && entry.consistentCaseCount < entry.caseCount) {
+        blockingEvidence.push('aggregate_consistency_failed');
+      }
+      const validationPassRate = entry.validationTotal > 0
+        ? Number((entry.validationPassedCount / entry.validationTotal).toFixed(12))
+        : 0;
+      const meanConsistencyScore = entry.caseCount > 0
+        ? Number((entry.consistencyScoreTotal / entry.caseCount).toFixed(12))
+        : 0;
+      const caseWinRate = entry.caseCount > 0
+        ? Number((entry.preferredCount / entry.caseCount).toFixed(12))
+        : 0;
+      return {
+        ...entry,
+        preferred: entry.preferredCount > 0 ? 'candidate' : 'baseline',
+        candidateScore: Number(entry.candidateScore.toFixed(12)),
+        scoreDelta: Number(entry.scoreDelta.toFixed(12)),
+        blockingEvidence: [...new Set(blockingEvidence)].sort(),
+        promotionEvidence: aggregatePromotionEvidence(entry),
+        promotionAllowed: false,
+        authority: 'evidence_only',
+        aggregate: {
+          rerollCount: entry.rerollCount,
+          heldoutVariantCount: entry.heldoutVariantIds.size,
+          validationPassedCount: entry.validationPassedCount,
+          validationTotal: entry.validationTotal,
+          validationPassRate,
+          meanConsistencyScore,
+          caseWinRate,
+        },
+      };
+    })
     .sort((left, right) => (
       right.scoreDelta - left.scoreDelta
         || right.candidateScore - left.candidateScore
@@ -144,7 +230,13 @@ function summarizeFamily(preferences) {
       caseCount: entry.caseCount,
       preferredCount: entry.preferredCount,
       blockingEvidence: entry.blockingEvidence,
+      promotionEvidence: entry.promotionEvidence,
+      promotionAllowed: entry.promotionAllowed,
+      authority: entry.authority,
+      aggregate: entry.aggregate,
     })),
+    promotionAllowed: false,
+    authority: 'evidence_only',
   };
 }
 
@@ -204,6 +296,10 @@ export async function runRhoReplayBatch({
         candidateId: familyMember.candidateId,
         ...judgeSelfPreference({ baseline, candidate: candidateSummary }),
         blockingEvidence: blockingEvidence(candidateSummary),
+        aggregate: replayAggregate(candidateSummary),
+        heldoutVariants: caseHeldoutVariants,
+        promotionAllowed: false,
+        authority: 'evidence_only',
       };
       preferences.push(preference);
       allPreferences.push({

@@ -1,5 +1,6 @@
 const DEFAULT_LIMIT = 8;
 const LOW_COMPLETION_THRESHOLD = 0.5;
+const EMBEDDING_DIVERSITY_WEIGHT = 3;
 
 function stableString(value) {
   if (value === undefined || value === null) {
@@ -376,6 +377,8 @@ function resolveVerifierDiversityKey(verifierCase, caseId, reason) {
 function rankedVerifierCase(verifierCase, index) {
   const caseId = getVerifierCaseId(verifierCase, index);
   const scored = classifyVerifierCase(verifierCase);
+  const diversityKey = resolveVerifierDiversityKey(verifierCase, caseId, scored.reason);
+  const embedding = resolveEmbedding(verifierCase);
   return {
     id: caseId,
     taskId: caseId,
@@ -384,7 +387,22 @@ function rankedVerifierCase(verifierCase, index) {
     reasons: scored.reason ? [scored.reason] : [],
     verifierCase,
     source: 'verifier_case',
-    diversityKey: resolveVerifierDiversityKey(verifierCase, caseId, scored.reason),
+    diversityKey,
+    embedding,
+    metadata: {
+      difficulty: {
+        score: scored.score,
+        band: difficultyBand(scored.score),
+        reasons: scored.reason ? [scored.reason] : [],
+      },
+      diversity: {
+        key: diversityKey,
+        keys: [diversityKey],
+        source: 'verifier_case',
+        embeddingAvailable: Boolean(embedding),
+        embeddingDimension: embedding?.length ?? 0,
+      },
+    },
   };
 }
 
@@ -450,6 +468,7 @@ function traceLineage(trace = {}) {
 }
 
 function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' }) {
+  const embedding = resolveEmbedding(trace);
   return {
     difficulty: {
       score: scored.score,
@@ -460,6 +479,8 @@ function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' 
       key: diversityKey,
       keys: resolveDiversityKeys(trace, taskId, diversityKey),
       source,
+      embeddingAvailable: Boolean(embedding),
+      embeddingDimension: embedding?.length ?? 0,
     },
   };
 }
@@ -474,42 +495,94 @@ function compareRankedItems(a, b) {
   return a.taskId.localeCompare(b.taskId);
 }
 
-export function buildRhoCoreset({
-  traces = [],
-  verifierCases = [],
-  limit = DEFAULT_LIMIT,
-  diversityKey,
-} = {}) {
-  const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
-  const rankedTraces = traces.map((trace, index) => {
-    const taskId = getTaskId(trace, index);
-    const scored = scoreTrace(trace);
-    const resolvedDiversityKey = resolveDiversityKey(trace, taskId, diversityKey);
-    return {
-      taskId,
-      score: scored.score,
-      reasons: scored.reasons,
-      trace,
-      diversityKey: resolvedDiversityKey,
-      heldoutVariants: heldoutVariants(trace),
-      lineage: traceLineage(trace),
-      metadata: replayMetadata({
-        trace,
-        taskId,
-        scored,
-        diversityKey: resolvedDiversityKey,
-      }),
-    };
-  });
-  const rankedVerifierCases = verifierCases
-    .map(rankedVerifierCase)
-    .filter((item) => item.score > 0 || item.reasons.length > 0);
-  const ranked = [...rankedTraces, ...rankedVerifierCases].sort(compareRankedItems);
+function normalizeEmbedding(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const vector = value.map((entry) => Number(entry));
+  if (!vector.every(Number.isFinite)) {
+    return null;
+  }
+  const magnitude = Math.sqrt(vector.reduce((sum, entry) => sum + entry * entry, 0));
+  return magnitude > 0 ? vector : null;
+}
 
-  if (safeLimit === 0) {
-    return { items: [], totalCandidates: ranked.length, selectedCount: 0 };
+function resolveEmbedding(source = {}) {
+  return normalizeEmbedding(
+    source.embedding ??
+      source.embeddingVector ??
+      source.embedding_vector ??
+      source.vector ??
+      source.metadata?.embedding ??
+      source.result?.embedding,
+  );
+}
+
+function dotProduct(left, right) {
+  const length = Math.min(left.length, right.length);
+  let dot = 0;
+  for (let index = 0; index < length; index += 1) {
+    dot += left[index] * right[index];
+  }
+  return dot;
+}
+
+function magnitude(vector) {
+  return Math.sqrt(vector.reduce((sum, entry) => sum + entry * entry, 0));
+}
+
+function cosineSimilarity(left, right) {
+  const denominator = magnitude(left) * magnitude(right);
+  if (denominator === 0) {
+    return 0;
+  }
+  return Math.max(-1, Math.min(1, dotProduct(left, right) / denominator));
+}
+
+function embeddingNovelty(item, selected) {
+  if (!item.embedding || selected.length === 0) {
+    return item.embedding ? 1 : 0;
+  }
+  const distances = selected
+    .filter((selectedItem) => selectedItem.embedding)
+    .map((selectedItem) => 1 - cosineSimilarity(item.embedding, selectedItem.embedding));
+  return distances.length > 0 ? Math.min(...distances) : 1;
+}
+
+function compareEmbeddingCandidates(a, b) {
+  if (b.selectionScore !== a.selectionScore) {
+    return b.selectionScore - a.selectionScore;
+  }
+  if (b.novelty !== a.novelty) {
+    return b.novelty - a.novelty;
+  }
+  return compareRankedItems(a.item, b.item);
+}
+
+function selectByEmbeddingDiversity(ranked, safeLimit) {
+  const selected = [];
+  const remaining = [...ranked];
+
+  while (selected.length < safeLimit && remaining.length > 0) {
+    const scored = remaining
+      .map((item) => {
+        const novelty = embeddingNovelty(item, selected);
+        return {
+          item,
+          novelty,
+          selectionScore: item.score + novelty * EMBEDDING_DIVERSITY_WEIGHT,
+        };
+      })
+      .sort(compareEmbeddingCandidates);
+    const next = scored[0].item;
+    selected.push(next);
+    remaining.splice(remaining.indexOf(next), 1);
   }
 
+  return selected;
+}
+
+function selectByKeyDiversity(ranked, safeLimit) {
   const selected = [];
   const selectedKeys = new Set();
 
@@ -532,11 +605,61 @@ export function buildRhoCoreset({
     }
   }
 
+  return selected;
+}
+
+export function buildRhoCoreset({
+  traces = [],
+  verifierCases = [],
+  limit = DEFAULT_LIMIT,
+  diversityKey,
+} = {}) {
+  const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
+  const rankedTraces = traces.map((trace, index) => {
+    const taskId = getTaskId(trace, index);
+    const scored = scoreTrace(trace);
+    const resolvedDiversityKey = resolveDiversityKey(trace, taskId, diversityKey);
+    return {
+      taskId,
+      score: scored.score,
+      reasons: scored.reasons,
+      trace,
+      diversityKey: resolvedDiversityKey,
+      embedding: resolveEmbedding(trace),
+      heldoutVariants: heldoutVariants(trace),
+      lineage: traceLineage(trace),
+      metadata: replayMetadata({
+        trace,
+        taskId,
+        scored,
+        diversityKey: resolvedDiversityKey,
+      }),
+    };
+  });
+  const rankedVerifierCases = verifierCases
+    .map(rankedVerifierCase)
+    .filter((item) => item.score > 0 || item.reasons.length > 0);
+  const ranked = [...rankedTraces, ...rankedVerifierCases].sort(compareRankedItems);
+
+  if (safeLimit === 0) {
+    return { items: [], totalCandidates: ranked.length, selectedCount: 0 };
+  }
+
+  const embeddedCount = ranked.filter((item) => item.embedding).length;
+  const useEmbeddingDiversity = embeddedCount >= 2 && safeLimit >= 2;
+  const selected = useEmbeddingDiversity
+    ? selectByEmbeddingDiversity(ranked, safeLimit)
+    : selectByKeyDiversity(ranked, safeLimit);
+
   selected.sort(compareRankedItems);
 
   return {
     items: selected,
     totalCandidates: ranked.length,
     selectedCount: selected.length,
+    selection: {
+      strategy: useEmbeddingDiversity ? 'embedding_dpp_like' : 'difficulty_diversity_key',
+      embeddedCandidates: embeddedCount,
+    },
   };
 }

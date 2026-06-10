@@ -16,7 +16,7 @@ Current state after the latest implementation pass:
 
 - **Architecture maturity:** high. The docs now describe the right shape: swarm of swarms, harnesses of harnesses, Memory Graph RAG, A2A lineage, RHO/BES/adaptive search, trust kernel.
 - **Primitive maturity:** high for a deterministic local harness. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, durable local A2A queues, governance loops, and trust gates.
-- **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
+- **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, benchmark/frontier history, isolated harness variants, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
 
 Approximate level:
 
@@ -92,11 +92,11 @@ Implemented:
 
 Still needed:
 
-- run larger RHO replays and harness experiments over stable, production-sized held-out suites;
-- connect lane results to persisted longitudinal frontier dashboards over time;
-- evolve full runnable harness variants in isolated candidate directories;
+- run larger real RHO replays and harness experiments over production-sized held-out suites;
+- connect the new longitudinal frontier history to persisted operator dashboards over time;
+- scale isolated harness variant directories from runnable manifests into full source-tree workspaces;
 - broaden verifier-genome and harness-of-harnesses coverage;
-- promote local A2A durability into actual long-lived network endpoints and multi-hop peer transport.
+- promote the new external A2A endpoint registry/negotiation contracts into actual long-lived network services and multi-hop peer transport.
 
 ## Gap Layer 3: Long-Running Maturity Gaps
 
@@ -112,9 +112,9 @@ Current memory is a strong deterministic skeleton with runtime extraction compos
 
 ### 2. Paper-Grade RHO
 
-Current RHO has coreset, difficulty/diversity metadata, held-out variants, and candidate-family replay primitives. Remaining work:
+Current RHO has coreset, difficulty/diversity metadata, embedding-aware deterministic DPP-like selection, held-out variants, candidate-family replay primitives, grouped aggregate evidence, and evidence-only promotion/blocking summaries. Remaining work:
 
-- true embedding/DPP case selection rather than deterministic diversity keys;
+- model-backed embeddings and larger DPP selection beyond precomputed vectors;
 - larger grouped rerolls across production held-out tasks;
 - broader candidate-family comparison across more subsystems;
 - stronger self-preference and self-consistency scoring;
@@ -123,10 +123,10 @@ Current RHO has coreset, difficulty/diversity metadata, held-out variants, and c
 
 ### 3. Paper-Grade Meta-Harness
 
-Current global harness experiments compare candidates and persist lineage, trace, metric, replay, and sweep artifacts. Remaining work:
+Current global harness experiments compare candidates, persist lineage/trace/metric/replay/sweep artifacts, and can write isolated evidence-only harness variant directories over repeated propose/evaluate/log cycles. Remaining work:
 
-- many complete runnable harness variants;
-- richer benchmark directories with full independent source/config/trace/metric artifacts;
+- many complete runnable harness variants beyond the current isolated manifests;
+- richer benchmark directories with full independent source/config/trace/metric artifacts and executable harness entrypoints;
 - Pareto frontier over stable benchmark suites;
 - harness-of-harnesses candidates that optimize the optimizer itself;
 - repeated propose/evaluate/log/propose cycles over time;
@@ -134,13 +134,13 @@ Current global harness experiments compare candidates and persist lineage, trace
 
 ### 4. Full BES Semantics Across Every Lane
 
-Current BES primitives are strong and now include adaptive budget allocation plus future-hard-case capture. Remaining work:
+Current BES primitives are strong and now include adaptive budget allocation, future-hard-case capture, lane-specific verifier metadata, trajectory-operator provenance, and champion-to-frontier evidence bridges. Remaining work:
 
 - forward/backward BES in every lane;
 - lane-specific dense subgoal verifiers;
-- trajectory operator provenance through every candidate;
-- mutation/recombination across compatible candidate families;
-- champion archives connected to global frontier records;
+- trajectory operator provenance through every live candidate path;
+- mutation/recombination across compatible candidate families at runtime scale;
+- champion archives connected to persisted longitudinal frontier dashboards;
 - deeper runtime use of adaptive search decisions after selecting explore/refine/replay/stop/evidence actions;
 - learned or model-assisted subgoal/verifier judgment where deterministic tests are too weak.
 
@@ -151,8 +151,8 @@ This is now a first-class signal in the local organism, with production-scale ex
 Required upgrades:
 
 - **Visual SwarmCell:** a dedicated SwarmCell for screenshots, UI states, diagrams, plots, PDFs, OCR, charts, and generated artifacts.
-- **Visual RHO cases:** first-pass visual cases are emitted from verifier evidence; scale still needs broader OCR/PDF/diagram/chart/UI regression suites.
-- **Visual BES lane:** first-pass visual evidence enters BES envelopes; deeper crop/artifact/OCR/VLM routing evolution remains.
+- **Visual RHO cases:** first-pass visual cases are emitted from verifier evidence, and benchmark case builders now cover OCR/PDF/diagram/chart/UI regression cases; scale still needs production suites.
+- **Visual BES lane:** first-pass visual evidence enters BES envelopes; budget-aware VLM routing metadata now exists, while deeper crop/artifact/OCR/VLM routing evolution remains.
 - **Multimodal Memory Graph RAG:** visual evidence references are graph nodes; richer links to claims, source files, UI states, and replay cases should expand.
 - **A2A visual references:** reference passing is supported by the durable envelope shape; artifact hash policy is enforced for visual-impacting trust gates.
 - **Meta-Harness visual benchmarks:** compare visual policy candidates over held-out UI/artifact/PDF/diagram tasks.
@@ -178,7 +178,7 @@ Current A2A is now a durable local interop substrate, not only scaffolding. Impl
 
 Remaining work:
 
-- persistent external A2A server endpoints per agent;
+- persistent external A2A server/client services per agent, beyond the new endpoint registry and negotiation envelopes;
 - production wiring for restart-persistent queue stores and stable issuer-secret providers;
 - independent subagent-to-subagent negotiation;
 - A2A lineage surviving real multi-hop agent -> SwarmCell -> swarm -> local harness -> global harness network flows.

@@ -199,3 +199,65 @@ test('selects candidate-family winner from aggregate replay performance across c
     true,
   );
 });
+
+test('emits aggregate candidate-family preference evidence without promotion authority', async () => {
+  const result = await runRhoReplayBatch({
+    coreset: {
+      items: [
+        { taskId: 'case_alpha', heldoutVariants: [{ variantId: 'seed_1' }, { variantId: 'seed_2' }] },
+        { taskId: 'case_beta', heldoutVariants: [{ variantId: 'seed_1' }, { variantId: 'seed_2' }] },
+      ],
+    },
+    groupSize: 3,
+    baselineRunner: async ({ heldoutVariant, rolloutIndex }) => ({
+      status: 'completed',
+      compactHandoff: {
+        summary: `baseline:${heldoutVariant.variantId}:${rolloutIndex}`,
+        testsRun: ['npm test'],
+      },
+      verifierEvidence: [{ passed: true }],
+    }),
+    candidateFamily: [
+      {
+        candidateId: 'cand_consistent',
+        runner: async ({ candidate, item }) => ({
+          status: 'completed',
+          compactHandoff: {
+            summary: `${candidate.candidateId}:${item.taskId}:stable`,
+            testsRun: ['npm test'],
+          },
+          verifierEvidence: [{ passed: true }],
+        }),
+      },
+      {
+        candidateId: 'cand_blocked',
+        runner: async ({ rolloutIndex }) => ({
+          status: rolloutIndex === 2 ? 'failed' : 'completed',
+          compactHandoff: {
+            summary: `blocked:${rolloutIndex}`,
+            testsRun: rolloutIndex === 2
+              ? [{ command: 'npm test', status: 'failed', passed: false }]
+              : ['npm test'],
+          },
+          verifierEvidence: [{ passed: rolloutIndex !== 2 }],
+        }),
+      },
+    ],
+  });
+
+  const consistent = result.familySummary.rankings.find((entry) => entry.candidateId === 'cand_consistent');
+  const blocked = result.familySummary.rankings.find((entry) => entry.candidateId === 'cand_blocked');
+
+  assert.equal(result.groupSize, 3);
+  assert.equal(result.familySummary.promotionAllowed, false);
+  assert.equal(result.familySummary.authority, 'evidence_only');
+  assert.equal(consistent.aggregate.rerollCount, 12);
+  assert.equal(consistent.aggregate.caseWinRate, 1);
+  assert.equal(consistent.aggregate.validationPassRate, 1);
+  assert.equal(consistent.promotionEvidence.includes('candidate_family_majority_preferred'), true);
+  assert.equal(consistent.promotionEvidence.includes('grouped_reroll_evidence'), true);
+  assert.equal(consistent.promotionAllowed, false);
+  assert.equal(blocked.blockingEvidence.includes('validation_failed'), true);
+  assert.equal(blocked.blockingEvidence.includes('aggregate_validation_failed'), true);
+  assert.equal(blocked.promotionEvidence.includes('candidate_family_majority_preferred'), false);
+});

@@ -1,4 +1,14 @@
 export const MEMORY_EXTRACTION_SOCIETY_SCHEMA_VERSION = 1;
+export const MEMORY_EXTRACTION_ROLES = [
+  'passage_collector',
+  'schema_proposer',
+  'fact_extractor',
+  'contradiction_critic',
+  'merge_planner',
+  'graph_constructor',
+  'retriever',
+  'evaluator',
+];
 
 function normalizeList(value) {
   if (!value) return [];
@@ -40,6 +50,19 @@ function normalizeFact(observation = {}) {
     passageIds: normalizeList(observation.passageIds || observation.passageId || observation.source).map(String).sort(),
     confidence: Number.isFinite(Number(observation.confidence)) ? Number(observation.confidence) : null,
     status: observation.status || 'local_pending',
+  };
+}
+
+function factPassageSupport(fact = {}, passages = []) {
+  const passageIds = normalizeList(fact.passageIds).map(String);
+  const available = new Set(passages.map((passage) => String(passage.passageId || passage.id)));
+  const missing = passageIds.filter((passageId) => !available.has(passageId));
+  const reasons = [];
+  if (passageIds.length === 0 || missing.length > 0) reasons.push('missing_passage_support');
+  return {
+    supported: reasons.length === 0,
+    reasons,
+    missingPassageIds: missing.sort(),
   };
 }
 
@@ -90,10 +113,14 @@ function upsertByIdentity(items, item, identity) {
   };
 }
 
-function callHook({ hook, name, context, hookTrace }) {
+function callRole({ roleHandlers = {}, role, fallbackHook, fallbackName, context, roleTrace, hookTrace }) {
+  const hook = roleHandlers[role] || fallbackHook;
   if (typeof hook !== 'function') return [];
   const result = normalizeList(hook(context));
-  if (result.length > 0) hookTrace.push(name);
+  if (result.length > 0) {
+    roleTrace.push(role);
+    if (fallbackName && hook === fallbackHook) hookTrace.push(fallbackName);
+  }
   return result;
 }
 
@@ -125,11 +152,15 @@ export function runMemoryExtractionSociety({
   observations = [],
   modelAssistance = {},
   modelHooks = {},
+  roleHandlers = {},
 } = {}) {
   const passages = [];
   const schemas = [];
   const facts = [];
+  const rejectedFacts = [];
   const hookTrace = [];
+  const roleTrace = [];
+  const roleOutputs = {};
   const normalizedObservations = normalizeList(observations);
 
   normalizedObservations.forEach((observation, index) => {
@@ -141,7 +172,14 @@ export function runMemoryExtractionSociety({
     if (schema) upsertByIdentity(schemas, schema, schemaKey);
 
     const fact = normalizeFact(observation);
-    if (fact) upsertByIdentity(facts, fact, fullFactKey);
+    if (fact) {
+      const guard = factPassageSupport(fact, passages);
+      if (guard.supported) {
+        upsertByIdentity(facts, fact, fullFactKey);
+      } else {
+        rejectedFacts.push({ ...fact, guard });
+      }
+    }
   });
 
   if (modelAssistance.enabled === true) {
@@ -151,33 +189,104 @@ export function runMemoryExtractionSociety({
       schemas: schemas.map((schema) => ({ ...schema })),
       facts: facts.map((fact) => ({ ...fact })),
     };
-    callHook({ hook: modelHooks.extractPassages, name: 'extractPassages', context, hookTrace })
+    const collectedPassages = callRole({
+      roleHandlers,
+      role: 'passage_collector',
+      fallbackHook: modelHooks.extractPassages,
+      fallbackName: 'extractPassages',
+      context,
+      roleTrace,
+      hookTrace,
+    });
+    if (collectedPassages.length > 0) roleOutputs.passage_collector = collectedPassages;
+    collectedPassages
       .forEach((passage, index) => upsertByIdentity(passages, normalizePassage(passage, index), (item) => item.passageId));
-    callHook({ hook: modelHooks.induceSchemas, name: 'induceSchemas', context, hookTrace })
+
+    const schemaContext = { ...context, passages: passages.map((passage) => ({ ...passage })) };
+    const proposedSchemas = callRole({
+      roleHandlers,
+      role: 'schema_proposer',
+      fallbackHook: modelHooks.induceSchemas,
+      fallbackName: 'induceSchemas',
+      context: schemaContext,
+      roleTrace,
+      hookTrace,
+    });
+    if (proposedSchemas.length > 0) roleOutputs.schema_proposer = proposedSchemas;
+    proposedSchemas
       .map(normalizeSchema)
       .forEach((schema) => upsertByIdentity(schemas, schema, schemaKey));
-    callHook({ hook: modelHooks.extractFacts, name: 'extractFacts', context, hookTrace })
+
+    const factContext = {
+      ...schemaContext,
+      schemas: schemas.map((schema) => ({ ...schema })),
+      facts: facts.map((fact) => ({ ...fact })),
+    };
+    const extractedFacts = callRole({
+      roleHandlers,
+      role: 'fact_extractor',
+      fallbackHook: modelHooks.extractFacts,
+      fallbackName: 'extractFacts',
+      context: factContext,
+      roleTrace,
+      hookTrace,
+    });
+    if (extractedFacts.length > 0) roleOutputs.fact_extractor = extractedFacts;
+    extractedFacts
       .map(normalizeFact)
-      .forEach((fact) => upsertByIdentity(facts, fact, fullFactKey));
+      .forEach((fact) => {
+        if (!fact) return;
+        const guard = factPassageSupport(fact, passages);
+        if (guard.supported) {
+          upsertByIdentity(facts, fact, fullFactKey);
+          return;
+        }
+        rejectedFacts.push({ ...fact, guard });
+      });
   }
 
   const hookContradictions = modelAssistance.enabled === true
-    ? callHook({
-      hook: modelHooks.checkContradictions,
-      name: 'checkContradictions',
+    ? callRole({
+      roleHandlers,
+      role: 'contradiction_critic',
+      fallbackHook: modelHooks.checkContradictions,
+      fallbackName: 'checkContradictions',
       context: {
         observations: normalizedObservations,
         passages,
         schemas,
         facts,
       },
+      roleTrace,
       hookTrace,
     })
     : [];
+  if (hookContradictions.length > 0) roleOutputs.contradiction_critic = hookContradictions;
+
+  if (modelAssistance.enabled === true) {
+    const settledContext = {
+      observations: normalizedObservations,
+      passages,
+      schemas,
+      facts,
+      rejectedFacts,
+      contradictions: [...findContradictions(facts), ...hookContradictions],
+    };
+    for (const role of ['merge_planner', 'graph_constructor', 'retriever', 'evaluator']) {
+      const output = callRole({
+        roleHandlers,
+        role,
+        context: settledContext,
+        roleTrace,
+        hookTrace,
+      });
+      if (output.length > 0) roleOutputs[role] = output;
+    }
+  }
 
   return {
     schemaVersion: MEMORY_EXTRACTION_SOCIETY_SCHEMA_VERSION,
-    roles: ['passage_extractor', 'schema_inducer', 'fact_extractor', 'contradiction_checker'],
+    roles: MEMORY_EXTRACTION_ROLES,
     passages: passages.sort((left, right) => left.passageId.localeCompare(right.passageId)),
     schemas: schemas.sort((left, right) => (
       left.headType.localeCompare(right.headType)
@@ -191,5 +300,12 @@ export function runMemoryExtractionSociety({
     )),
     contradictions: [...findContradictions(facts), ...hookContradictions],
     hookTrace: hookTrace.sort(),
+    roleTrace: [...new Set(roleTrace)].sort(),
+    roleOutputs,
+    rejectedFacts: rejectedFacts.sort((left, right) => (
+      left.subject.localeCompare(right.subject)
+      || left.relation.localeCompare(right.relation)
+      || left.object.localeCompare(right.object)
+    )),
   };
 }

@@ -1,3 +1,8 @@
+import {
+  buildVisualBenchmarkCases,
+  sanitizeVisualArtifactPath,
+} from './visualBenchmarkCases.js';
+
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -9,11 +14,11 @@ function stableString(value, fallback = '') {
 }
 
 function artifactPath(artifact = {}) {
-  if (typeof artifact.path === 'string') return artifact.path;
-  if (typeof artifact.artifacts?.image === 'string') return artifact.artifacts.image;
-  if (typeof artifact.artifacts?.diff === 'string') return artifact.artifacts.diff;
-  if (typeof artifact.artifacts?.after === 'string') return artifact.artifacts.after;
-  if (typeof artifact.artifacts?.before === 'string') return artifact.artifacts.before;
+  if (typeof artifact.path === 'string') return sanitizeVisualArtifactPath(artifact.path);
+  if (typeof artifact.artifacts?.image === 'string') return sanitizeVisualArtifactPath(artifact.artifacts.image);
+  if (typeof artifact.artifacts?.diff === 'string') return sanitizeVisualArtifactPath(artifact.artifacts.diff);
+  if (typeof artifact.artifacts?.after === 'string') return sanitizeVisualArtifactPath(artifact.artifacts.after);
+  if (typeof artifact.artifacts?.before === 'string') return sanitizeVisualArtifactPath(artifact.artifacts.before);
   return null;
 }
 
@@ -25,6 +30,26 @@ function artifactHash(artifact = {}) {
     ?? artifact.artifacts?.hash
     ?? artifact.artifacts?.sha256;
   return hash ? stableString(hash, null) : null;
+}
+
+function sanitizedArtifactRecord(artifact = {}) {
+  const sanitized = { ...artifact };
+  const safePath = artifactPath(artifact);
+  if (safePath) sanitized.path = safePath;
+  else delete sanitized.path;
+  if (artifact.artifacts && typeof artifact.artifacts === 'object') {
+    const nested = {};
+    for (const [key, value] of Object.entries(artifact.artifacts)) {
+      if (typeof value !== 'string') {
+        nested[key] = value;
+        continue;
+      }
+      const safeNestedPath = sanitizeVisualArtifactPath(value);
+      if (safeNestedPath) nested[key] = safeNestedPath;
+    }
+    sanitized.artifacts = nested;
+  }
+  return sanitized;
 }
 
 function visualReason(verifierResult = {}) {
@@ -58,6 +83,11 @@ export function buildVisualEvidenceBundle({
   const normalizedTaskId = stableString(taskId, 'visual_task');
   const visualArtifacts = asArray(artifacts ?? verifierResult.artifacts)
     .filter((artifact) => artifact && typeof artifact === 'object');
+  const visualCases = buildVisualBenchmarkCases({
+    taskId: normalizedTaskId,
+    verifierResult,
+    artifacts: visualArtifacts.map((artifact) => sanitizedArtifactRecord(artifact)),
+  });
   const nodes = visualArtifacts.map((artifact, index) => buildNode({
     taskId: normalizedTaskId,
     artifact,
@@ -65,7 +95,7 @@ export function buildVisualEvidenceBundle({
     index,
   }));
   const reason = visualReason(verifierResult);
-  const rhoCases = nodes.map((node) => ({
+  const rhoCases = nodes.map((node, index) => ({
     caseId: node.id,
     taskId: normalizedTaskId,
     reason,
@@ -75,6 +105,7 @@ export function buildVisualEvidenceBundle({
       verifier: verifierResult.name || 'visual.verifier',
       score: node.score,
       confidence: node.confidence,
+      visualCase: visualCases[index] || null,
       visualArtifacts: node.path ? [{
         type: node.artifactType,
         path: node.path,
@@ -86,7 +117,8 @@ export function buildVisualEvidenceBundle({
 
   return {
     nodes,
-    artifacts: visualArtifacts,
+    artifacts: visualArtifacts.map((artifact) => sanitizedArtifactRecord(artifact)),
+    visualCases,
     verdict: {
       passed: verifierResult.passed === true,
       score: Number.isFinite(Number(verifierResult.score)) ? Number(verifierResult.score) : null,

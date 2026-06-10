@@ -77,6 +77,18 @@ function migrationRecord(id, fromVersion, toVersion, target) {
   };
 }
 
+function evidenceRecordsForConflict(layers = {}, conflict = {}) {
+  const passageIds = new Set(normalizeList(conflict.provenanceIds).map(String));
+  const records = normalizeList(layers.passages)
+    .filter((passage) => passageIds.has(String(passage.passageId || passage.id)));
+  const recordIds = new Set(records.map((passage) => String(passage.passageId || passage.id)));
+  return [
+    ...records,
+    ...[...passageIds]
+      .filter((passageId) => !recordIds.has(passageId)),
+  ];
+}
+
 function withSchemaVersion(layers) {
   return {
     ...layers,
@@ -140,7 +152,7 @@ function applyPromotion(layers, promotion = {}, policy = {}) {
     for (const conflict of conflicts) {
       const decision = adjudicateMemoryConflict({
         conflict,
-        evidence: fact.passageIds,
+        evidence: evidenceRecordsForConflict(layers, conflict),
         policy,
       });
       conflictDecisions.push(decision);

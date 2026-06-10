@@ -62,6 +62,10 @@ function uniqueSorted(values = []) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function isPresentObject(value) {
+  return value && typeof value === 'object' && Object.keys(value).length > 0;
+}
+
 function replayFailureReasons(rho) {
   if (rho?.validation?.passed !== false) return [];
   return asArray(rho.validation.reasons ?? rho.validation.failures ?? rho.validation.error ?? 'rho_validation_failed')
@@ -98,6 +102,99 @@ function buildFutureHardCases({ lane, taskId, candidateId, rho, promotion }) {
   }
 
   return hardCases;
+}
+
+function objectId(value) {
+  if (!value || typeof value !== 'object') return null;
+  return value.candidateId ?? value.attemptId ?? value.id ?? value.policyId ?? null;
+}
+
+function matchingRecords(records, candidateId) {
+  const normalizedCandidateId = normalizeId(candidateId, 'candidate');
+  const matches = asArray(records).filter((record) => normalizeId(objectId(record), '') === normalizedCandidateId);
+  return matches.length > 0 ? matches : [];
+}
+
+function championRecords(archive) {
+  if (!archive) return [];
+  if (Array.isArray(archive)) return archive;
+  return asArray(archive.champions ?? archive.records ?? archive.candidates);
+}
+
+function frontierRecords(frontier) {
+  if (!frontier) return [];
+  if (Array.isArray(frontier)) return frontier;
+  return asArray(frontier.records ?? frontier.frontier ?? frontier.candidates);
+}
+
+function compatibleFamily(record) {
+  return record?.compatibleFamily
+    ?? record?.family
+    ?? record?.metadata?.compatibleFamily
+    ?? record?.metadata?.family
+    ?? null;
+}
+
+function buildChampionFrontierBridge({ candidateId, lane, taskId, championArchive, frontier }) {
+  const champions = matchingRecords(championRecords(championArchive), candidateId);
+  const records = matchingRecords(frontierRecords(frontier), candidateId);
+  if (champions.length === 0 && records.length === 0) return null;
+
+  return {
+    evidenceOnly: true,
+    promotionAuthority: false,
+    lane,
+    taskId: normalizeId(taskId, 'task'),
+    candidateId,
+    championIds: uniqueSorted(champions.map((champion) => objectId(champion))),
+    frontierRecordIds: uniqueSorted(records.map((record) => (
+      record.frontierId ?? record.recordId ?? record.id ?? objectId(record)
+    ))),
+    compatibleFamilies: uniqueSorted([
+      ...champions.map(compatibleFamily),
+      ...records.map(compatibleFamily),
+    ]),
+  };
+}
+
+function normalizeTrajectoryEntry({ candidate, trajectory, lineage }) {
+  const candidateTrajectory = candidate.trajectoryOperator
+    ?? candidate.trajectoryProvenance
+    ?? candidate.trajectory;
+  const runtimeTrajectory = candidateTrajectory === undefined ? trajectory : undefined;
+  const sourceValue = candidateTrajectory ?? runtimeTrajectory;
+  const source = candidateTrajectory !== undefined
+    ? (candidate.trajectoryOperator ? 'candidate.trajectoryOperator' : 'candidate.trajectory')
+    : (runtimeTrajectory !== undefined ? 'runtime.trajectory' : 'lineage');
+  const sourceObject = sourceValue && typeof sourceValue === 'object' && !Array.isArray(sourceValue)
+    ? sourceValue
+    : {};
+  const trajectoryValue = sourceObject.trajectory ?? (Array.isArray(sourceValue) ? sourceValue : undefined);
+  const operator = normalizeId(
+    sourceObject.operator
+      ?? sourceObject.name
+      ?? candidate.operator
+      ?? candidate.lineage?.operator
+      ?? lineage?.operator,
+    'seed',
+  ).toLowerCase();
+  const parents = uniqueSorted([
+    ...asArray(lineage?.parents),
+    ...asArray(sourceObject.parents),
+    ...asArray(sourceObject.parentCandidateIds),
+    sourceObject.donorCandidateId,
+    sourceObject.donorId,
+  ]);
+
+  return {
+    operator,
+    source,
+    parents,
+    ...(trajectoryValue !== undefined ? { trajectoryLength: asArray(trajectoryValue).length } : {}),
+    ...(sourceObject.donorCandidateId ? { donorCandidateId: normalizeId(sourceObject.donorCandidateId, 'donor') } : {}),
+    ...(sourceObject.inputTrajectoryId ? { inputTrajectoryId: normalizeId(sourceObject.inputTrajectoryId, 'input') } : {}),
+    ...(sourceObject.outputTrajectoryId ? { outputTrajectoryId: normalizeId(sourceObject.outputTrajectoryId, 'output') } : {}),
+  };
 }
 
 export function summarizeBesLaneRuntimeResult(laneResult = {}) {
@@ -198,6 +295,8 @@ export async function runBesLaneRuntime({
     const denseSubgoalResult = verifyDenseSubgoals({
       subgoals: denseSubgoals,
       evidence: collectEvidenceText({ candidate, hardCases: normalizedHardCases, domain }),
+      lane: contract.lane,
+      verifierUnit: contract.verifierUnit,
     });
     const a2a = cloneJson(candidate.a2a ?? a2aEnvelope, null);
     const a2aMetadata = a2aContext(a2a);
@@ -206,6 +305,29 @@ export async function runBesLaneRuntime({
       candidate.memoryGraph ?? memoryGraphContext ?? visualMemoryGraph(visualEvidence),
       null,
     );
+    const lineage = recordLineage({
+      candidateId,
+      parents: candidate.parents ?? candidate.lineage?.parents ?? a2aMetadata?.lineage?.parents ?? [],
+      operator: candidate.operator ?? candidate.lineage?.operator ?? 'seed',
+      lane: contract.lane,
+      localLineage: candidate.lineage ?? a2aMetadata?.lineage,
+    });
+    const trajectoryOperators = [
+      normalizeTrajectoryEntry({
+        candidate,
+        trajectory,
+        lineage,
+      }),
+    ];
+    const candidateChampionArchive = candidate.championArchive ?? championArchive;
+    const candidateFrontier = candidate.frontier ?? frontier;
+    const championFrontierBridge = buildChampionFrontierBridge({
+      candidateId,
+      lane: contract.lane,
+      taskId,
+      championArchive: candidateChampionArchive,
+      frontier: candidateFrontier,
+    });
     const evidenceSummary = normalizeLaneEvidence({
       domain,
       rho,
@@ -214,18 +336,11 @@ export async function runBesLaneRuntime({
       adaptiveSearch: candidate.adaptiveSearch ?? adaptiveSearch,
       toolTree: candidate.toolTree ?? toolTree,
       trajectory: candidate.trajectory ?? trajectory,
-      championArchive: candidate.championArchive ?? championArchive,
-      frontier: candidate.frontier ?? frontier,
+      championArchive: candidateChampionArchive,
+      frontier: candidateFrontier,
       verifierGenome: candidate.verifierGenome ?? verifierGenome,
       a2a,
       memoryGraph,
-    });
-    const lineage = recordLineage({
-      candidateId,
-      parents: candidate.parents ?? candidate.lineage?.parents ?? a2aMetadata?.lineage?.parents ?? [],
-      operator: candidate.operator ?? candidate.lineage?.operator ?? 'seed',
-      lane: contract.lane,
-      localLineage: candidate.lineage ?? a2aMetadata?.lineage,
     });
     const promotion = summarizeLanePromotion({
       candidate,
@@ -244,6 +359,8 @@ export async function runBesLaneRuntime({
       bes: {
         goalTree: buildGoalTree({ lane: contract.lane, taskId, hardCases: normalizedHardCases }),
         denseSubgoals: denseSubgoalResult,
+        trajectoryOperators,
+        ...(isPresentObject(championFrontierBridge) ? { championFrontierBridge } : {}),
       },
       evidence: {
         ...(domain ? { domain } : {}),
