@@ -10,6 +10,45 @@
 
 ---
 
+## Recursive Evolution Model
+
+The production target is not a single optimizer bolted onto an agent. It is a
+nested evolutionary system:
+
+```text
+evolving agent
+-> evolving soul
+-> evolving local harness
+-> evolving SwarmCell
+-> evolving swarm
+-> evolving oversoul
+-> evolving global harness
+-> evolving harness-of-harnesses
+-> continuously evolving substrate
+```
+
+Each layer can observe, remember, propose, mutate, recombine, evaluate, and
+report upward. No layer can self-authorize durable mutation. The substrate
+continues changing only when evidence survives replay, verifier checks,
+frontier comparison, rollback planning, policy gates, and approval.
+
+That recursion gives Helios its shape:
+
+- **Agents self-improve** through `soul.md`, local memory, local feedback,
+  prompt/tool/skill candidates, and lane-specific verifier evidence.
+- **Local harnesses self-improve** by turning each agent's outcomes into
+  SwarmCell-local candidates and hard cases.
+- **Swarms self-improve** by comparing roles, souls, collaboration patterns,
+  recombinations, and champion archives under the oversoul.
+- **The global harness self-improves** by replaying candidates across stable
+  held-out suites and tracking frontier movement.
+- **The harness-of-harnesses self-improves** by creating isolated source-tree
+  variants that can modify the harness itself without touching the active
+  workspace.
+- **The substrate self-improves** by promoting only those changes that improve
+  longitudinal quality, safety, reliability, cost, latency, maintainability,
+  visual confidence, memory health, and trust risk.
+
 ## Relationship To Soul, Oversoul, And Pi Extension Plan
 
 This plan is the production trunk. The companion plan,
@@ -22,6 +61,7 @@ adds identity and communication organs:
 
 Those features should flow through this production trunk:
 
+- each agent's `soul.md` is evaluated as part of its local harness behavior;
 - benchmark suites evaluate soul and oversoul variants;
 - Meta-Harness source-tree candidates include soul/oversoul files;
 - RHO mines soul/oversoul failures and wins as hard cases;
@@ -372,4 +412,3 @@ Remaining production gaps:
 - A2A has long-lived server/client transport, production queue/secret provider interfaces, subagent negotiation, and real multi-hop lineage.
 - Governance has production autonomy tables, escalation/override/audit policy, rollback/quarantine drills, and explicit external/VLM evidence policy.
 - Soul and oversoul files can be included as evaluated candidate artifacts, but cannot grant authority or lower gates.
-

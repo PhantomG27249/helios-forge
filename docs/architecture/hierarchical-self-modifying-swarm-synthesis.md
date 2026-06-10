@@ -21,14 +21,32 @@ Related local docs:
 
 Helios Forge should become a hierarchical self-modifying swarm governed by a non-self-modifying trust kernel.
 
-The system should behave like a singular mega-agent network, but internally it is a swarm of swarms:
+The system should behave like a singular mega-agent network, but internally it is a recursive evolutionary stack:
+
+```text
+evolving agent
+-> evolving soul
+-> evolving local harness
+-> evolving SwarmCell
+-> evolving swarm
+-> evolving oversoul
+-> evolving global harness
+-> evolving harness-of-harnesses
+-> continuously evolving substrate
+```
+
+That stack is a swarm of swarms and a harness of harnesses:
 
 - each agent can host local subagents;
+- each agent can carry a durable `soul.md` that records identity, behavior priors, memory anchors, mutation lineage, and evaluation history;
 - each agent/subagent group can run its own local meta-harness;
 - each local meta-harness can maintain a local MemGraphRAG working graph;
 - each local loop can propose mutations to prompts, tools, skills, local memory policy, verifier policy, routing, or source code;
+- each swarm can carry an `oversoul.md` that records shared mission, role ecology, mutation policy, collective memory, and governance posture;
 - all mutation evidence flows into a global meta-harness;
 - all durable memory candidates flow into a global MemGraphRAG runtime;
+- the global harness can evaluate many isolated harness source-tree variants as a harness-of-harnesses;
+- the substrate can evolve only through evidence-backed promotions;
 - durable changes pass through centralized verifier, rollback, approval, and safe-apply gates.
 
 The concise loop:
@@ -36,12 +54,13 @@ The concise loop:
 ```text
 observe locally -> remember locally -> evolve locally -> report upward
 -> compare globally -> replay globally -> promote safely -> update durable memory
+-> update substrate -> generate the next harder evaluation frontier
 ```
 
 The concise product claim:
 
 ```text
-Helios Forge is a trace-driven, memory-grounded, self-improving agent harness that can evolve local agent behavior, compare global swarm behavior, and propose self-modifications without becoming self-authorizing.
+Helios Forge is a trace-driven, memory-grounded, self-improving agent harness where agents evolve inside evolving harnesses, harnesses evolve inside evolving swarms, swarms evolve inside a harness-of-harnesses, and the substrate evolves continuously without becoming self-authorizing.
 ```
 
 ## Implementation Snapshot

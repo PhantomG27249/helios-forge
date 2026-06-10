@@ -31,6 +31,10 @@ The production spine covers:
 
 Soul, oversoul, and the Pi bridge should be evaluated by that spine. They are
 identity and communication candidates, not separate authority systems.
+In the full recursion, agents evolve through souls, souls evolve inside local
+harnesses, local harnesses evolve inside SwarmCells and swarms, swarms evolve
+through the oversoul, and the global harness-of-harnesses evaluates whether any
+of those changes should become part of the continuously evolving substrate.
 
 ## Current Baseline
 

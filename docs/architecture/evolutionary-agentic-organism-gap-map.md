@@ -240,20 +240,25 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 
 ## North Star
 
-The final behavior should feel like one coordinated system with many specialized parts:
+The final behavior should feel like one coordinated system with many specialized parts arranged as a recursive evolutionary stack:
 
 ```text
-agents sense locally
-SwarmCells consolidate locally
-swarms coordinate tactically
-local harnesses optimize locally
-global harnesses compare strategically
-Memory Graph RAG remembers across time
-A2A moves evidence across boundaries
-RHO finds hard cases
-BES evolves candidates
-VLM sees what text cannot
-the trust kernel decides what becomes durable
+evolving agent
+-> evolving soul
+-> evolving local harness
+-> evolving SwarmCell
+-> evolving swarm
+-> evolving oversoul
+-> evolving global harness
+-> evolving harness-of-harnesses
+-> continuously evolving substrate
 ```
 
-That is the line: self-evolving, memory-grounded, multimodal, networked, and governed.
+Every layer can remember, replay, mutate, recombine, and report upward. No layer
+can approve its own durable mutation. The global harness compares cells,
+candidate families, soul/oversoul variants, and source-tree harness variants
+over stable held-out tasks. The trust kernel remains outside the self-modifying
+loop.
+
+That is the line: self-evolving, memory-grounded, multimodal, networked,
+recursively harnessed, and governed.
