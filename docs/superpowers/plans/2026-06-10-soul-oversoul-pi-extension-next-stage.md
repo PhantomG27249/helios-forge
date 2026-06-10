@@ -10,6 +10,28 @@
 
 ---
 
+## Relationship To The Production Capability Spine
+
+This plan is the identity and Pi-communication layer. It does not replace the
+main production capability plan:
+
+```text
+docs/superpowers/plans/2026-06-10-production-capability-spine-next-stage.md
+```
+
+The production spine covers:
+
+- production benchmark suites and scheduled replay cycles;
+- autonomous Meta-Harness source-tree variants;
+- production-scale RHO embeddings, rerolls, and self-preference evidence;
+- model-assisted MemGraphRAG roles and BES dense judgment;
+- multimodal scale with a dedicated visual SwarmCell and visual suites;
+- external durable A2A server/client transport and multi-hop lineage;
+- governance hardening with autonomy levels, escalation, audit, rollback, and quarantine.
+
+Soul, oversoul, and the Pi bridge should be evaluated by that spine. They are
+identity and communication candidates, not separate authority systems.
+
 ## Current Baseline
 
 The repo already has deterministic paper-shaped substrate: RHO/BES lanes, swarm profiles, SwarmCell contracts, A2A envelopes, capability-goal status, Meta-Harness variant workspaces, and a Pi kwargs extension. The next stage should not replace that substrate. It should add durable agent identity and a better Pi bridge on top.
@@ -266,4 +288,3 @@ Candidates:
 - Pi-native subagents receive better skill, soul, oversoul, output-contract, and sidecar coordination context.
 - UI/status surfaces show soul/oversoul and Pi bridge health without adding direct self-approval controls.
 - Full tests and release smoke pass.
-
