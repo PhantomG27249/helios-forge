@@ -1,7 +1,11 @@
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { captureBrowserPreview } from './browserPreviewCapture.js';
+import {
+  captureBrowserPreview,
+  sanitizeBrowserEvidenceMetadata,
+  validateBrowserPreviewUrl,
+} from './browserPreviewCapture.js';
 import { runOcrWorker } from './ocrWorker.js';
 import { createPdfPageArtifacts } from './pdfRenderer.js';
 import { capturePdfPages } from './pdfPageWorker.js';
@@ -43,7 +47,12 @@ function defaultOutputDir(taskId) {
   return path.join('.harness', 'visual', taskId);
 }
 
-function createDefaultWorkerAdapter({ workspaceRoot, workerRuntimes = {}, maxOcrMetadataTextLength }) {
+function createDefaultWorkerAdapter({
+  workspaceRoot,
+  workerRuntimes = {},
+  maxOcrMetadataTextLength,
+  browserPolicy,
+}) {
   return {
     screenshot: ({ url, outputPath, taskId }) => captureBrowserPreview({
       taskId,
@@ -51,6 +60,7 @@ function createDefaultWorkerAdapter({ workspaceRoot, workerRuntimes = {}, maxOcr
       url,
       outputPath,
       browserRuntime: workerRuntimes.browserRuntime,
+      browserPolicy,
     }),
     ocr: ({ imagePath, taskId }) => runOcrWorker({
       taskId,
@@ -95,6 +105,15 @@ function redactUrlForTrace(value) {
   }
 }
 
+function browserEvidenceEventMetadata(browserEvidence = {}) {
+  return {
+    consoleErrorCount: browserEvidence.consoleErrors?.length || 0,
+    failedRequestCount: browserEvidence.failedRequests?.length || 0,
+    networkRequestCount: browserEvidence.networkSummary?.length || 0,
+    hasDomSnapshot: Boolean(browserEvidence.domSnapshotPath),
+  };
+}
+
 export async function captureProductionVisualArtifacts({
   taskId,
   workspaceRoot,
@@ -106,6 +125,7 @@ export async function captureProductionVisualArtifacts({
   captureAdapter,
   workerRuntimes = {},
   maxOcrMetadataTextLength = 2048,
+  browserPolicy,
   emitEvent,
 } = {}) {
   if (!workspaceRoot) {
@@ -125,6 +145,7 @@ export async function captureProductionVisualArtifacts({
     workspaceRoot,
     workerRuntimes,
     maxOcrMetadataTextLength,
+    browserPolicy,
   });
 
   const artifacts = {
@@ -136,7 +157,14 @@ export async function captureProductionVisualArtifacts({
   let ocr = null;
 
   if (targetUrl) {
-    if (typeof activeCaptureAdapter.screenshot === 'function') {
+    const policyResult = validateBrowserPreviewUrl({
+      url: targetUrl,
+      browserPolicy,
+      reason: 'captureProductionVisualArtifacts',
+    });
+    if (!policyResult.allowed) {
+      skipped.push({ kind: 'screenshot', reason: policyResult.reason });
+    } else if (typeof activeCaptureAdapter.screenshot === 'function') {
       const outputPath = path.join(resolvedOutputDir, 'web-preview.png');
       const captured = await activeCaptureAdapter.screenshot({ url: targetUrl, outputPath, taskId });
       if (isUnavailable(captured)) {
@@ -154,6 +182,19 @@ export async function captureProductionVisualArtifacts({
           source: { type: 'web_preview', url: redactedUrl },
           summary: `Production web preview screenshot for ${redactedUrl}`,
         });
+        const browserEvidence = sanitizeBrowserEvidenceMetadata(captured?.browserEvidence || captured?.evidence);
+        if (browserEvidence) {
+          artifacts.screenshot.metadata = {
+            ...artifacts.screenshot.metadata,
+            browserEvidence,
+          };
+          await emitMaybe(emitEvent, {
+            type: 'vlm.production_browser_evidence_captured',
+            taskId,
+            artifactId: artifacts.screenshot.artifactId,
+            ...browserEvidenceEventMetadata(browserEvidence),
+          });
+        }
         await emitMaybe(emitEvent, {
           type: 'vlm.production_screenshot_captured',
           taskId,

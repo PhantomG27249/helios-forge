@@ -180,6 +180,81 @@ test('visual verifier sends modelGateway metadata and safe image data URLs only 
   });
 });
 
+test('visual verifier includes concise sanitized browser evidence in model artifacts', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const calls = [];
+    const result = await runVisualVerifier({
+      taskId: 'task_visual_browser_evidence',
+      workspaceRoot,
+      goal: 'Verify the browser preview rendered without runtime errors.',
+      targetUrl: 'http://127.0.0.1:3000/?token=secret',
+      captureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await mkdir(path.dirname(outputPath), { recursive: true });
+          await writeFile(outputPath, PNG_1X1);
+          return {
+            imagePath: outputPath,
+            width: 64,
+            height: 64,
+            browserEvidence: {
+              consoleErrors: [
+                {
+                  text: 'Unhandled error in CheckoutPage',
+                  stack: 'secret stack trace',
+                  location: { url: 'http://127.0.0.1:3000/checkout?token=secret' },
+                },
+              ],
+              failedRequests: [
+                {
+                  url: 'http://user:pass@127.0.0.1:3000/api/orders?token=secret',
+                  status: 500,
+                  method: 'POST',
+                  requestHeaders: { Authorization: 'Bearer secret', Cookie: 'sid=secret' },
+                  responseBody: '{"secret":"body"}',
+                },
+              ],
+              networkSummary: [
+                {
+                  url: 'http://127.0.0.1:3000/app?token=secret',
+                  status: 200,
+                  responseHeaders: { 'Set-Cookie': 'sid=secret' },
+                },
+              ],
+              domSnapshotPath: path.join(workspaceRoot, '.harness', 'visual', 'task_visual_browser_evidence', 'dom.json'),
+              domHtml: '<html><body>secret checkout html</body></html>',
+            },
+          };
+        },
+      },
+      vlmJudge: async ({ artifacts }) => {
+        calls.push({ artifacts });
+        return { score: 0.9, confidence: 0.8, findings: [], passed: true };
+      },
+    });
+
+    assert.equal(result.passed, true);
+    const evidence = calls[0].artifacts[0].metadata.browserEvidence;
+    assert.deepEqual(evidence.summary, {
+      consoleErrorCount: 1,
+      failedRequestCount: 1,
+      networkRequestCount: 1,
+      hasDomSnapshot: true,
+    });
+    assert.equal(evidence.consoleErrors[0].text, 'Unhandled error in CheckoutPage');
+    assert.equal(evidence.failedRequests[0].url, 'http://127.0.0.1:3000/api/orders');
+    assert.equal(evidence.failedRequests[0].requestHeaders.Authorization, '[redacted]');
+    assert.equal(evidence.failedRequests[0].requestHeaders.Cookie, '[redacted]');
+    assert.equal(evidence.networkSummary[0].url, 'http://127.0.0.1:3000/app');
+    assert.equal(evidence.domSnapshotPath, '.harness/visual/task_visual_browser_evidence/dom.json');
+    const serialized = JSON.stringify(calls[0].artifacts);
+    assert.equal(serialized.includes('Bearer secret'), false);
+    assert.equal(serialized.includes('sid=secret'), false);
+    assert.equal(serialized.includes('secret stack trace'), false);
+    assert.equal(serialized.includes('secret checkout html'), false);
+    assert.equal(serialized.includes('responseBody'), false);
+  });
+});
+
 test('visual verifier rubric exposes strictness thresholds', () => {
   assert.deepEqual(
     createVisualVerifierRubric({ goal: 'Strict visual check', strictness: 'strict' }),

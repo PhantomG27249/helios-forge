@@ -7,6 +7,7 @@ import { reviewAttempt } from '../src/harness-sidecar/swarm/reviewer.js';
 import { recombineApprovedOutputs } from '../src/harness-sidecar/swarm/recombiner.js';
 import { scheduleAttempts } from '../src/harness-sidecar/swarm/attemptScheduler.js';
 import { orchestrateSwarm } from '../src/harness-sidecar/swarm/swarmOrchestrator.js';
+import { loadDefaultAgentProfiles } from '../src/harness-sidecar/swarm/agentProfiles.js';
 
 test('role prompt builder scopes role instructions to allowed files and output contract', () => {
   assert.equal(ROLE_REGISTRY.implementer.id, 'implementer');
@@ -77,6 +78,24 @@ test('subagent runner marks attempts with missing output contract fields', async
 
   assert.equal(result.status, 'contract_failed');
   assert.deepEqual(result.contract.missingFields, ['verifierEvidence']);
+});
+
+test('default swarm profiles expose browser tools only to visual specialists', () => {
+  const profiles = loadDefaultAgentProfiles();
+  const visualTools = profiles['visual-specialist'].toolCaps.allowed;
+  const implementerTools = profiles.implementer.toolCaps.allowed;
+  const browserTools = [
+    'browser.session.create',
+    'browser.navigate',
+    'browser.screenshot',
+    'browser.console.read',
+    'browser.network.summary',
+  ];
+
+  for (const tool of browserTools) {
+    assert.equal(visualTools.includes(tool), true, `${tool} should be visual-specialist scoped`);
+    assert.equal(implementerTools.includes(tool), false, `${tool} should not be implementer scoped`);
+  }
 });
 
 test('subagent runner fails attempts with forbidden local durable approval', async () => {

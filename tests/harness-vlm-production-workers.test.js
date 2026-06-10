@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { captureBrowserPreview } from '../src/harness-sidecar/vlm/browserPreviewCapture.js';
+import { captureProductionVisualArtifacts } from '../src/harness-sidecar/vlm/productionArtifactCapture.js';
 import { runOcrWorker } from '../src/harness-sidecar/vlm/ocrWorker.js';
 import { capturePdfPages } from '../src/harness-sidecar/vlm/pdfPageWorker.js';
 import { captureVisualDiff } from '../src/harness-sidecar/vlm/visualDiffWorker.js';
@@ -53,6 +54,161 @@ test('browser preview worker writes injected runtime output under visual task di
     assert.equal(result.imagePath, path.join(workspaceRoot, '.harness', 'visual', 'task_browser', 'web-preview.png'));
     assert.equal(await readFile(result.imagePath, 'utf8'), 'png-bytes');
     assert.equal(JSON.stringify(result).includes('png-bytes'), false);
+  });
+});
+
+test('browser preview worker denies external URLs before invoking runtime capture', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const captureCalls = [];
+    const result = await captureBrowserPreview({
+      taskId: 'task_browser_policy',
+      workspaceRoot,
+      url: 'https://example.com/private',
+      browserRuntime: {
+        capture: async (args) => {
+          captureCalls.push(args);
+          return {};
+        },
+      },
+    });
+
+    assert.equal(result.status, 'denied');
+    assert.equal(result.kind, 'policy');
+    assert.equal(result.reason, 'external_origin_not_allowlisted');
+    assert.deepEqual(captureCalls, []);
+  });
+});
+
+test('browser preview worker returns sanitized browser evidence from runtime capture', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const result = await captureBrowserPreview({
+      taskId: 'task_browser_evidence',
+      workspaceRoot,
+      url: 'http://127.0.0.1:3777/',
+      browserRuntime: {
+        capture: async ({ outputPath }) => {
+          await writeFile(outputPath, Buffer.from('png-bytes'));
+          return {
+            imagePath: outputPath,
+            width: 800,
+            height: 600,
+            browserEvidence: {
+              consoleErrors: [
+                { type: 'error', text: 'Hydration failed', location: { url: 'http://127.0.0.1/app?token=secret' } },
+              ],
+              failedRequests: [
+                {
+                  url: 'http://user:pass@127.0.0.1:3777/api?token=secret',
+                  method: 'POST',
+                  status: 500,
+                  requestHeaders: { Authorization: 'Bearer secret', Cookie: 'sid=secret', 'X-Trace-Id': 'trace-1' },
+                  responseHeaders: { 'Set-Cookie': 'sid=next', 'Content-Type': 'application/json' },
+                  requestBody: '{"password":"secret"}',
+                  responseBody: '{"stack":"secret"}',
+                },
+              ],
+              networkSummary: [
+                {
+                  url: 'http://127.0.0.1:3777/app?session=secret',
+                  status: 200,
+                  responseBody: '<html>raw</html>',
+                  requestHeaders: { Cookie: 'sid=secret' },
+                },
+              ],
+              domSnapshotPath: path.join(workspaceRoot, '.harness', 'visual', 'task_browser_evidence', 'dom.json'),
+              domHtml: '<html><body>secret</body></html>',
+            },
+          };
+        },
+      },
+    });
+
+    assert.equal(result.status, 'captured');
+    assert.equal(result.browserEvidence.consoleErrors.length, 1);
+    assert.equal(result.browserEvidence.failedRequests[0].url, 'http://127.0.0.1:3777/api');
+    assert.equal(result.browserEvidence.failedRequests[0].requestHeaders.Authorization, '[redacted]');
+    assert.equal(result.browserEvidence.failedRequests[0].requestHeaders.Cookie, '[redacted]');
+    assert.equal(result.browserEvidence.failedRequests[0].requestHeaders['X-Trace-Id'], 'trace-1');
+    assert.equal(result.browserEvidence.failedRequests[0].responseHeaders['Set-Cookie'], '[redacted]');
+    assert.equal(result.browserEvidence.networkSummary[0].url, 'http://127.0.0.1:3777/app');
+    assert.equal(result.browserEvidence.domSnapshotPath, path.join(workspaceRoot, '.harness', 'visual', 'task_browser_evidence', 'dom.json'));
+    const serialized = JSON.stringify(result.browserEvidence);
+    assert.equal(serialized.includes('Bearer secret'), false);
+    assert.equal(serialized.includes('sid=secret'), false);
+    assert.equal(serialized.includes('password'), false);
+    assert.equal(serialized.includes('<html>'), false);
+  });
+});
+
+test('production visual capture denies external targetUrl before invoking screenshot adapter', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const screenshotCalls = [];
+    const result = await captureProductionVisualArtifacts({
+      taskId: 'task_production_policy',
+      workspaceRoot,
+      targetUrl: 'https://example.com/private',
+      captureAdapter: {
+        screenshot: async (args) => {
+          screenshotCalls.push(args);
+          return {};
+        },
+      },
+    });
+
+    assert.equal(result.artifacts.screenshot, null);
+    assert.deepEqual(result.skipped, [{
+      kind: 'screenshot',
+      reason: 'external_origin_not_allowlisted',
+    }]);
+    assert.deepEqual(screenshotCalls, []);
+  });
+});
+
+test('production visual capture attaches browser evidence metadata and emits evidence events', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const events = [];
+    const result = await captureProductionVisualArtifacts({
+      taskId: 'task_production_evidence',
+      workspaceRoot,
+      targetUrl: 'http://127.0.0.1:3777/?token=secret',
+      emitEvent: (event) => events.push(event),
+      captureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await writeFile(outputPath, Buffer.from('png-bytes'));
+          return {
+            imagePath: outputPath,
+            width: 320,
+            height: 240,
+            browserEvidence: {
+              consoleErrors: [{ text: 'ReferenceError: missingWidget' }],
+              failedRequests: [
+                {
+                  url: 'http://127.0.0.1:3777/api?token=secret',
+                  status: 503,
+                  responseBody: 'raw failure body',
+                  requestHeaders: { Authorization: 'Bearer secret' },
+                },
+              ],
+              networkSummary: [{ url: 'http://127.0.0.1:3777/app?secret=1', status: 200 }],
+              domSnapshotPath: path.join(workspaceRoot, '.harness', 'visual', 'task_production_evidence', 'dom.json'),
+            },
+          };
+        },
+      },
+    });
+
+    assert.equal(result.artifacts.screenshot.metadata.browserEvidence.consoleErrors.length, 1);
+    assert.equal(result.artifacts.screenshot.metadata.browserEvidence.failedRequests[0].url, 'http://127.0.0.1:3777/api');
+    assert.equal(result.artifacts.screenshot.metadata.browserEvidence.failedRequests[0].requestHeaders.Authorization, '[redacted]');
+    assert.equal(
+      result.artifacts.screenshot.metadata.browserEvidence.domSnapshotPath,
+      path.join(workspaceRoot, '.harness', 'visual', 'task_production_evidence', 'dom.json'),
+    );
+    assert.equal(events.some((event) => event.type === 'vlm.production_browser_evidence_captured'), true);
+    const serialized = JSON.stringify({ events, metadata: result.artifacts.screenshot.metadata.browserEvidence });
+    assert.equal(serialized.includes('Bearer secret'), false);
+    assert.equal(serialized.includes('raw failure body'), false);
+    assert.equal(serialized.includes('secret=1'), false);
   });
 });
 

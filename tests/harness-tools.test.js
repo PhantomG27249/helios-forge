@@ -79,7 +79,19 @@ test('default tool registry executes shell, verifier, and MCP tools through scop
     });
     const tools = registry.list().map((tool) => tool.name).sort();
 
-    assert.deepEqual(tools, ['mcp.call', 'shell.run', 'verifier.run', 'visual.verifier.run']);
+    assert.deepEqual(tools, [
+      'browser.console.read',
+      'browser.dom.snapshot',
+      'browser.navigate',
+      'browser.network.summary',
+      'browser.screenshot',
+      'browser.session.close',
+      'browser.session.create',
+      'mcp.call',
+      'shell.run',
+      'verifier.run',
+      'visual.verifier.run',
+    ]);
 
     const shell = await registry.execute('shell.run', {
       command: `${nodeCommand} -e "console.log('shell-ok')"`,
