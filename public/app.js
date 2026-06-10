@@ -253,6 +253,7 @@ window.setServerUrl = function(host) {
 function startConnection() {
   serverUrl = serverUrlInput.value.trim();
   workspacePath = workspacePathInput?.value?.trim() || '';
+  syncWorkspaceInputs(workspacePath);
   if (!serverUrl) return;
   if (location.protocol === 'https:') serverUrl = serverUrl.replace('ws://', 'wss://');
   debug(`Connecting to: ${serverUrl}`);
@@ -358,6 +359,18 @@ const workspaceInput = document.getElementById('workspace-input');
 function syncWorkspaceInputs(path) {
   if (workspacePathInput) workspacePathInput.value = path || '';
   if (workspaceInput) workspaceInput.value = path || '';
+}
+
+function getSelectedWorkspacePath() {
+  const latest = workspaceInput?.value?.trim()
+    || workspacePathInput?.value?.trim()
+    || workspacePath
+    || '';
+  if (latest && latest !== workspacePath) {
+    workspacePath = latest;
+    syncWorkspaceInputs(workspacePath);
+  }
+  return workspacePath;
 }
 
 function applyWorkspaceSelection(path, { notify = true } = {}) {
@@ -568,11 +581,7 @@ function handleMessage(msg) {
       updateHeader();
       // Update workspace input to match session's directory
       if (msg.state?.cwd) {
-        syncWorkspaceInputs(msg.state.cwd);
-        if (msg.state.cwd !== workspacePath) {
-          workspacePath = msg.state.cwd;
-          debug('Workspace updated to: ' + workspacePath);
-        }
+        applyWorkspaceSelection(msg.state.cwd, { notify: false });
       }
     }
     // Don't add a new session - update current instead
@@ -586,6 +595,11 @@ function handleMessage(msg) {
   }
 
   if (msg.type === 'workspace_changed' && msg.success) {
+    if (msg.path) {
+      workspacePath = msg.path;
+      syncWorkspaceInputs(workspacePath);
+    }
+    send({ type: 'harness_status' });
     toast('Workspace set', 'success');
     return;
   }
@@ -1389,7 +1403,7 @@ function requestHarnessAdaptiveSearchStatus() {
         : 'Adaptive-search status has not been returned by the sidecar yet.';
     }
   }, 2500);
-  send({ type: 'harness_adaptive_search_status_get', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_adaptive_search_status_get', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function handleHarnessAdaptiveSearchStatus(payload) {
@@ -1448,7 +1462,7 @@ function requestHarnessSkillCandidates() {
   harnessSkillCandidatesRequestTimer = setTimeout(() => {
     if (!harnessSkillCandidatesLoaded) renderHarnessSkillCandidates();
   }, 2500);
-  send({ type: 'harness_skill_candidates_get', workspaceRoot: workspacePath || undefined, limit: 20 });
+  send({ type: 'harness_skill_candidates_get', workspaceRoot: getSelectedWorkspacePath() || undefined, limit: 20 });
 }
 
 function handleHarnessSkillCandidates(payload) {
@@ -1488,7 +1502,7 @@ function updateHarnessSkillCandidateEvents(event) {
 
 function reviewHarnessSkillCandidate(candidateId, decision) {
   if (!candidateId || !decision) return;
-  send({ type: 'harness_skill_candidate_review', candidateId, decision, workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_skill_candidate_review', candidateId, decision, workspaceRoot: getSelectedWorkspacePath() || undefined });
   harnessSkillCandidates = harnessSkillCandidates.map(candidate => {
     const id = candidate.candidateId || candidate.id || candidate.name;
     return id === candidateId ? { ...candidate, status: `${decision}_requested` } : candidate;
@@ -1617,7 +1631,7 @@ function requestHarnessCapabilities() {
         : 'No capabilities returned yet';
     }
   }, 2500);
-  send({ type: 'harness_capabilities_get', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_capabilities_get', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function capabilityBucketFromPayload(payload, keys) {
@@ -2143,7 +2157,7 @@ function saveCapabilityRecord(record) {
   populateCapabilityForm(record);
   send({
     type: 'harness_capability_save',
-    workspaceRoot: workspacePath || undefined,
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
     record,
   });
   if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = `Installing ${record.name}...`;
@@ -2254,7 +2268,7 @@ function deleteHarnessCapability(capabilityId) {
   if (!ok) return;
   send({
     type: 'harness_capability_delete',
-    workspaceRoot: workspacePath || undefined,
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
     capabilityId,
   });
   if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Deleting capability...';
@@ -2516,7 +2530,7 @@ function toggleHarnessPanel() {
 }
 
 function startHarness() {
-  send({ type: 'harness_start', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_start', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function stopHarness() {
@@ -2565,6 +2579,7 @@ function launchHarnessFromPrompt(text, options = {}) {
     mode: 'full',
     budget: { ...DEFAULT_HARNESS_BUDGET },
     source: route.mode === 'direct' ? 'prompt_direct' : 'prompt_background',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
 
   debug(`Harness ${route.mode} launch: ${route.reason}`);
@@ -2585,6 +2600,7 @@ function runHarnessTask() {
     mode: 'full',
     budget: { ...DEFAULT_HARNESS_BUDGET },
     source: 'manual_panel',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
   harnessTaskInput.value = '';
 }
@@ -2603,6 +2619,7 @@ function runDeepResearchTask() {
       maxWallMinutes: Number.isFinite(maxWallMinutes) ? maxWallMinutes : 45,
     },
     source: 'deep_research_ui',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
   harnessDeepTaskInput.value = '';
 }

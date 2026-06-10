@@ -51,14 +51,16 @@ export function classifyHarnessPrompt(text, { hasImages = false, isStreaming = f
   };
 }
 
-export function buildHarnessTaskMessage(route, { budget = DEFAULT_HARNESS_BUDGET } = {}) {
+export function buildHarnessTaskMessage(route, { budget = DEFAULT_HARNESS_BUDGET, workspaceRoot = '' } = {}) {
   if (!route?.shouldRun) return null;
 
-  return {
+  const message = {
     type: 'harness_task_start',
     task: route.task,
     mode: 'full',
     budget: { ...budget },
     source: route.mode === 'direct' ? 'prompt_direct' : 'prompt_background',
   };
+  if (workspaceRoot) message.workspaceRoot = workspaceRoot;
+  return message;
 }
