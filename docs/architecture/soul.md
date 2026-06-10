@@ -11,7 +11,8 @@ verifier requirements, workspace boundaries, or delegated-token scope.
 ## Purpose
 
 A Helios agent should be more than a role label such as `implementer` or
-`critic`. The soul record gives each agent continuity:
+`critic`. The soul record gives each agent identity specialization and a local
+evolution loop:
 
 - what it is for;
 - how it prefers to reason and collaborate;
@@ -21,8 +22,12 @@ A Helios agent should be more than a role label such as `implementer` or
 - which mutations helped or harmed it;
 - how it relates to the swarm and oversoul.
 
-This gives the swarm a substrate for personality-like behavior while keeping
-the implementation auditable and testable.
+This lets each agent become more itself over time while still contributing to
+the fused swarm mind. The individual identity remains inspectable and bounded;
+the oversoul can combine its evidence, memories, traits, and successful
+patterns with other agents without erasing lineage. This gives the swarm a
+substrate for personality-like behavior while keeping the implementation
+auditable and testable.
 
 ## Canonical Runtime Location
 
@@ -125,6 +130,9 @@ Short instructions that may be injected into a worker prompt after sanitization.
 ## Evolution Operations
 
 Soul evolution should use the same evidence-only pattern as the rest of Helios.
+Every agent gets its own local evolution loop: observe task outcomes, update
+memory anchors, propose soul mutations, replay/evaluate those mutations, and
+report successful or failed traits upward to the oversoul and global harness.
 Allowed operations:
 
 - `mutate_trait`: adjust one trait, risk posture, or collaboration preference;
@@ -163,4 +171,3 @@ Soul records should connect to these systems:
 A soul is a behavioral prior, not a permission model. Permission still comes
 from the trust kernel, promotion policy, capability records, scoped delegated
 tokens, and human approval. If a soul and policy conflict, policy wins.
-

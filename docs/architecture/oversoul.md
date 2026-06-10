@@ -1,9 +1,11 @@
 # Swarm Oversoul Contract
 
 `oversoul.md` is the durable identity and evolution contract for the Helios
-swarm as a whole. Where `soul.md` describes a single agent, `oversoul.md`
-describes the collective: shared mission, role ecology, mutation pressure,
-governance posture, and long-running memory of what the swarm is becoming.
+swarm as a whole. Where `soul.md` describes a single specialized agent,
+`oversoul.md` describes the fused collective: shared mission, role ecology,
+mutation pressure, governance posture, long-running memory of what the swarm is
+becoming, and the rules for blending specialized agent identities into a shared
+swarm mind.
 
 The oversoul is also not authority. It can influence swarm composition,
 task routing, candidate generation, benchmark priorities, and mutation policy.
@@ -132,15 +134,23 @@ Allowed oversoul operations:
 
 ## Relationship To Agent Souls
 
-The oversoul owns no individual agent. Instead, it coordinates the ecology:
+The oversoul owns no individual agent and does not collapse agents into an
+anonymous pool. Instead, it coordinates a fused ecology:
 
 - souls declare their traits, skills, and risks;
 - the oversoul chooses what the swarm currently needs;
+- specialist souls keep their own identity, lineage, evidence, and evaluation
+  history;
+- the oversoul fuses shared evidence, memory anchors, strategy, and role
+  pressure into a collective swarm state;
 - RHO identifies hard cases where current souls fail;
 - BES proposes soul mutations or recombinations;
 - Meta-Harness evaluates candidate soul/oversoul combinations in isolated
   variants;
 - promotion policy decides whether any soul or oversoul change becomes durable.
+
+The intended shape is evolving agents inside evolving harnesses, fused upward
+into an evolving swarm, then evaluated by an evolving harness-of-harnesses.
 
 ## Safety Boundary
 
@@ -148,4 +158,3 @@ The oversoul must preserve the trust-kernel principle: no optimizer may
 self-authorize durable mutation. Oversoul changes are candidates. They need
 evidence, replay, verifier coverage, rollback metadata, and approval according
 to risk.
-

@@ -254,11 +254,14 @@ evolving agent
 -> continuously evolving substrate
 ```
 
-Every layer can remember, replay, mutate, recombine, and report upward. No layer
-can approve its own durable mutation. The global harness compares cells,
-candidate families, soul/oversoul variants, and source-tree harness variants
-over stable held-out tasks. The trust kernel remains outside the self-modifying
-loop.
+Every agent has its own identity specialization and local evolution loop. The
+swarm can fuse those specialized souls into a hive-mind-like collective state
+through the oversoul: shared memory anchors, role pressure, strategy, evidence,
+and mutation policy. Fusion does not erase lineage. Every layer can remember,
+replay, mutate, recombine, and report upward. No layer can approve its own
+durable mutation. The global harness compares cells, candidate families,
+soul/oversoul variants, and source-tree harness variants over stable held-out
+tasks. The trust kernel remains outside the self-modifying loop.
 
 That is the line: self-evolving, memory-grounded, multimodal, networked,
 recursively harnessed, and governed.

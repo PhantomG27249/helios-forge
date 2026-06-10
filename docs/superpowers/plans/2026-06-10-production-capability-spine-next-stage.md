@@ -27,6 +27,9 @@ evolving agent
 -> continuously evolving substrate
 ```
 
+Each agent gets its own identity specialization and local evolution loop. The
+swarm can fuse specialized agents into a hive-mind-like collective through the
+oversoul while preserving each soul's lineage, evidence, and risk posture.
 Each layer can observe, remember, propose, mutate, recombine, evaluate, and
 report upward. No layer can self-authorize durable mutation. The substrate
 continues changing only when evidence survives replay, verifier checks,
@@ -39,7 +42,8 @@ That recursion gives Helios its shape:
 - **Local harnesses self-improve** by turning each agent's outcomes into
   SwarmCell-local candidates and hard cases.
 - **Swarms self-improve** by comparing roles, souls, collaboration patterns,
-  recombinations, and champion archives under the oversoul.
+  recombinations, and champion archives under the oversoul, then fusing useful
+  specialization into shared swarm strategy.
 - **The global harness self-improves** by replaying candidates across stable
   held-out suites and tracking frontier movement.
 - **The harness-of-harnesses self-improves** by creating isolated source-tree
