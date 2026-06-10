@@ -35,6 +35,48 @@ const LANE_CONTRACTS = Object.freeze({
     verifierUnit: 'swarm_eval',
     artifacts: Object.freeze(['agent_roles', 'handoff_contracts', 'coordination_trace']),
   }),
+  context: Object.freeze({
+    lane: 'context',
+    candidateUnit: 'context_policy',
+    verifierUnit: 'context_eval',
+    artifacts: Object.freeze(['context_profile', 'retrieval_weights', 'token_budget']),
+  }),
+  compaction: Object.freeze({
+    lane: 'compaction',
+    candidateUnit: 'compaction_policy',
+    verifierUnit: 'compaction_eval',
+    artifacts: Object.freeze(['compaction_profile', 'continuation_trace', 'retention_budget']),
+  }),
+  tool: Object.freeze({
+    lane: 'tool',
+    candidateUnit: 'tool_loop_policy',
+    verifierUnit: 'tool_loop_eval',
+    artifacts: Object.freeze(['tool_sequence', 'recovery_policy', 'approval_contract']),
+  }),
+  budget: Object.freeze({
+    lane: 'budget',
+    candidateUnit: 'budget_policy',
+    verifierUnit: 'budget_eval',
+    artifacts: Object.freeze(['budget_profile', 'allocator_trace', 'cost_gate']),
+  }),
+  visual: Object.freeze({
+    lane: 'visual',
+    candidateUnit: 'visual_policy',
+    verifierUnit: 'visual_eval',
+    artifacts: Object.freeze(['visual_rubric', 'artifact_capture_policy', 'vlm_thresholds']),
+  }),
+  mcp_trust: Object.freeze({
+    lane: 'mcp_trust',
+    candidateUnit: 'mcp_trust_policy',
+    verifierUnit: 'mcp_trust_eval',
+    artifacts: Object.freeze(['capability_scope', 'poisoning_policy', 'trust_decision']),
+  }),
+  harness: Object.freeze({
+    lane: 'harness',
+    candidateUnit: 'harness_configuration',
+    verifierUnit: 'harness_experiment_eval',
+    artifacts: Object.freeze(['routing_policy', 'coordination_policy', 'frontier_record']),
+  }),
 });
 
 export function getBesLaneContract(lane) {

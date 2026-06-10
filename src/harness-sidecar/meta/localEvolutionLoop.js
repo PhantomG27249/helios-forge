@@ -44,7 +44,7 @@ function inferTarget(evolutionOutput = {}) {
   return 'local_profile';
 }
 
-function buildCandidate({ cellId, attempt = {}, evolutionOutput = {}, hardCaseTag, index }) {
+function buildCandidate({ cellId, attempt = {}, evolutionOutput = {}, hardCaseTag, index, besLane }) {
   const safeCellId = safeIdPart(cellId, 'cell');
   return blockLocalDurablePromotion({
     candidateId: `local_${safeCellId}_${index}`,
@@ -69,10 +69,11 @@ function buildCandidate({ cellId, attempt = {}, evolutionOutput = {}, hardCaseTa
       verifierEvidence: normalizedStringList(attempt.verifierEvidence),
       traceRefs: normalizedStringList(evolutionOutput.traceRefs),
     },
+    ...(besLane ? { besLane } : {}),
   });
 }
 
-export function runLocalEvolutionLoop({ cellId, attempt = {} } = {}) {
+export function runLocalEvolutionLoop({ cellId, attempt = {}, besLane = null } = {}) {
   const evolutionOutput = attempt.evolutionOutput || {};
   const hardCaseTags = normalizedStringList(evolutionOutput.hardCaseTags);
   const candidateTags = hardCaseTags.length
@@ -84,6 +85,7 @@ export function runLocalEvolutionLoop({ cellId, attempt = {} } = {}) {
     evolutionOutput,
     hardCaseTag,
     index: index + 1,
+    besLane,
   }));
 
   return {

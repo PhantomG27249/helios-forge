@@ -14,6 +14,18 @@ test('returns deterministic BES lane contracts for memory evolution', () => {
   assert.equal(contract.verifierUnit, 'memory_eval');
 });
 
+test('returns BES lane contracts for policy sublanes', () => {
+  const context = getBesLaneContract('context');
+  const mcpTrust = getBesLaneContract('mcp_trust');
+
+  assert.equal(context.candidateUnit, 'context_policy');
+  assert.equal(context.verifierUnit, 'context_eval');
+  assert.ok(context.artifacts.includes('context_profile'));
+  assert.equal(mcpTrust.candidateUnit, 'mcp_trust_policy');
+  assert.equal(mcpTrust.verifierUnit, 'mcp_trust_eval');
+  assert.ok(mcpTrust.artifacts.includes('capability_scope'));
+});
+
 test('applies deletion trajectory operator to remove a step', () => {
   const result = applyTrajectoryOperator({
     operator: 'deletion',

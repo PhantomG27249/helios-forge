@@ -38,65 +38,58 @@ These pieces already exist in the current codebase and should be reused rather t
 | Global harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records and frontier comparison |
 | Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton |
 | RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented structured replay evidence |
-| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives; shared all-lane runtime still planned |
-| Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators |
+| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime |
+| Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers |
 | Skill evolution | `src/harness-sidecar/skills/*` | Implemented workspace-local skill candidate lifecycle |
 | Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js` | Implemented visual artifact/verifier substrate |
 | A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js` | Local contract and routing scaffolding |
 | Trust kernel | `src/harness-sidecar/core/trustKernelBoundary.js`, `security/*`, approval modules | Implemented non-self-authorizing boundary |
 
-## Gap Layer 1: Before The BES Mesh Plan Lands
+## Gap Layer 1: BES Mesh Composition Now Landed
 
-These are the main gaps in the current codebase.
+The first BES mesh composition pass is now implemented. It closes the missing-module and missing-envelope gaps that previously kept the system from behaving like a coordinated evolutionary harness substrate.
 
-1. **No shared BES lane runtime**
-   - Missing: `src/harness-sidecar/bes/laneRuntime.js`.
-   - Impact: every subsystem has its own partial evolution shape.
-   - Needed: one common envelope for candidate, evidence, lineage, RHO replay, dense subgoals, optimization metadata, and blocked promotion summary.
+1. **Shared BES lane runtime**
+   - Implemented: `src/harness-sidecar/bes/laneRuntime.js` and `laneEvidence.js`.
+   - Provides one common envelope for candidate, evidence, lineage, optional RHO replay, dense subgoals, optimization metadata, and blocked promotion summary.
+   - Lane output is evidence-only; promotion remains disallowed inside the lane runtime.
 
-2. **Policy evolution is not uniformly lane-wrapped**
-   - Existing policy evolvers produce shadow candidates.
-   - Missing: consistent BES/RHO/evidence envelopes for context, compaction, tool, budget, visual, memory, MCP trust, and research policies.
+2. **Policy evolution lane wrappers**
+   - Implemented for context, compaction, tool-loop, budget, visual, memory, MCP trust, and research policies.
+   - Existing shadow-policy APIs remain intact; wrappers add non-promotable BES/RHO/evidence envelopes.
 
-3. **Domain candidates are not uniformly represented**
-   - Memory, research, skill, swarm, verifier, and harness candidates do not yet share one candidate schema.
-   - Missing: consistent lane candidate records with domain evaluator output, lineage, replay evidence, and promotion constraints.
+3. **Domain candidate wrappers**
+   - Implemented for memory, research, generated skill candidates, and swarm attempt plans.
+   - Local SwarmCell/meta candidates can preserve `besLane` evidence without gaining apply authority.
 
-4. **A2A does not yet carry evolutionary lineage as a tested contract**
-   - Existing A2A-shaped modules route local interop.
-   - Missing: tested fields for `besLane`, `rhoCaseIds`, `memoryGraphRefs`, `candidateRef`, `lineage`, `trust`, and `requiredVerification`.
+4. **A2A evolutionary lineage references**
+   - Implemented reference fields for `besLane`, `rhoCaseIds`, `memoryGraphRefs`, `candidateRef`, `lineage`, `trust`, and `requiredVerification`.
+   - External A2A context is forced to `external: true` and `verified: false` at the gateway boundary.
 
-5. **Memory Graph RAG is not a standard lane context packet**
-   - Existing memory graph and hierarchical retriever work.
-   - Missing: compact, bounded context packets for local, SwarmCell, and global graph evidence with provenance, conflicts, and retrieval trace.
+5. **Memory Graph RAG lane context packet**
+   - Implemented compact, bounded context packets for local, SwarmCell, and global graph evidence with provenance, conflicts, and retrieval trace.
 
-6. **Harness-of-harnesses is not yet concrete**
-   - Current architecture says harness policies/configs should be evolvable.
-   - Missing: a candidate schema for harness configuration, routing policy, verifier policy, memory policy, and coordination policy as optimizable units.
+6. **Harness-of-harnesses first schema**
+   - A shared `harness` lane contract now exists for harness configuration, routing policy, coordination policy, and frontier records.
+   - Larger benchmark loops over full runnable harness variants remain future work.
 
-7. **Optimization metadata does not consistently survive across layers**
-   - Missing consistent attachment for RHO, adaptive search, ToolTree, trajectory operators, champion archives, frontiers, verifier genomes, A2A lineage, and memory graph context.
+7. **Optimization metadata transport**
+   - Lane envelopes preserve domain evidence, dense subgoals, optional RHO replay, adaptive search, ToolTree, trajectory operator, champion archive, frontier, verifier genome, A2A lineage, and memory graph context where supplied.
 
-## Gap Layer 2: What The BES Mesh Plan Should Close
+## Gap Layer 2: Remaining After The BES Mesh Composition Pass
 
-The plan in `docs/superpowers/plans/2026-06-09-bes-lane-expansion-for-harness-layers.md` should close the composition gaps.
+The composition layer is now present. The remaining work shifts from missing envelopes to deeper runtime use, scale, continuity, learned judgment, and production durability.
 
-Expected outcomes:
+Still needed:
 
-- all evolution layers can call `runBesLaneRuntime`;
-- policy, memory, research, skill, swarm, verifier, visual, tool, budget, compaction, and MCP trust candidates share a common evidence envelope;
-- RHO replay and dense subgoal evidence are attached where available;
-- A2A envelopes preserve candidate lineage and evidence references;
-- Memory Graph RAG context packets feed optimization without becoming unreviewed durable memory;
-- harness policies and configs can be represented as candidates;
-- operator status exposes lane evidence without exposing raw prompts, secrets, full patches, or untrusted content;
-- trust-kernel rules block self-approval, failed RHO validation, missing provenance, unsafe MCP trust changes, missing source patch metadata, and memory conflict ambiguity.
+- attach lane wrappers to more live runtime call sites rather than only exposing safe adapter functions;
+- run larger RHO replays and harness experiments over held-out suites;
+- connect lane results to global frontier dashboards over time;
+- evolve full runnable harness variants in isolated candidate directories;
+- broaden verifier-genome and harness-of-harnesses coverage;
+- build durable A2A inbox/outbox and peer transport.
 
-After this plan, the system should behave much more like a cohesive network of networks. The remaining work shifts from composition to scale, continuity, learned judgment, and production durability.
-
-## Gap Layer 3: Remaining After The BES Mesh Plan
-
-These are the last major gaps before Helios feels like a mature evolutionary agentic organism.
+## Gap Layer 3: Long-Running Maturity Gaps
 
 ### 1. Paper-Grade Memory Graph RAG
 
@@ -204,13 +197,13 @@ The trust kernel should stay non-self-modifying. Remaining work:
 
 Use this checklist to know when the "evolutionary agentic organism" target is close.
 
-- [ ] Every lane emits a common BES evidence envelope.
-- [ ] Every candidate has lineage, evidence references, evaluator output, and promotion status.
+- [x] Every lane emits a common BES evidence envelope.
+- [x] Every candidate has lineage, evidence references, evaluator output, and promotion status.
 - [ ] RHO hard cases can originate from every layer.
-- [ ] Memory Graph RAG context is available to every lane.
+- [x] Memory Graph RAG context is available to every lane.
 - [ ] Multimodal evidence is represented in memory, replay, A2A, and trust gates.
-- [ ] A2A envelopes preserve lineage and trust metadata across nested swarms.
-- [ ] Harness policies/configs are candidates in a harness-of-harnesses loop.
+- [x] A2A envelopes preserve lineage and trust metadata across nested swarms.
+- [x] Harness policies/configs are candidates in a harness-of-harnesses loop.
 - [ ] Adaptive search can allocate budget across text, tool, swarm, visual, replay, and verifier actions.
 - [ ] Global frontier records compare quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
 - [ ] Promotions require replay, verifier, provenance, rollback, and approval evidence.

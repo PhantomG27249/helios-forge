@@ -158,6 +158,59 @@ function resolveLayersAndGraph({ layers, graph, snapshot }) {
   };
 }
 
+function compactIds(value = {}, key = 'nodeIds', maxItems = 12) {
+  if (Array.isArray(value)) return uniqueSorted(value).slice(0, maxItems);
+  return uniqueSorted(value?.[key] || value?.ids || value?.items?.map((item) => item.id)).slice(0, maxItems);
+}
+
+function provenanceList(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  if (typeof value === 'string') return [value];
+  if (typeof value === 'object') return [value.id || value.traceId || value.sourceId || JSON.stringify(value)];
+  return [String(value)];
+}
+
+export function createLaneMemoryGraphContextPacket({
+  local = {},
+  swarmCell = {},
+  global = {},
+  provenance = [],
+  conflicts = [],
+  retrieval = {},
+  maxItems = 12,
+} = {}) {
+  const localNodeIds = compactIds(local, 'nodeIds', maxItems);
+  const swarmCellNodeIds = compactIds(swarmCell, 'nodeIds', maxItems);
+  const globalNodeIds = compactIds(global, 'nodeIds', maxItems);
+  const globalProvenance = provenanceList(global.provenance);
+  const packetProvenance = provenanceList(provenance);
+  const retrievalTrace = normalizeList(retrieval.trace || retrieval.retrievalTrace || retrieval.items?.map((item) => item.id))
+    .map(String)
+    .slice(0, maxItems);
+
+  return {
+    schemaVersion: HIERARCHICAL_MEMORY_RETRIEVER_SCHEMA_VERSION,
+    source: 'memory_graph_lane_context',
+    local: {
+      ...local,
+      nodeIds: localNodeIds,
+    },
+    swarmCell: {
+      ...swarmCell,
+      nodeIds: swarmCellNodeIds,
+    },
+    global: {
+      ...global,
+      nodeIds: globalNodeIds,
+      provenance: uniqueSorted([...globalProvenance, ...packetProvenance]).slice(0, maxItems),
+    },
+    provenance: uniqueSorted([...globalProvenance, ...packetProvenance]).slice(0, maxItems),
+    conflicts: normalizeList(conflicts).slice(0, maxItems),
+    retrievalTrace,
+  };
+}
+
 export function retrieveHierarchicalMemoryContext({
   query,
   layers,

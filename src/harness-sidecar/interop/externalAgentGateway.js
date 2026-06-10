@@ -19,6 +19,28 @@ function emit(emitEvent, event) {
   if (typeof emitEvent === 'function') emitEvent(event);
 }
 
+function markExternalA2aContextUntrusted(envelope = {}) {
+  const a2a = envelope.task?.context?.a2a;
+  if (!a2a || typeof a2a !== 'object' || Array.isArray(a2a)) return envelope;
+  return {
+    ...envelope,
+    task: {
+      ...envelope.task,
+      context: {
+        ...envelope.task.context,
+        a2a: {
+          ...a2a,
+          trust: {
+            ...(a2a.trust || {}),
+            external: true,
+            verified: false,
+          },
+        },
+      },
+    },
+  };
+}
+
 export class ExternalAgentGateway {
   constructor({
     agents = [],
@@ -47,11 +69,11 @@ export class ExternalAgentGateway {
 
   buildEnvelope({ agentId, task = {}, grantedCapabilities } = {}) {
     const agent = this.getAgent(agentId);
-    const envelope = buildGatewayRequest({
+    const envelope = markExternalA2aContextUntrusted(buildGatewayRequest({
       agent,
       task,
       grantedCapabilities,
-    });
+    }));
     return {
       ...envelope,
       mode: isMutationTask(task) ? 'mutation' : 'read',

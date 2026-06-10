@@ -1,4 +1,5 @@
 import { seedAttemptStrategies } from '../bes/strategySeeder.js';
+import { runBesLaneRuntime } from '../bes/laneRuntime.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -205,4 +206,78 @@ export function planEvolutionSwarmAttempts({
     index,
     source,
   }));
+}
+
+function laneCases(value = {}) {
+  if (Array.isArray(value)) return value;
+  return value.items || value.cases || value.hardCases || [];
+}
+
+function evaluateSwarmAttempt(candidate = {}) {
+  const reasons = [];
+  let score = 0.25;
+
+  if (candidate.specialization) {
+    reasons.push('role coverage');
+    score += 0.15;
+  }
+  if (candidate.strategy) {
+    reasons.push('handoff contract');
+    score += 0.15;
+  }
+  if (candidate.islandId && candidate.islandId !== 'island_unassigned') {
+    reasons.push('diversity');
+    score += 0.15;
+  }
+  if ((candidate.planning?.missingGoalIds || []).length === 0) {
+    reasons.push('hard-case coverage');
+    score += 0.15;
+  }
+  if (Number.isFinite(Number(candidate.budgetWeight))) {
+    reasons.push('budget weight assigned');
+    score += 0.1;
+  }
+
+  return {
+    score: Math.min(1, score),
+    reasons,
+    safety: { status: 'shadow_only', reasons: ['swarm_attempt_plan_only'] },
+    promotable: false,
+  };
+}
+
+export async function runSwarmPolicyBesLane({
+  taskId = 'swarm_policy_bes',
+  taskType = 'general',
+  evolutionArchive = [],
+  bidirectionalBes = null,
+  rhoCoreset = null,
+  hardCases = [],
+  maxCandidates = 4,
+  now,
+} = {}) {
+  const candidates = planEvolutionSwarmAttempts({
+    taskId,
+    taskType,
+    maxAttempts: maxCandidates,
+    evolutionArchive,
+    bidirectionalBes,
+    rhoCoreset,
+  });
+  const normalizedHardCases = hardCases.length ? hardCases : laneCases(rhoCoreset);
+
+  return runBesLaneRuntime({
+    lane: 'swarm',
+    taskId,
+    candidates,
+    hardCases: normalizedHardCases,
+    now,
+    denseSubgoals: [
+      { id: 'role_coverage', requiredEvidence: 'role coverage' },
+      { id: 'handoff_evidence', requiredEvidence: 'handoff contract' },
+      { id: 'diversity', requiredEvidence: 'diversity' },
+      { id: 'hard_case_coverage', requiredEvidence: 'hard-case coverage' },
+    ],
+    evaluator: ({ candidate }) => evaluateSwarmAttempt(candidate),
+  });
 }

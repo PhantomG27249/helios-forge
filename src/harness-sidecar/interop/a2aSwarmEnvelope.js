@@ -19,6 +19,13 @@ function scopedContext(context = {}) {
     'visualArtifacts',
     'memoryRefs',
     'graphRefs',
+    'besLane',
+    'rhoCaseIds',
+    'memoryGraphRefs',
+    'candidateRef',
+    'lineage',
+    'trust',
+    'requiredVerification',
   ];
   const scoped = {};
   for (const key of allowedKeys) {

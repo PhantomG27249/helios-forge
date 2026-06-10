@@ -18,9 +18,10 @@ export async function runLocalMetaHarness({
   cell = {},
   attempt = {},
   archive = true,
+  besLane = null,
 } = {}) {
   const cellId = resolveCellId(cell);
-  const loop = runLocalEvolutionLoop({ cellId, attempt });
+  const loop = runLocalEvolutionLoop({ cellId, attempt, besLane });
   const auditEvents = [
     auditEvent('local_meta.evolution_loop_completed', {
       cellId,

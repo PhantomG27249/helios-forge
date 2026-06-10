@@ -1,5 +1,7 @@
 const COMPACTION_HARD_CASE_PREFIX = 'compaction_';
 
+import { runBesLaneRuntime } from '../bes/laneRuntime.js';
+
 function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -141,4 +143,50 @@ export function evaluateCompactionPolicyCandidate({ candidate, replayCase = {} }
     },
     promotable: false,
   };
+}
+
+function laneCases(coreset = {}) {
+  if (Array.isArray(coreset)) return coreset;
+  return coreset.items || coreset.cases || coreset.hardCases || [];
+}
+
+function evaluateAcrossCases({ candidate, hardCases, evaluate }) {
+  const cases = hardCases.length ? hardCases : [{}];
+  const results = cases.map((traceCase) => evaluate(traceCase));
+  const score = results.reduce((sum, result) => sum + Number(result.score || 0), 0) / results.length;
+  return {
+    score,
+    reasons: [...new Set(results.flatMap((result) => result.reasons || []))],
+    caseCount: cases.length,
+    caseResults: results,
+    safety: results.find((result) => result.safety)?.safety || { status: 'shadow_only' },
+    promotable: false,
+  };
+}
+
+export async function runCompactionPolicyBesLane({
+  coreset,
+  baselinePolicy = {},
+  maxCandidates = 4,
+  taskId = 'compaction_policy_bes',
+  now,
+  candidateOverrides = [],
+} = {}) {
+  const hardCases = laneCases(coreset);
+  const proposalCoreset = { cases: hardCases, hardCases, items: hardCases };
+  const candidates = proposeCompactionPolicies({ coreset: proposalCoreset, baselinePolicy, maxCandidates })
+    .map((candidate, index) => ({ ...candidate, ...(candidateOverrides[index] || {}) }));
+
+  return runBesLaneRuntime({
+    lane: 'compaction',
+    taskId,
+    candidates,
+    hardCases,
+    now,
+    evaluator: ({ candidate }) => evaluateAcrossCases({
+      candidate,
+      hardCases,
+      evaluate: (replayCase) => evaluateCompactionPolicyCandidate({ candidate, replayCase }),
+    }),
+  });
 }

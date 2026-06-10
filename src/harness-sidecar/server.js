@@ -148,6 +148,45 @@ function sendBadRequest(res, error) {
   sendJson(res, 400, { error: error.message || String(error) });
 }
 
+function uniqueSorted(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [values]).filter(Boolean).map(String))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export function summarizeBesLaneStatus(laneResult = {}) {
+  const candidates = Array.isArray(laneResult.candidates) ? laneResult.candidates : [];
+  const ranked = [...candidates].sort((left, right) => (
+    Number(right.evidence?.summary?.domainScore ?? right.evidence?.domain?.score ?? 0)
+      - Number(left.evidence?.summary?.domainScore ?? left.evidence?.domain?.score ?? 0)
+      || String(left.candidateId || left.policyId || '').localeCompare(String(right.candidateId || right.policyId || ''))
+  ));
+  const blockedReasons = uniqueSorted(candidates.flatMap((candidate) => (
+    candidate.promotion?.blockedReasons || []
+  )));
+  const evidenceSources = uniqueSorted(candidates.flatMap((candidate) => (
+    candidate.evidence?.sources || []
+  )));
+
+  return {
+    lane: laneResult.lane || null,
+    taskId: laneResult.taskId || null,
+    candidateCount: candidates.length,
+    bestCandidateId: ranked[0]?.candidateId || ranked[0]?.policyId || null,
+    evidenceSources,
+    blockedReasons,
+    promotionAllowed: false,
+    updatedAt: laneResult.updatedAt || ranked[0]?.updatedAt || null,
+  };
+}
+
+export function createHarnessStatusSnapshot({ besLanes = [] } = {}) {
+  return {
+    besLanes: (Array.isArray(besLanes) ? besLanes : [besLanes])
+      .filter(Boolean)
+      .map(summarizeBesLaneStatus),
+  };
+}
+
 function countEnabledCapabilities(capabilities = []) {
   return capabilities.reduce((counts, capability) => {
     if (!capability?.enabled) return counts;

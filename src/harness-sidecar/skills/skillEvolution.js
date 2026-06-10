@@ -1,3 +1,5 @@
+import { runBesLaneRuntime } from '../bes/laneRuntime.js';
+
 function safeIdPart(value) {
   return String(value || 'skill')
     .toLowerCase()
@@ -200,5 +202,78 @@ export function generateSkillCandidates({
         },
       },
     };
+  });
+}
+
+function skillNeedHardCases(skillNeed = {}) {
+  const evidence = Array.isArray(skillNeed.evidence) ? skillNeed.evidence : [];
+  const failureModes = Array.isArray(skillNeed.failureModes) ? skillNeed.failureModes : [];
+  if (evidence.length > 0) {
+    return evidence.map((entry, index) => ({
+      caseId: entry.eventId || entry.caseId || `skill_case_${index + 1}`,
+      traceId: entry.traceId || null,
+      reasons: failureModes,
+    }));
+  }
+  return failureModes.map((reason, index) => ({
+    caseId: `skill_case_${index + 1}`,
+    reasons: [reason],
+  }));
+}
+
+function evaluateSkillCandidate(candidate = {}) {
+  const genome = candidate.genome || {};
+  const reasons = [];
+  let score = 0.2;
+
+  if (genome.triggerPolicy) {
+    reasons.push('trigger_precision');
+    score += 0.15;
+  }
+  if ((genome.workflowSteps || []).length >= 3) {
+    reasons.push('workflow_specificity');
+    score += 0.15;
+  }
+  if ((genome.requiredEvidence || []).length >= 2) {
+    reasons.push('verifier_evidence');
+    score += 0.15;
+  }
+  if ((genome.forbiddenActions || []).includes('weaken_approval_policy')) {
+    reasons.push('safety_boundaries');
+    score += 0.2;
+  }
+  if (candidate.applied === false && candidate.status === 'shadow_only') {
+    reasons.push('shadow_only_no_global_install');
+    score += 0.15;
+  }
+
+  return {
+    score: Math.min(1, score),
+    reasons,
+    safety: {
+      status: 'shadow_only',
+      forbiddenActions: genome.forbiddenActions || [],
+    },
+    promotable: false,
+  };
+}
+
+export async function runSkillCandidateBesLane({
+  taskId = 'skill_candidate_bes',
+  skillNeed,
+  count = 2,
+  parentSections,
+  now,
+} = {}) {
+  const candidates = generateSkillCandidates({ skillNeed, count, parentSections, now });
+  const hardCases = skillNeedHardCases(skillNeed);
+
+  return runBesLaneRuntime({
+    lane: 'skill',
+    taskId,
+    candidates,
+    hardCases,
+    denseSubgoals: QUALITY_SUBGOALS.map((goal) => ({ id: goal, requiredEvidence: goal })),
+    evaluator: ({ candidate }) => evaluateSkillCandidate(candidate),
   });
 }

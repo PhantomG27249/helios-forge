@@ -93,6 +93,7 @@ flowchart TD
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
 | AB-MCTS adaptive search | Allocates online budget between going wider, going deeper, switching worker/profile, gathering evidence, and stopping/promoting. It is advisory by default and replayable from traces. | `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, `adaptiveSearchApi.js` |
 | Bidirectional BES and population evolution | Builds backward goal trees, scores dense goal satisfaction, alternates forward candidates with backward refinement, recombines partial progress, and runs Shinka-style population/island/archive evolution. | `src/harness-sidecar/bes/*` |
+| Shared BES lane runtime | Wraps policy, memory, research, skill, swarm, tool, budget, visual, compaction, MCP-trust, and harness candidates in common evidence-only envelopes with lineage, dense subgoals, optional RHO replay, A2A refs, memory graph context, and promotion-blocking summaries. | `src/harness-sidecar/bes/laneRuntime.js`, `laneEvidence.js`, `src/harness-sidecar/meta/*PolicyEvolution.js`, `src/harness-sidecar/skills/skillEvolution.js`, `src/harness-sidecar/swarm/evolutionSwarmPlanner.js` |
 | RHO coreset | Selects high-signal traces, verifier cases, MemGraphRAG construction failures, and swarm hard cases for optimization. | `src/harness-sidecar/rho/coresetBuilder.js` |
 | Meta optimizer | Generates approval-ready policy candidates using BES/RHO evidence and promotion gates. | `src/harness-sidecar/meta/*` |
 | Shadow policy evolution | Proposes and evaluates shadow-only context, tool-loop, budget, visual/VLM, memory, MCP trust, and research policies without self-applying them. | `src/harness-sidecar/meta/*PolicyEvolution.js` |
@@ -112,6 +113,7 @@ flowchart TD
 | Traces, resume, replay | Writes event JSONL, summarizes/compacts traces, reconstructs resumable state, exposes trace replay. | `src/harness-sidecar/core/trace*.js`, `taskResume.js` |
 | UI operator surface | Displays harness controls, capabilities, traces, memory/RAG/graph, visual artifacts, subagents, verifier evolution status, adaptive-search state, skill candidate review, and replay results. | `public/index.html`, `public/app.js` |
 | External agent interop | Normalizes agent cards, routes agents, redacts credentials, issues delegated capability tokens, gates mutation. | `src/harness-sidecar/interop/*` |
+| BES/A2A lineage bridge | Preserves reference-only BES lane, RHO case, memory graph, candidate, lineage, trust, and required-verification metadata across local A2A envelopes and marks external A2A claims unverified at the gateway boundary. | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js` |
 
 ## Runtime Flow
 
