@@ -49,6 +49,13 @@ function normalizeAutonomyLevel(level) {
   return AUTONOMY_LEVELS[numeric];
 }
 
+export function listAutonomyLevels() {
+  return Object.values(AUTONOMY_LEVELS).map((level) => ({
+    ...level,
+    allowedActions: [...level.allowedActions],
+  }));
+}
+
 function safeId(value, fallback = 'item') {
   const normalized = String(value || fallback)
     .trim()
@@ -195,10 +202,18 @@ function summarizeRollbackDrills(rollbackDrills = []) {
 
 function summarizeAudit(auditEvents = []) {
   const events = asArray(auditEvents);
+  const escalations = events.filter((event) => event?.type === 'governance.escalation');
   return {
     eventCount: events.length,
-    escalationCount: events.filter((event) => event?.type === 'governance.escalation').length,
+    escalationCount: escalations.length,
     overrideCount: events.filter((event) => event?.type === 'governance.override').length,
+    escalationReasons: [...new Set(escalations.flatMap((event) => event?.reasons || []))].sort(),
+    lastEscalation: escalations.length
+      ? {
+        candidateId: escalations.at(-1).candidateId,
+        reasons: escalations.at(-1).reasons || [],
+      }
+      : null,
   };
 }
 
@@ -237,6 +252,11 @@ function auditEvent({ type, actor, candidate, reasons, decision, override }) {
   };
 }
 
+function hasLocalReversibleScope(candidate = {}) {
+  const scope = String(candidate.writeScope || candidate.scope || candidate.applyScope || 'workspace_local').toLowerCase();
+  return ['local', 'local_config', 'workspace', 'workspace_local', 'repo', 'repo_local'].includes(scope);
+}
+
 export function decideGovernanceAction({
   autonomyLevel = 0,
   candidate = {},
@@ -269,6 +289,21 @@ export function decideGovernanceAction({
   const approval = decideAutoApproval({ candidate, evidence, rollback, trust, approvals, policy });
   const lowRisk = !candidate.risk || candidate.risk === 'low';
   if (approval.status === 'auto_approved' && lowRisk && autonomy.level >= 2) {
+    if (!hasLocalReversibleScope(candidate)) {
+      const reasons = ['auto_approval_limited_to_local_reversible_scope'];
+      return {
+        decision: 'escalated',
+        autonomy,
+        reasons,
+        auditEvent: auditEvent({
+          type: 'governance.escalation',
+          actor,
+          candidate,
+          reasons,
+          decision: 'escalated',
+        }),
+      };
+    }
     return {
       decision: 'auto_approved',
       autonomy,

@@ -117,6 +117,32 @@ test('failed RHO validation is visible and blocks promotion', async () => {
   assert.equal(candidate.promotion.allowed, false);
 });
 
+test('failed replays and rejected candidates become future hard cases', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'code',
+    taskId: 'task-hard-case-carry-forward',
+    candidates: [
+      { candidateId: 'candidate-replay-failed', status: 'shadow_only' },
+      { candidateId: 'candidate-rejected', status: 'approved', durableApplyApproved: true },
+    ],
+    replayRunner: async ({ candidate }) => (
+      candidate.candidateId === 'candidate-replay-failed'
+        ? { validation: { passed: false, reasons: ['regression_on_trace_17'] } }
+        : { validation: { passed: true } }
+    ),
+    evaluator: () => ({ score: 0.9, reasons: ['candidate looked promising'] }),
+  });
+
+  assert.deepEqual(result.futureHardCases.map((hardCase) => hardCase.caseId), [
+    'task-hard-case-carry-forward:code:candidate-replay-failed:replay',
+    'task-hard-case-carry-forward:code:candidate-rejected:rejection',
+  ]);
+  assert.equal(result.futureHardCases[0].source, 'rho_replay_failed');
+  assert.deepEqual(result.futureHardCases[0].reasons, ['regression_on_trace_17']);
+  assert.equal(result.futureHardCases[1].source, 'promotion_rejected');
+  assert.ok(result.futureHardCases[1].reasons.includes('candidate_claims_approval'));
+});
+
 test('empty dense subgoal shells do not satisfy required evidence', async () => {
   const result = await runBesLaneRuntime({
     lane: 'harness',

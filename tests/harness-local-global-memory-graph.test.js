@@ -96,6 +96,40 @@ test('memory extraction society emits passages schemas facts and contradictions'
   assert.equal(Array.isArray(result.contradictions), true);
 });
 
+test('memory extraction society uses guarded injected model hooks only when enabled', () => {
+  let hookCalls = 0;
+  const modelHooks = {
+    extractFacts: ({ observations }) => {
+      hookCalls += 1;
+      assert.equal(observations[0].source, 'trace-hook');
+      return [{
+        subject: 'memoryExtractionSociety',
+        subjectType: 'module',
+        relation: 'can_use',
+        object: 'guarded model hooks',
+        objectType: 'capability',
+        passageIds: ['trace-hook'],
+        confidence: 0.91,
+      }];
+    },
+  };
+
+  const disabled = runMemoryExtractionSociety({
+    observations: [{ text: 'Hook source text.', source: 'trace-hook' }],
+    modelHooks,
+  });
+  const enabled = runMemoryExtractionSociety({
+    observations: [{ text: 'Hook source text.', source: 'trace-hook' }],
+    modelHooks,
+    modelAssistance: { enabled: true },
+  });
+
+  assert.equal(hookCalls, 1);
+  assert.deepEqual(disabled.facts, []);
+  assert.equal(enabled.facts[0].object, 'guarded model hooks');
+  assert.deepEqual(enabled.hookTrace, ['extractFacts']);
+});
+
 test('memory graph runtime persists promoted global layers and constructed graph', async () => {
   await makeTempWorkspace(async (workspaceRoot) => {
     const runtime = createMemoryGraphRuntime({ workspaceRoot });
@@ -192,6 +226,60 @@ test('memory graph runtime reports and persists legacy schema migrations', async
   });
 });
 
+test('memory graph runtime preserves layer and graph migration records across rebuilds', async () => {
+  await makeTempWorkspace(async (workspaceRoot) => {
+    const memoryDir = path.join(workspaceRoot, '.harness', 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(
+      path.join(memoryDir, 'global-layers.json'),
+      `${JSON.stringify({
+        schemaVersion: 0,
+        passages: [{ passageId: 'legacy-p1', text: 'Legacy migration fact.' }],
+        facts: [{
+          subject: 'memoryGraphRuntime',
+          relation: 'tracks',
+          object: 'layer migrations',
+          passageIds: ['legacy-p1'],
+        }],
+      }, null, 2)}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(memoryDir, 'global-graph.json'),
+      `${JSON.stringify({
+        schemaVersion: 0,
+        nodes: [{ id: 'legacy_node', kind: 'legacy' }],
+        edges: [],
+        migrationHistory: [{ id: 'legacy_custom_migration', fromVersion: -1, toVersion: 0, target: 'global_graph' }],
+      }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const runtime = createMemoryGraphRuntime({ workspaceRoot, schemaThreshold: 1 });
+    const result = await runtime.ingestPromotion({
+      passages: [{ passageId: 'p2', text: 'Runtime tracks graph migrations.' }],
+      schemas: [{ headType: 'module', relation: 'tracks', tailType: 'version_record', frequency: 1 }],
+      facts: [{
+        subject: 'memoryGraphRuntime',
+        relation: 'tracks',
+        object: 'graph migrations',
+        objectType: 'version_record',
+        passageIds: ['p2'],
+      }],
+    });
+    const persistedGraph = JSON.parse(await readFile(path.join(memoryDir, 'global-graph.json'), 'utf8'));
+
+    assert.deepEqual(result.migrations.map((migration) => migration.id), [
+      'global_graph_v0_to_v1',
+      'global_layers_v0_to_v1',
+    ]);
+    assert.deepEqual(persistedGraph.migrationHistory.map((migration) => migration.id), [
+      'global_graph_v0_to_v1',
+      'legacy_custom_migration',
+    ]);
+  });
+});
+
 test('hierarchical memory retriever returns active facts passages and summary counts', () => {
   const layers = createGlobalMemoryLayers();
   upsertPassage(layers, { passageId: 'p1', text: 'A requires B.' });
@@ -284,6 +372,40 @@ test('hierarchical memory retriever honors zero item budgets', () => {
 
   assert.deepEqual(noItems.items, []);
   assert.equal(noGraphItems.items.some((item) => item.source === 'memory_graph'), false);
+});
+
+test('hierarchical memory retriever emits task-startup policy signals with budget efficiency', () => {
+  const layers = createGlobalMemoryLayers();
+  upsertPassage(layers, { passageId: 'p1', text: 'Task startup should retrieve active memory facts.' });
+  upsertSchema(layers, { headType: 'phase', relation: 'uses', tailType: 'policy_signal', frequency: 2 });
+  upsertFact(layers, {
+    subject: 'task_startup',
+    subjectType: 'phase',
+    relation: 'uses',
+    object: 'active memory retrieval',
+    objectType: 'policy_signal',
+    passageIds: ['p1'],
+  });
+  activateStableSchemas({ layers, schemaThreshold: 2 });
+
+  const context = retrieveHierarchicalMemoryContext({
+    query: 'task startup active memory retrieval',
+    layers,
+    graph: { stats: { activeFactCount: 1, bridgeCount: 0 } },
+    maxItems: 4,
+    retrievalPhase: 'task_startup',
+    budgets: { graphItems: 0, tokenBudget: 400 },
+  });
+
+  assert.equal(context.policySignals.phase, 'task_startup');
+  assert.equal(context.policySignals.requireEvidenceBackedFacts, true);
+  assert.equal(context.policySignals.retrievalHitRate, 1);
+  assert.equal(context.policySignals.budgetEfficiency > 0, true);
+  assert.deepEqual(context.policySignals.startupPriorities, [
+    'active_fact',
+    'stable_schema',
+    'passage',
+  ]);
 });
 
 test('memory graph BES lane packets are sorted deduped and evidence-only', () => {

@@ -261,3 +261,43 @@ test('selects compaction replay failures as hard cases', () => {
   );
   assert.equal(coreset.items[0].score >= 5, true);
 });
+
+test('annotates selected traces with replay difficulty diversity heldout and lineage metadata', () => {
+  const coreset = buildRhoCoreset({
+    traces: [
+      {
+        taskId: 'lineage-hard',
+        status: 'failed',
+        failureModes: ['tool_timeout', 'retrieval_miss'],
+        source: { path: 'traces/lineage-hard/events.jsonl', sha: 'abc123' },
+        config: { profile: 'rho-scale', seed: 17 },
+        trace: { traceId: 'trace_hard', runId: 'run_hard' },
+        heldoutVariants: [
+          { variantId: 'seed_17', seed: 17 },
+          { variantId: 'seed_23', seed: 23 },
+        ],
+        events: [{ type: 'recovery.event', category: 'tool_timeout' }],
+      },
+    ],
+    limit: 1,
+  });
+
+  assert.equal(coreset.items[0].metadata.difficulty.band, 'hard');
+  assert.deepEqual(coreset.items[0].metadata.difficulty.reasons, [
+    'failure_or_recovery',
+    'low_completion_or_unsuccessful',
+  ]);
+  assert.deepEqual(coreset.items[0].metadata.diversity.keys, [
+    'tool_timeout',
+    'retrieval_miss',
+  ]);
+  assert.deepEqual(
+    coreset.items[0].heldoutVariants.map((variant) => variant.variantId),
+    ['seed_17', 'seed_23'],
+  );
+  assert.deepEqual(coreset.items[0].lineage, {
+    source: { path: 'traces/lineage-hard/events.jsonl', sha: 'abc123' },
+    config: { profile: 'rho-scale', seed: 17 },
+    trace: { traceId: 'trace_hard', runId: 'run_hard' },
+  });
+});

@@ -183,6 +183,10 @@ export async function runPromotionLoop({
     smokePassed: smokePassed(smokeResult),
     smokeResult,
     metrics: evalResult?.metrics || evalResult || {},
+    replay: evalResult?.replay,
+    verifier: evalResult?.verifier,
+    provenance: evalResult?.provenance,
+    rollback: evalResult?.rollback,
     evaluatedAt: new Date().toISOString(),
   };
 

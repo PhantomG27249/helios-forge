@@ -407,6 +407,63 @@ function resolveDiversityKey(trace, taskId, diversityKey) {
   return stableString(firstRecovery?.category ?? getEvents(trace)[0]?.category ?? taskId);
 }
 
+function resolveDiversityKeys(trace, taskId, diversityKey) {
+  const failureModes = trace?.failureModes ?? trace?.failure_modes;
+  if (Array.isArray(failureModes) && failureModes.length > 0) {
+    return failureModes.map(stableString).filter(Boolean);
+  }
+  const key = resolveDiversityKey(trace, taskId, diversityKey);
+  return key ? [key] : [];
+}
+
+function difficultyBand(score) {
+  if (score >= 5) return 'hard';
+  if (score >= 2) return 'medium';
+  return 'easy';
+}
+
+function normalizeHeldoutVariant(variant, index) {
+  if (variant && typeof variant === 'object' && !Array.isArray(variant)) {
+    return {
+      variantId: stableString(variant.variantId ?? variant.id ?? variant.name ?? `variant_${index + 1}`),
+      ...variant,
+    };
+  }
+  return {
+    variantId: stableString(variant ?? `variant_${index + 1}`),
+  };
+}
+
+function heldoutVariants(trace) {
+  const variants = Array.isArray(trace?.heldoutVariants)
+    ? trace.heldoutVariants
+    : (Array.isArray(trace?.heldout_variants) ? trace.heldout_variants : []);
+  return variants.map(normalizeHeldoutVariant);
+}
+
+function traceLineage(trace = {}) {
+  return {
+    source: trace.source ?? trace.sourceRef ?? trace.source_ref ?? {},
+    config: trace.config ?? trace.configRef ?? trace.config_ref ?? {},
+    trace: trace.trace ?? trace.traceRef ?? trace.trace_ref ?? {},
+  };
+}
+
+function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' }) {
+  return {
+    difficulty: {
+      score: scored.score,
+      band: difficultyBand(scored.score),
+      reasons: scored.reasons,
+    },
+    diversity: {
+      key: diversityKey,
+      keys: resolveDiversityKeys(trace, taskId, diversityKey),
+      source,
+    },
+  };
+}
+
 function compareRankedItems(a, b) {
   if (b.score !== a.score) {
     return b.score - a.score;
@@ -427,12 +484,21 @@ export function buildRhoCoreset({
   const rankedTraces = traces.map((trace, index) => {
     const taskId = getTaskId(trace, index);
     const scored = scoreTrace(trace);
+    const resolvedDiversityKey = resolveDiversityKey(trace, taskId, diversityKey);
     return {
       taskId,
       score: scored.score,
       reasons: scored.reasons,
       trace,
-      diversityKey: resolveDiversityKey(trace, taskId, diversityKey),
+      diversityKey: resolvedDiversityKey,
+      heldoutVariants: heldoutVariants(trace),
+      lineage: traceLineage(trace),
+      metadata: replayMetadata({
+        trace,
+        taskId,
+        scored,
+        diversityKey: resolvedDiversityKey,
+      }),
     };
   });
   const rankedVerifierCases = verifierCases

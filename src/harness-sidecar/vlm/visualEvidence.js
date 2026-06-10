@@ -17,6 +17,16 @@ function artifactPath(artifact = {}) {
   return null;
 }
 
+function artifactHash(artifact = {}) {
+  const hash = artifact.hash
+    ?? artifact.artifactHash
+    ?? artifact.sha256
+    ?? artifact.checksum
+    ?? artifact.artifacts?.hash
+    ?? artifact.artifacts?.sha256;
+  return hash ? stableString(hash, null) : null;
+}
+
 function visualReason(verifierResult = {}) {
   if (verifierResult.reason === 'visual_artifact_unavailable') return 'vlm_missed_artifact';
   if (verifierResult.modelPassed === true && verifierResult.passed === false) return 'visual_false_positive';
@@ -32,6 +42,7 @@ function buildNode({ taskId, artifact, verifierResult, index }) {
     artifactId,
     artifactType: artifact.type || 'visual_artifact',
     path: artifactPath(artifact),
+    artifactHash: artifactHash(artifact),
     passed: verifierResult.passed === true,
     score: Number.isFinite(Number(verifierResult.score)) ? Number(verifierResult.score) : null,
     confidence: Number.isFinite(Number(verifierResult.confidence)) ? Number(verifierResult.confidence) : null,
@@ -64,7 +75,11 @@ export function buildVisualEvidenceBundle({
       verifier: verifierResult.name || 'visual.verifier',
       score: node.score,
       confidence: node.confidence,
-      visualArtifacts: node.path ? [{ type: node.artifactType, path: node.path }] : [],
+      visualArtifacts: node.path ? [{
+        type: node.artifactType,
+        path: node.path,
+        ...(node.artifactHash ? { hash: node.artifactHash } : {}),
+      }] : [],
       findings: node.findings,
     },
   }));

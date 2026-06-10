@@ -244,3 +244,31 @@ test('visual evidence labels model pass with failed verifier threshold as a fals
   assert.equal(bundle.verdict.reason, 'visual_false_positive');
   assert.equal(bundle.rhoCases[0].reason, 'visual_false_positive');
 });
+
+test('visual evidence preserves artifact hashes on nodes and verifier cases', () => {
+  const bundle = buildVisualEvidenceBundle({
+    taskId: 'task_visual_hash',
+    verifierResult: {
+      name: 'visual.verifier',
+      passed: true,
+      score: 0.95,
+      confidence: 0.84,
+      artifacts: [
+        {
+          artifactId: 'after',
+          type: 'screenshot',
+          path: '.harness/visual/task_visual_hash/after.png',
+          hash: 'sha256:abc123',
+        },
+      ],
+    },
+  });
+
+  assert.equal(bundle.nodes[0].artifactHash, 'sha256:abc123');
+  assert.equal(bundle.artifacts[0].hash, 'sha256:abc123');
+  assert.deepEqual(bundle.rhoCases[0].verifierCase.visualArtifacts, [{
+    type: 'screenshot',
+    path: '.harness/visual/task_visual_hash/after.png',
+    hash: 'sha256:abc123',
+  }]);
+});

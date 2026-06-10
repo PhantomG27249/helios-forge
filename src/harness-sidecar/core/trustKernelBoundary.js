@@ -82,22 +82,44 @@ function autoMergeRequested(proposal = {}) {
 function visualTaskRequiresEvidence(proposal = {}) {
   const taskKind = String(proposal.taskKind ?? proposal.task?.kind ?? proposal.lane ?? '').toLowerCase();
   return proposal.visualEvidenceRequired === true
+    || proposal.visualImpact === true
+    || proposal.visualImpacting === true
     || taskKind === 'visual'
     || taskKind === 'vlm';
 }
 
-function hasArtifactBackedVisualEvidence(visualEvidence = {}) {
+function visualReferencePath(reference = {}) {
+  return reference?.path
+    || reference?.artifacts?.image
+    || reference?.artifacts?.diff
+    || reference?.artifacts?.before
+    || reference?.artifacts?.after;
+}
+
+function visualReferenceHash(reference = {}) {
+  return reference?.hash
+    || reference?.artifactHash
+    || reference?.sha256
+    || reference?.checksum
+    || reference?.artifacts?.hash
+    || reference?.artifacts?.sha256;
+}
+
+function evaluateVisualEvidence(visualEvidence = {}) {
   const artifacts = Array.isArray(visualEvidence.artifacts) ? visualEvidence.artifacts : [];
   const nodes = Array.isArray(visualEvidence.nodes) ? visualEvidence.nodes : [];
-  const hasArtifactPath = artifacts.some((artifact) => (
-    artifact?.path
-      || artifact?.artifacts?.image
-      || artifact?.artifacts?.diff
-      || artifact?.artifacts?.before
-      || artifact?.artifacts?.after
-  ));
-  const hasNodePath = nodes.some((node) => node?.path);
-  return Boolean((hasArtifactPath || hasNodePath) && visualEvidence.verdict?.passed === true);
+  const references = [...artifacts, ...nodes];
+  const pathBackedReferences = references.filter((reference) => visualReferencePath(reference));
+  const hasReferencePath = pathBackedReferences.length > 0;
+  const allReferencesHashBacked = pathBackedReferences.every((reference) => visualReferenceHash(reference));
+
+  if (visualEvidence.verdict?.passed !== true || !hasReferencePath) {
+    return { valid: false, reason: 'missing_visual_evidence' };
+  }
+  if (!allReferencesHashBacked) {
+    return { valid: false, reason: 'missing_visual_evidence_hash' };
+  }
+  return { valid: true, reason: null };
 }
 
 function hasExplicitApproval({ approved, approval, proposal }) {
@@ -160,12 +182,15 @@ export function evaluateTrustKernelBoundary({
   if (autoMergeRequested(proposal)) {
     return decision({ reason: 'auto_merge_rejected', reasons: ['auto_merge_rejected'] });
   }
-  if (visualTaskRequiresEvidence(proposal) && !hasArtifactBackedVisualEvidence(proposal.visualEvidence)) {
-    return decision({
-      requiresApproval: true,
-      reason: 'missing_visual_evidence',
-      reasons: ['missing_visual_evidence'],
-    });
+  if (visualTaskRequiresEvidence(proposal)) {
+    const visualEvidence = evaluateVisualEvidence(proposal.visualEvidence);
+    if (!visualEvidence.valid) {
+      return decision({
+        requiresApproval: true,
+        reason: visualEvidence.reason,
+        reasons: [visualEvidence.reason],
+      });
+    }
   }
 
   if (APPROVAL_REQUIRED_KINDS.has(kind)) {

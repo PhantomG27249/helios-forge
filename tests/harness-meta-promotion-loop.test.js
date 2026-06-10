@@ -46,8 +46,14 @@ function runner(metrics = { quality: 0.9, safety: 0.96, cost: 0.3, latency: 0.2 
     async runSmoke({ candidate: runCandidate }) {
       return { passed: true, smokeId: `smoke_${runCandidate.candidateId}` };
     },
-    async runEval() {
-      return { metrics };
+    async runEval({ candidate: runCandidate }) {
+      return {
+        metrics,
+        replay: { passed: true, replayId: `replay_${runCandidate.candidateId}` },
+        verifier: { passed: true, verifierId: `verifier_${runCandidate.candidateId}` },
+        provenance: { traceId: 'task_meta_loop', artifactId: `artifact_${runCandidate.candidateId}` },
+        rollback: { available: true, drillId: `rollback_${runCandidate.candidateId}` },
+      };
     },
   };
 }
@@ -245,7 +251,13 @@ test('promotion loop selects preference winner and archives all optimizer candid
         },
         async runEval({ candidate: runCandidate }) {
           evaluated.push(runCandidate.candidateId);
-          return { metrics: { quality: 0.91, safety: 0.97, cost: 0.3, latency: 0.2 } };
+          return {
+            metrics: { quality: 0.91, safety: 0.97, cost: 0.3, latency: 0.2 },
+            replay: { passed: true, replayId: `replay_${runCandidate.candidateId}` },
+            verifier: { passed: true, verifierId: `verifier_${runCandidate.candidateId}` },
+            provenance: { traceId: 'task_meta_loop', artifactId: `artifact_${runCandidate.candidateId}` },
+            rollback: { available: true, drillId: `rollback_${runCandidate.candidateId}` },
+          };
         },
       },
       approval: { candidateId: 'cand_high', choice: 'approve', approver: 'human' },

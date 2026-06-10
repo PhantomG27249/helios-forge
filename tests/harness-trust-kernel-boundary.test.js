@@ -142,8 +142,17 @@ test('requires artifact-backed visual evidence for visual task source patches', 
       paths: ['public/app.css'],
       visualEvidenceRequired: true,
       visualEvidence: {
-        nodes: [{ id: 'visual_evidence:task_visual:screenshot', type: 'visual_evidence' }],
-        artifacts: [{ type: 'screenshot', path: '.harness/visual/task_visual/after.png' }],
+        nodes: [{
+          id: 'visual_evidence:task_visual:screenshot',
+          type: 'visual_evidence',
+          path: '.harness/visual/task_visual/after.png',
+          artifactHash: 'sha256:abc123',
+        }],
+        artifacts: [{
+          type: 'screenshot',
+          path: '.harness/visual/task_visual/after.png',
+          hash: 'sha256:abc123',
+        }],
         verdict: { passed: true, score: 0.91, confidence: 0.8 },
       },
     },
@@ -151,4 +160,107 @@ test('requires artifact-backed visual evidence for visual task source patches', 
 
   assert.equal(allowedWithApproval.allowed, true);
   assert.equal(allowedWithApproval.reason, null);
+});
+
+test('requires hash-backed positive visual evidence for visual-impacting source patches', () => {
+  const missingHash = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      visualImpact: true,
+      paths: ['public/app.css'],
+      visualEvidence: {
+        artifacts: [{ type: 'screenshot', path: '.harness/visual/task_visual/after.png' }],
+        verdict: { passed: true, score: 0.94, confidence: 0.82 },
+      },
+    },
+  });
+
+  assert.equal(missingHash.allowed, false);
+  assert.equal(missingHash.reason, 'missing_visual_evidence_hash');
+  assert.equal(missingHash.requiresApproval, true);
+
+  const failedVerdict = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      visualImpact: true,
+      paths: ['public/app.css'],
+      visualEvidence: {
+        artifacts: [{
+          type: 'screenshot',
+          path: '.harness/visual/task_visual/after.png',
+          hash: 'sha256:abc123',
+        }],
+        verdict: { passed: false, score: 0.94, confidence: 0.82 },
+      },
+    },
+  });
+
+  assert.equal(failedVerdict.allowed, false);
+  assert.equal(failedVerdict.reason, 'missing_visual_evidence');
+
+  const allowed = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      visualImpact: true,
+      paths: ['public/app.css'],
+      visualEvidence: {
+        nodes: [{
+          id: 'visual_evidence:task_visual:screenshot',
+          type: 'visual_evidence',
+          path: '.harness/visual/task_visual/after.png',
+          artifactHash: 'sha256:abc123',
+        }],
+        artifacts: [{
+          type: 'screenshot',
+          path: '.harness/visual/task_visual/after.png',
+          hash: 'sha256:abc123',
+        }],
+        verdict: { passed: true, score: 0.94, confidence: 0.82 },
+      },
+    },
+  });
+
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.reason, null);
+});
+
+test('rejects partial visual evidence when any path-backed reference is missing a hash', () => {
+  const result = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      visualImpact: true,
+      paths: ['public/app.css'],
+      visualEvidence: {
+        nodes: [{
+          id: 'visual_evidence:task_visual:screenshot',
+          type: 'visual_evidence',
+          path: '.harness/visual/task_visual/after.png',
+          artifactHash: 'sha256:abc123',
+        }],
+        artifacts: [
+          {
+            type: 'screenshot',
+            path: '.harness/visual/task_visual/after.png',
+            hash: 'sha256:abc123',
+          },
+          {
+            type: 'diff',
+            path: '.harness/visual/task_visual/diff.png',
+          },
+        ],
+        verdict: { passed: true, score: 0.94, confidence: 0.82 },
+      },
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'missing_visual_evidence_hash');
 });

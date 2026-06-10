@@ -69,6 +69,11 @@ async function seedPromotableSkillCandidate(workspaceRoot, overrides = {}) {
       rollback: {
         available: true,
       },
+      evidence: {
+        replay: { passed: true, replayId: 'skill-review-replay-001' },
+        verifier: { passed: true, verifierId: 'skill-review-verifier-001' },
+        provenance: { traceId: 'trace-skill-review-001', sourceSkillSnapshotId: 'source-skill-review-001' },
+      },
       ...overrides,
     },
     skillMarkdown: '# Review Safe Skill\n\nUse this only for local review.\n',

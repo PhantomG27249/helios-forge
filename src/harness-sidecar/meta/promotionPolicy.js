@@ -22,6 +22,68 @@ function isApproved(candidateId, approvals) {
   ));
 }
 
+function pushReason(reasons, reason) {
+  if (!reasons.includes(reason)) reasons.push(reason);
+}
+
+function evidenceObject(candidateRun = {}) {
+  return candidateRun.evidence || candidateRun.promotionEvidence || {};
+}
+
+function replayPassed(candidateRun = {}) {
+  const evidence = evidenceObject(candidateRun);
+  return Boolean(
+    evidence.replay?.passed === true
+      || evidence.rhoReplay?.passed === true
+      || evidence.rho?.validation?.passed === true
+      || candidateRun.replay?.passed === true
+      || candidateRun.rho?.validation?.passed === true
+  );
+}
+
+function verifierPassed(candidateRun = {}) {
+  const evidence = evidenceObject(candidateRun);
+  return Boolean(
+    evidence.verifier?.passed === true
+      || evidence.verifierEvidence?.passed === true
+      || candidateRun.verifier?.passed === true
+      || candidateRun.verifierEvidence?.passed === true
+  );
+}
+
+function provenanceRecorded(candidateRun = {}) {
+  const evidence = evidenceObject(candidateRun);
+  const provenance = evidence.provenance || candidateRun.provenance || candidateRun.lineage || {};
+  return Boolean(
+    provenance.traceId
+      || provenance.sourceSnapshotId
+      || provenance.sourceSkillSnapshotId
+      || provenance.artifactId
+      || provenance.lineageId
+  );
+}
+
+function addRequiredPromotionEvidenceReasons(reasons, candidateRun = {}) {
+  if (replayPassed(candidateRun)) pushReason(reasons, 'replay_passed');
+  else pushReason(reasons, 'missing_replay_evidence');
+
+  if (verifierPassed(candidateRun)) pushReason(reasons, 'verifier_passed');
+  else pushReason(reasons, 'missing_verifier_evidence');
+
+  if (provenanceRecorded(candidateRun)) pushReason(reasons, 'provenance_recorded');
+  else pushReason(reasons, 'missing_provenance');
+
+  if (rollbackAvailable(candidateRun)) pushReason(reasons, 'rollback_available');
+  else pushReason(reasons, 'missing_rollback');
+}
+
+function hasRequiredPromotionEvidence(reasons) {
+  return reasons.includes('replay_passed')
+    && reasons.includes('verifier_passed')
+    && reasons.includes('provenance_recorded')
+    && reasons.includes('rollback_available');
+}
+
 function isParetoImprovement(metrics, baselineFrontier) {
   if (!baselineFrontier.length) {
     return true;
@@ -136,6 +198,7 @@ function evaluateVerifierPromotion({
   } else {
     reasons.push('verifier_cost_regression');
   }
+  addRequiredPromotionEvidenceReasons(reasons, candidateRun);
 
   const status = (
     reasons.includes('human_approved')
@@ -143,6 +206,7 @@ function evaluateVerifierPromotion({
     && reasons.includes('verifier_baseline_clean')
     && reasons.includes('verifier_flakiness_ok')
     && reasons.includes('verifier_cost_ok')
+    && hasRequiredPromotionEvidence(reasons)
   ) ? 'promoted' : 'rejected';
 
   return {
@@ -211,7 +275,9 @@ function skillCostOk(metrics = {}, baseline = {}, approvals = [], policy = {}) {
 
 function rollbackAvailable(candidateRun = {}) {
   return Boolean(
-    candidateRun.rollback?.available === true
+    candidateRun.rollback?.reversible === true
+      || candidateRun.rollback?.available === true
+      || candidateRun.rollback?.drillId
       || candidateRun.rollback?.packageId
       || candidateRun.rollback?.installRecordId
   );
@@ -269,6 +335,7 @@ function evaluateSkillPromotion({
   } else {
     reasons.push('missing_rollback');
   }
+  addRequiredPromotionEvidenceReasons(reasons, candidateRun);
 
   const status = (
     reasons.includes('human_approved')
@@ -277,7 +344,7 @@ function evaluateSkillPromotion({
     && !reasons.includes('skill_provenance_incompatible')
     && reasons.includes('skill_trigger_precision_ok')
     && reasons.includes('skill_cost_ok')
-    && reasons.includes('rollback_available')
+    && hasRequiredPromotionEvidence(reasons)
   ) ? 'promoted' : 'rejected';
 
   return {
@@ -356,12 +423,14 @@ export function evaluatePromotion({
   if (isShadowOnlyCandidate(candidateRun)) {
     reasons.push('shadow_policy_no_self_apply');
   }
+  addRequiredPromotionEvidenceReasons(reasons, candidateRun);
 
   const status = (
     reasons.includes('human_approved')
     && reasons.includes('smoke_passed')
     && reasons.includes('safety_threshold_met')
     && reasons.includes('pareto_improvement')
+    && hasRequiredPromotionEvidence(reasons)
     && !reasons.includes('shadow_policy_no_self_apply')
   ) ? 'promoted' : 'rejected';
 

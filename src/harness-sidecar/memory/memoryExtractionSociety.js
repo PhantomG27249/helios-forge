@@ -43,6 +43,16 @@ function normalizeFact(observation = {}) {
   };
 }
 
+function normalizePassage(passage = {}, index = 0) {
+  const passageId = passageIdFor(passage, index);
+  return {
+    id: passage.id || passageId,
+    passageId,
+    text: passage.text || passage.summary || '',
+    source: passage.source,
+  };
+}
+
 function normalizeSchema(observation = {}) {
   const relation = observation.relation || observation.predicate;
   if (!relation || !observation.subjectType || !observation.objectType) return null;
@@ -53,6 +63,38 @@ function normalizeSchema(observation = {}) {
     frequency: Number.isFinite(Number(observation.frequency)) ? Number(observation.frequency) : 1,
     status: observation.status || 'candidate',
   };
+}
+
+function schemaKey(schema = {}) {
+  return [schema.headType, schema.relation, schema.tailType].join('\0');
+}
+
+function fullFactKey(fact = {}) {
+  return [fact.subject, fact.relation, fact.object].join('\0');
+}
+
+function upsertByIdentity(items, item, identity) {
+  if (!item) return;
+  const itemKey = identity(item);
+  const index = items.findIndex((existing) => identity(existing) === itemKey);
+  if (index === -1) {
+    items.push(item);
+    return;
+  }
+  items[index] = {
+    ...items[index],
+    ...item,
+    passageIds: item.passageIds
+      ? [...new Set([...normalizeList(items[index].passageIds), ...normalizeList(item.passageIds)])].sort()
+      : items[index].passageIds,
+  };
+}
+
+function callHook({ hook, name, context, hookTrace }) {
+  if (typeof hook !== 'function') return [];
+  const result = normalizeList(hook(context));
+  if (result.length > 0) hookTrace.push(name);
+  return result;
 }
 
 function findContradictions(facts = []) {
@@ -79,28 +121,59 @@ function findContradictions(facts = []) {
   ));
 }
 
-export function runMemoryExtractionSociety({ observations = [] } = {}) {
+export function runMemoryExtractionSociety({
+  observations = [],
+  modelAssistance = {},
+  modelHooks = {},
+} = {}) {
   const passages = [];
   const schemas = [];
   const facts = [];
+  const hookTrace = [];
+  const normalizedObservations = normalizeList(observations);
 
-  normalizeList(observations).forEach((observation, index) => {
+  normalizedObservations.forEach((observation, index) => {
     if (observation.text || observation.source || observation.passageId) {
-      const passageId = passageIdFor(observation, index);
-      passages.push({
-        id: passageId,
-        passageId,
-        text: observation.text || observation.summary || '',
-        source: observation.source,
-      });
+      upsertByIdentity(passages, normalizePassage(observation, index), (passage) => passage.passageId);
     }
 
     const schema = normalizeSchema(observation);
-    if (schema) schemas.push(schema);
+    if (schema) upsertByIdentity(schemas, schema, schemaKey);
 
     const fact = normalizeFact(observation);
-    if (fact) facts.push(fact);
+    if (fact) upsertByIdentity(facts, fact, fullFactKey);
   });
+
+  if (modelAssistance.enabled === true) {
+    const context = {
+      observations: normalizedObservations,
+      passages: passages.map((passage) => ({ ...passage })),
+      schemas: schemas.map((schema) => ({ ...schema })),
+      facts: facts.map((fact) => ({ ...fact })),
+    };
+    callHook({ hook: modelHooks.extractPassages, name: 'extractPassages', context, hookTrace })
+      .forEach((passage, index) => upsertByIdentity(passages, normalizePassage(passage, index), (item) => item.passageId));
+    callHook({ hook: modelHooks.induceSchemas, name: 'induceSchemas', context, hookTrace })
+      .map(normalizeSchema)
+      .forEach((schema) => upsertByIdentity(schemas, schema, schemaKey));
+    callHook({ hook: modelHooks.extractFacts, name: 'extractFacts', context, hookTrace })
+      .map(normalizeFact)
+      .forEach((fact) => upsertByIdentity(facts, fact, fullFactKey));
+  }
+
+  const hookContradictions = modelAssistance.enabled === true
+    ? callHook({
+      hook: modelHooks.checkContradictions,
+      name: 'checkContradictions',
+      context: {
+        observations: normalizedObservations,
+        passages,
+        schemas,
+        facts,
+      },
+      hookTrace,
+    })
+    : [];
 
   return {
     schemaVersion: MEMORY_EXTRACTION_SOCIETY_SCHEMA_VERSION,
@@ -116,6 +189,7 @@ export function runMemoryExtractionSociety({ observations = [] } = {}) {
       || left.relation.localeCompare(right.relation)
       || left.object.localeCompare(right.object)
     )),
-    contradictions: findContradictions(facts),
+    contradictions: [...findContradictions(facts), ...hookContradictions],
+    hookTrace: hookTrace.sort(),
   };
 }

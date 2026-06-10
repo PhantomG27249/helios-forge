@@ -43,6 +43,11 @@ export async function runHarnessExperiment({
   configPatch = '',
   promotion = {},
   rollback = {},
+  lineage = {},
+  traceManifest = {},
+  metricLineage = {},
+  replayEvidence = {},
+  sweep = {},
 } = {}) {
   const baselineMetrics = await invokeRunner(baselineRunner, { candidate: baseline, role: 'baseline' });
   const candidateMetrics = await invokeRunner(candidateRunner, { candidate, role: 'candidate' });
@@ -75,6 +80,11 @@ export async function runHarnessExperiment({
         preference,
       },
       rollback,
+      lineage,
+      traceManifest,
+      metricLineage,
+      replayEvidence,
+      sweep,
     })
     : null;
 

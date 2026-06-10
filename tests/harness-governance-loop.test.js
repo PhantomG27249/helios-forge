@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import {
   decideGovernanceAction,
+  listAutonomyLevels,
   planScheduledReplayJobs,
   recordRollbackDrill,
   summarizeGovernanceStatus,
@@ -126,6 +127,38 @@ test('applies autonomy levels, low-risk reversible approval policy, and escalati
   assert.deepEqual(escalated.auditEvent.reasons, ['branch_mutation_requires_human']);
   assert.equal(override.decision, 'override_approved');
   assert.equal(override.auditEvent.type, 'governance.override');
+});
+
+test('formal autonomy levels narrow auto approval to reversible local config and summarize escalation reasons', () => {
+  const levels = listAutonomyLevels();
+  assert.deepEqual(levels.map((level) => level.levelName), ['manual', 'shadow', 'supervised', 'guarded']);
+  assert.equal(levels[2].allowedActions.includes('apply_local_reversible'), false);
+  assert.equal(levels[3].allowedActions.includes('apply_local_reversible'), true);
+
+  const denied = decideGovernanceAction({
+    autonomyLevel: 3,
+    candidate: {
+      candidateId: 'global-config-a',
+      changeType: 'local_config',
+      risk: 'low',
+      writeScope: 'global',
+    },
+    evidence: { baselinePassed: true, heldOutPassed: true },
+    rollback: { reversible: true },
+    actor: 'meta-loop',
+  });
+
+  assert.equal(denied.decision, 'escalated');
+  assert.equal(denied.reasons.includes('auto_approval_limited_to_local_reversible_scope'), true);
+
+  const summary = summarizeGovernanceStatus({
+    autonomyLevel: 3,
+    auditEvents: [denied.auditEvent],
+  });
+  assert.equal(summary.autonomy.levelName, 'guarded');
+  assert.equal(summary.audit.escalationCount, 1);
+  assert.deepEqual(summary.audit.escalationReasons, ['auto_approval_limited_to_local_reversible_scope']);
+  assert.equal(summary.audit.lastEscalation.candidateId, 'global-config-a');
 });
 
 test('harness status snapshot includes governance dashboard summaries', () => {

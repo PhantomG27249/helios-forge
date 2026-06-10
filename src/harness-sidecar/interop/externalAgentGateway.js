@@ -36,10 +36,43 @@ function recordView(record) {
   return cloneSerializable(record);
 }
 
+function endpointDescriptor(agent = {}) {
+  const endpoint = agent.endpoint && typeof agent.endpoint === 'object'
+    ? Object.fromEntries(
+      Object.entries(agent.endpoint)
+        .filter(([key]) => !/socket|server|listener|connection/i.test(key)),
+    )
+    : agent.endpoint;
+  return cloneSerializable({
+    id: agent.id,
+    name: agent.name,
+    protocol: agent.protocol,
+    endpoint,
+    command: agent.command,
+    capabilities: agent.capabilities,
+    costModel: agent.costModel,
+    latencyStats: agent.latencyStats,
+    trustLevel: agent.trustLevel,
+    toolPermissions: agent.toolPermissions,
+    available: agent.available,
+    metadata: agent.metadata,
+  });
+}
+
 function recordsFromState(records) {
   if (Array.isArray(records)) return records;
   if (records && typeof records === 'object') return Object.values(records);
   return [];
+}
+
+function loadIssuerSecret(store) {
+  if (!store) return undefined;
+  if (typeof store === 'function') return store();
+  if (typeof store.loadIssuerSecret === 'function') return store.loadIssuerSecret();
+  if (typeof store.load === 'function') return store.load();
+  if (typeof store.get === 'function') return store.get('issuerSecret');
+  if (typeof store.issuerSecret === 'string') return store.issuerSecret;
+  return undefined;
 }
 
 function markExternalA2aContextUntrusted(envelope = {}) {
@@ -71,6 +104,8 @@ function mutationTrustFailure({
   approval,
   capabilityToken,
   now,
+  issuerSecret,
+  requireStableIssuerSecret = false,
 } = {}) {
   if (!isMutationTask(task)) return null;
   const normalizedCapabilities = normalizeList(capabilities);
@@ -92,6 +127,12 @@ function mutationTrustFailure({
       tokenReasons: [],
     };
   }
+  if (requireStableIssuerSecret && !issuerSecret) {
+    return {
+      reason: 'issuer_secret_required',
+      tokenReasons: [],
+    };
+  }
 
   const timestamp = now();
   const tokenDecisions = normalizedCapabilities.map((capability) => ({
@@ -102,6 +143,7 @@ function mutationTrustFailure({
       capability,
       mode: 'mutation',
       now: timestamp,
+      issuerSecret,
     }),
   }));
   const scopeDecisions = normalizeList(task.requiredScopes).map((scope) => ({
@@ -113,6 +155,7 @@ function mutationTrustFailure({
       scope,
       mode: 'mutation',
       now: timestamp,
+      issuerSecret,
     }),
   }));
   const tokenReasons = [...tokenDecisions, ...scopeDecisions].flatMap(({ label, decision }) => (
@@ -135,16 +178,23 @@ export class ExternalAgentGateway {
     now = Date.now,
     durableStore = null,
     durableState = null,
+    issuerSecret,
+    issuerSecretStore = null,
+    requireStableIssuerSecret = false,
   } = {}) {
     if (dispatch && typeof dispatch !== 'function') {
       throw new Error('ExternalAgentGateway dispatch must be a function');
     }
-    this.agents = new Map(normalizeAgentCards(agents).map((agent) => [agent.id, agent]));
     this.dispatch = dispatch || (async () => ({ ok: true }));
     this.emitEvent = emitEvent;
     this.now = now;
     this.durableStore = durableStore;
+    this.issuerSecret = issuerSecret || loadIssuerSecret(issuerSecretStore);
+    this.requireStableIssuerSecret = requireStableIssuerSecret;
     const restoredState = durableState || durableStore?.load?.() || {};
+    const restoredPeers = recordsFromState(restoredState.peerEndpoints);
+    const agentCards = agents.length ? agents : restoredPeers;
+    this.agents = new Map(normalizeAgentCards(agentCards).map((agent) => [agent.id, agent]));
     this.outbox = new Map(recordsFromState(restoredState.outbox).map((record) => [record.messageId, cloneSerializable(record)]));
     this.inbox = new Map(recordsFromState(restoredState.inbox).map((record) => [record.messageId, cloneSerializable(record)]));
     this.sequence = 0;
@@ -154,6 +204,7 @@ export class ExternalAgentGateway {
     return {
       outbox: [...this.outbox.values()].map((record) => recordView(record)),
       inbox: [...this.inbox.values()].map((record) => recordView(record)),
+      peerEndpoints: [...this.agents.values()].map((agent) => endpointDescriptor(agent)),
     };
   }
 
@@ -227,6 +278,8 @@ export class ExternalAgentGateway {
       approval,
       capabilityToken,
       now: this.now,
+      issuerSecret: this.issuerSecret,
+      requireStableIssuerSecret: this.requireStableIssuerSecret,
     });
     if (trustFailure) {
       throw new Error(`${trustFailure.reason}${trustFailure.tokenReasons.length ? `: ${trustFailure.tokenReasons.join(', ')}` : ''}`);
@@ -519,6 +572,8 @@ export class ExternalAgentGateway {
         approval,
         capabilityToken,
         now: this.now,
+        issuerSecret: this.issuerSecret,
+        requireStableIssuerSecret: this.requireStableIssuerSecret,
       });
       if (trustFailure) {
         emit(this.emitEvent, {

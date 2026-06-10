@@ -51,6 +51,48 @@ test('harness run store rejects duplicate run ids instead of overwriting evidenc
   });
 });
 
+test('harness run store persists source config trace metric and sweep lineage artifacts', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const run = await createHarnessRun({
+      workspaceRoot,
+      runId: 'run_lineage',
+      candidate: { candidateId: 'cand_lineage', family: 'rho-scale' },
+      lineage: {
+        source: { files: ['src/harness-sidecar/rho/replayBatchRunner.js'], commit: 'abc123' },
+        config: { profile: 'rho-scale', groupSize: 2 },
+        trace: { traceIds: ['trace_a', 'trace_b'] },
+        metrics: { objective: 'heldout_replay', schemaVersion: 1 },
+      },
+      traceManifest: {
+        traces: [{ traceId: 'trace_a', path: 'traces/trace_a/events.jsonl' }],
+      },
+      metricLineage: {
+        metrics: [{ name: 'validation_pass_rate', source: 'self_validation' }],
+      },
+      replayEvidence: {
+        cases: [{ caseId: 'case_family', preferredCandidateId: 'cand_lineage' }],
+      },
+      sweep: {
+        sweepId: 'sweep_rho_001',
+        repeatedRun: 3,
+        candidateFamily: ['cand_lineage', 'cand_other'],
+      },
+    });
+
+    const lineage = JSON.parse(await readFile(path.join(run.runDir, 'lineage.json'), 'utf8'));
+    const traceManifest = JSON.parse(await readFile(path.join(run.runDir, 'trace-manifest.json'), 'utf8'));
+    const metricLineage = JSON.parse(await readFile(path.join(run.runDir, 'metric-lineage.json'), 'utf8'));
+    const replayEvidence = JSON.parse(await readFile(path.join(run.runDir, 'replay-evidence.json'), 'utf8'));
+    const sweep = JSON.parse(await readFile(path.join(run.runDir, 'sweep.json'), 'utf8'));
+
+    assert.equal(lineage.source.commit, 'abc123');
+    assert.equal(traceManifest.traces[0].traceId, 'trace_a');
+    assert.equal(metricLineage.metrics[0].source, 'self_validation');
+    assert.equal(replayEvidence.cases[0].preferredCandidateId, 'cand_lineage');
+    assert.deepEqual(sweep.candidateFamily, ['cand_lineage', 'cand_other']);
+  });
+});
+
 
 test('experiment runner prefers candidate when metrics dominate baseline', async () => {
   const result = await runHarnessExperiment({
@@ -60,6 +102,37 @@ test('experiment runner prefers candidate when metrics dominate baseline', async
   });
 
   assert.equal(result.preference.preferred, 'candidate');
+});
+
+test('experiment runner stores replay and sweep lineage with persisted runs', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const result = await runHarnessExperiment({
+      workspaceRoot,
+      runId: 'run_replay_lineage',
+      candidate: { candidateId: 'cand_replay' },
+      baselineRunner: async () => ({ quality: 0.5, safety: 0.9, cost: 0.3, latency: 0.3 }),
+      candidateRunner: async () => ({ quality: 0.7, safety: 0.9, cost: 0.3, latency: 0.3 }),
+      lineage: {
+        source: { files: ['src/harness-sidecar/meta/harnessExperimentRunner.js'] },
+        config: { profile: 'rho-scale' },
+      },
+      replayEvidence: {
+        familySummary: { preferredCandidateId: 'cand_replay' },
+      },
+      sweep: {
+        sweepId: 'sweep_meta_001',
+        repeatedRun: 2,
+      },
+    });
+
+    const lineage = JSON.parse(await readFile(path.join(result.run.runDir, 'lineage.json'), 'utf8'));
+    const replayEvidence = JSON.parse(await readFile(path.join(result.run.runDir, 'replay-evidence.json'), 'utf8'));
+    const sweep = JSON.parse(await readFile(path.join(result.run.runDir, 'sweep.json'), 'utf8'));
+
+    assert.equal(lineage.config.profile, 'rho-scale');
+    assert.equal(replayEvidence.familySummary.preferredCandidateId, 'cand_replay');
+    assert.equal(sweep.repeatedRun, 2);
+  });
 });
 
 test('frontier keeps non-dominated candidate', () => {

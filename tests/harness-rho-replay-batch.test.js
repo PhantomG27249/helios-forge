@@ -92,3 +92,110 @@ test('judges self-preference from validation and consistency scores', () => {
   assert.equal(result.reasons.includes('candidate_validation'), true);
   assert.equal(result.reasons.includes('candidate_consistency'), true);
 });
+
+test('compares candidate families across held-out variants with validation consistency and blocking evidence', async () => {
+  const result = await runRhoReplayBatch({
+    coreset: {
+      items: [{
+        taskId: 'case_family',
+        prompt: 'repair harness',
+        heldoutVariants: [{ variantId: 'seed_a' }, { variantId: 'seed_b' }],
+      }],
+    },
+    groupSize: 2,
+    baselineRunner: async ({ heldoutVariant, rolloutIndex }) => ({
+      status: 'completed',
+      compactHandoff: {
+        summary: `baseline:${heldoutVariant.variantId}:${rolloutIndex}`,
+        testsRun: ['npm test'],
+      },
+      verifierEvidence: [{ passed: true, rolloutIndex }],
+    }),
+    candidateFamily: [
+      {
+        candidateId: 'cand_stable',
+        runner: async ({ candidate, heldoutVariant, rolloutIndex }) => ({
+          status: 'completed',
+          compactHandoff: {
+            summary: `${candidate.candidateId}:${heldoutVariant.variantId}`,
+            testsRun: ['npm test'],
+          },
+          verifierEvidence: [{ passed: true, rolloutIndex }],
+        }),
+      },
+      {
+        candidateId: 'cand_fragile',
+        runner: async ({ candidate, heldoutVariant, rolloutIndex }) => ({
+          status: heldoutVariant.variantId === 'seed_b' && rolloutIndex === 1 ? 'failed' : 'completed',
+          compactHandoff: {
+            summary: `${candidate.candidateId}:${heldoutVariant.variantId}:${rolloutIndex}`,
+            testsRun: heldoutVariant.variantId === 'seed_b' && rolloutIndex === 1
+              ? [{ command: 'npm test', status: 'failed', passed: false }]
+              : ['npm test'],
+          },
+          verifierEvidence: [{ passed: !(heldoutVariant.variantId === 'seed_b' && rolloutIndex === 1) }],
+        }),
+      },
+    ],
+  });
+
+  const replayCase = result.cases[0];
+  assert.deepEqual(replayCase.heldoutVariants.map((variant) => variant.variantId), ['seed_a', 'seed_b']);
+  assert.equal(replayCase.baseline.rollouts.length, 4);
+  assert.deepEqual(replayCase.candidateFamily.map((candidate) => candidate.candidateId), [
+    'cand_stable',
+    'cand_fragile',
+  ]);
+  assert.equal(replayCase.candidateFamily[0].validation.passedCount, 4);
+  assert.equal(replayCase.candidateFamily[1].validation.passed, false);
+  assert.equal(replayCase.preferences[0].candidateId, 'cand_stable');
+  assert.equal(replayCase.preferences[0].preferred, 'candidate');
+  assert.equal(replayCase.preferences[1].blockingEvidence.includes('validation_failed'), true);
+  assert.equal(result.familySummary.preferredCandidateId, 'cand_stable');
+});
+
+test('selects candidate-family winner from aggregate replay performance across cases', async () => {
+  const result = await runRhoReplayBatch({
+    coreset: {
+      items: [
+        { taskId: 'case_one' },
+        { taskId: 'case_two' },
+      ],
+    },
+    baselineRunner: async () => ({
+      status: 'completed',
+      compactHandoff: { summary: 'baseline', testsRun: ['npm test'] },
+      verifierEvidence: [{ passed: true }],
+    }),
+    candidateFamily: [
+      {
+        candidateId: 'cand_flashy',
+        runner: async ({ item }) => {
+          const passed = item.taskId === 'case_one';
+          return {
+            status: passed ? 'completed' : 'failed',
+            compactHandoff: {
+              summary: passed ? 'huge win' : 'missed second case',
+              testsRun: passed ? ['npm test'] : [{ command: 'npm test', status: 'failed', passed: false }],
+            },
+            verifierEvidence: [{ passed }],
+          };
+        },
+      },
+      {
+        candidateId: 'cand_steady',
+        runner: async () => ({
+          status: 'completed',
+          compactHandoff: { summary: 'steady pass', testsRun: ['npm test'] },
+          verifierEvidence: [{ passed: true }],
+        }),
+      },
+    ],
+  });
+
+  assert.equal(result.familySummary.preferredCandidateId, 'cand_steady');
+  assert.equal(
+    result.familySummary.rankings.find((entry) => entry.candidateId === 'cand_flashy').blockingEvidence.includes('validation_failed'),
+    true,
+  );
+});

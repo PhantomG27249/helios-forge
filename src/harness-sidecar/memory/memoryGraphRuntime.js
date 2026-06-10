@@ -176,6 +176,11 @@ export function createMemoryGraphRuntime({
     return migrateGraph(loaded).graph;
   }
 
+  async function loadGraphWithMigrations() {
+    const loaded = await readJsonIfPresent(paths.graphPath, null);
+    return migrateGraph(loaded);
+  }
+
   async function saveRuntimeState({ layers, graph }) {
     await mkdir(paths.memoryDir, { recursive: true });
     await writeFile(paths.layersPath, `${JSON.stringify(withSchemaVersion(layers), null, 2)}\n`, 'utf8');
@@ -187,10 +192,15 @@ export function createMemoryGraphRuntime({
 
   async function ingestPromotion(promotion = {}) {
     const loadedLayers = await loadLayersWithMigrations();
+    const loadedGraph = await loadGraphWithMigrations();
     const layers = loadedLayers.layers;
     const conflictDecisions = applyPromotion(layers, promotion, conflictPolicy);
     const activation = activateStableSchemas({ layers, schemaThreshold });
-    const graph = constructMemoryGuidedGraph({ layers, ...graphOptions });
+    const graph = {
+      ...constructMemoryGuidedGraph({ layers, ...graphOptions }),
+      schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
+      migrationHistory: uniqueMigrations(loadedGraph.graph.migrationHistory, loadedGraph.migrations),
+    };
 
     await saveRuntimeState({ layers, graph });
 
@@ -200,7 +210,7 @@ export function createMemoryGraphRuntime({
       graph,
       activation,
       conflictDecisions,
-      migrations: loadedLayers.migrations,
+      migrations: uniqueMigrations(loadedGraph.migrations, loadedLayers.migrations),
       paths,
     };
   }

@@ -39,6 +39,11 @@ async function seedCandidate(workspaceRoot, overrides = {}) {
       rollback: {
         available: true,
       },
+      evidence: {
+        replay: { passed: true, replayId: 'skill-replay-001' },
+        verifier: { passed: true, verifierId: 'skill-verifier-001' },
+        provenance: { traceId: 'trace-skill-001', sourceSkillSnapshotId: 'source-skill-001' },
+      },
       ...overrides,
     },
     skillMarkdown: '# Visual Debugging Repair\n\n## When to use\nUse for visual verifier misses.\n',

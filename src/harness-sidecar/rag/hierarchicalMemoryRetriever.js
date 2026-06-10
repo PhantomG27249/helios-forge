@@ -151,6 +151,42 @@ function numericBudget(value, fallback) {
   return Number.isFinite(normalized) ? normalized : fallback;
 }
 
+function estimateItemTokens(item = {}) {
+  return Number(item.tokensEstimated) || Math.max(1, Math.ceil(String(item.text || '').length / 4));
+}
+
+function createRetrievalPolicySignals({
+  phase,
+  items = [],
+  facts = [],
+  budgets = {},
+} = {}) {
+  if (phase !== 'task_startup') return undefined;
+  const activeFacts = normalizeList(facts).filter((fact) => fact.status === 'active');
+  const retrievedActiveFactIds = new Set(
+    normalizeList(items)
+      .filter((item) => item.kind === 'active_fact')
+      .map((item) => item.id),
+  );
+  const expectedActiveFactIds = activeFacts.map((fact) => fact.id || factId(fact));
+  const hits = expectedActiveFactIds.filter((id) => retrievedActiveFactIds.has(id)).length;
+  const tokenBudget = Number(budgets.tokenBudget ?? budgets.maxTokens);
+  const tokensEstimated = items.reduce((sum, item) => sum + estimateItemTokens(item), 0);
+
+  return {
+    phase,
+    requireEvidenceBackedFacts: true,
+    startupPriorities: ['active_fact', 'stable_schema', 'passage'],
+    retrievalHitRate: expectedActiveFactIds.length === 0
+      ? 0
+      : Math.round((hits / expectedActiveFactIds.length) * 100) / 100,
+    tokensEstimated,
+    budgetEfficiency: Number.isFinite(tokenBudget) && tokenBudget > 0
+      ? Math.max(0, Math.min(1, Math.round((tokensEstimated / tokenBudget) * 100) / 100))
+      : 0,
+  };
+}
+
 function resolveLayersAndGraph({ layers, graph, snapshot }) {
   return {
     layers: layers || snapshot?.layers || snapshot?.globalLayers || {},
@@ -240,6 +276,7 @@ export function retrieveHierarchicalMemoryContext({
   snapshot,
   maxItems = 8,
   budgets = {},
+  retrievalPhase,
 } = {}) {
   const terms = queryTerms(query);
   const limit = Math.max(0, Math.floor(numericBudget(maxItems, 8)));
@@ -274,11 +311,18 @@ export function retrieveHierarchicalMemoryContext({
     .slice(0, limit);
 
   const activeFactCount = facts.filter((fact) => fact.status === 'active').length;
+  const policySignals = createRetrievalPolicySignals({
+    phase: retrievalPhase,
+    items,
+    facts,
+    budgets,
+  });
   return {
     schemaVersion: HIERARCHICAL_MEMORY_RETRIEVER_SCHEMA_VERSION,
     source: 'hierarchical_memory',
     query,
     items,
+    ...(policySignals ? { policySignals } : {}),
     summary: {
       schemaCount: schemas.length,
       stableSchemaCount: schemas.filter((schema) => schema.status === 'stable').length,

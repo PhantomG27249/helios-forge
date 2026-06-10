@@ -285,6 +285,136 @@ test('gateway can hydrate and save durable A2A queues through an injected store'
   assert.equal(persisted.outbox[0].status, 'dispatched');
 });
 
+test('gateway uses injected issuer secret stores for restart-stable delegated tokens', () => {
+  let secret = 'stable-test-issuer-secret';
+  const issuerSecretStore = {
+    load: () => secret,
+    save: (nextSecret) => {
+      secret = nextSecret;
+    },
+  };
+  const gateway = new ExternalAgentGateway({
+    now: () => 6_000,
+    issuerSecretStore,
+    agents: [{
+      id: 'agent.stable-writer',
+      name: 'Stable Writer',
+      protocol: 'a2a',
+      endpoint: { url: 'https://stable-writer.example.test/a2a' },
+      capabilities: ['patch.apply'],
+      trustLevel: 'internal',
+    }],
+  });
+  const token = createDelegatedCapabilityToken({
+    taskId: 'task-stable-token',
+    agentId: 'agent.stable-writer',
+    capabilities: ['patch.apply'],
+    scopes: ['files:src/harness-sidecar/interop/**'],
+    mode: 'mutation',
+    issuedBy: 'owner',
+    issuerSecret: secret,
+    now: 6_000,
+    ttlMs: 5_000,
+  });
+
+  const queued = gateway.enqueueTask({
+    agentId: 'agent.stable-writer',
+    approval: { approved: true, approvedBy: 'owner' },
+    capabilityToken: token,
+    task: {
+      id: 'task-stable-token',
+      mutation: true,
+      requiredCapabilities: ['patch.apply'],
+      requiredScopes: ['files:src/harness-sidecar/interop/**'],
+      prompt: 'Apply scoped patch.',
+    },
+  });
+
+  assert.equal(queued.status, 'queued');
+  assert.equal(secret, 'stable-test-issuer-secret');
+});
+
+test('gateway can require stable issuer secret injection before durable mutation delegation', () => {
+  const gateway = new ExternalAgentGateway({
+    now: () => 6_500,
+    requireStableIssuerSecret: true,
+    agents: [{
+      id: 'agent.no-secret',
+      name: 'No Secret Writer',
+      protocol: 'a2a',
+      endpoint: { url: 'https://no-secret.example.test/a2a' },
+      capabilities: ['patch.apply'],
+      trustLevel: 'internal',
+    }],
+  });
+  const token = createDelegatedCapabilityToken({
+    taskId: 'task-no-secret',
+    agentId: 'agent.no-secret',
+    capabilities: ['patch.apply'],
+    mode: 'mutation',
+    issuedBy: 'owner',
+    now: 6_500,
+    ttlMs: 5_000,
+  });
+
+  assert.throws(
+    () => gateway.enqueueTask({
+      agentId: 'agent.no-secret',
+      approval: { approved: true, approvedBy: 'owner' },
+      capabilityToken: token,
+      task: {
+        id: 'task-no-secret',
+        mutation: true,
+        requiredCapabilities: ['patch.apply'],
+        prompt: 'Apply patch.',
+      },
+    }),
+    /issuer_secret_required/,
+  );
+});
+
+test('gateway persists peer endpoint descriptors for restart discovery without socket probes', () => {
+  let persisted = null;
+  let dispatchTouched = false;
+  const durableStore = {
+    load: () => persisted,
+    save: (state) => {
+      persisted = state;
+    },
+  };
+  const firstGateway = new ExternalAgentGateway({
+    durableStore,
+    agents: [{
+      id: 'agent.visual-peer',
+      name: 'Visual Peer',
+      protocol: 'a2a',
+      endpoint: { url: 'https://visual-peer.example.test/a2a', socket: 'must-not-open' },
+      capabilities: ['visual.verify'],
+      trustLevel: 'verified',
+    }],
+  });
+
+  firstGateway.persistDurableState();
+
+  const restoredGateway = new ExternalAgentGateway({
+    durableStore,
+    dispatch: async () => {
+      dispatchTouched = true;
+      return { ok: true };
+    },
+  });
+  const peers = restoredGateway.discoverPeers({
+    protocol: 'a2a',
+    capabilities: ['visual.verify'],
+    minTrustLevel: 'verified',
+  });
+
+  assert.equal(dispatchTouched, false);
+  assert.deepEqual(peers.map((peer) => peer.id), ['agent.visual-peer']);
+  assert.deepEqual(persisted.peerEndpoints.map((peer) => peer.endpoint.url), ['https://visual-peer.example.test/a2a']);
+  assert.equal(peers[0].endpoint.socket, undefined);
+});
+
 test('gateway discovers viable peers by A2A capability, availability, and trust', () => {
   const gateway = new ExternalAgentGateway({
     agents: [
@@ -353,6 +483,37 @@ test('stream envelopes preserve ordered chunks, progress, cancellation, and corr
   assert.equal(JSON.stringify(chunk).includes('sk-should-redact'), false);
   assert.equal(cancelled.message.kind, 'stream_cancel');
   assert.equal(cancelled.message.cancellation.reason, 'user_requested');
+});
+
+test('swarm A2A envelopes preserve multi-hop durable lineage alongside scoped context lineage', () => {
+  const envelope = buildSwarmA2AEnvelope({
+    from: 'agent.parent',
+    to: 'agent.child',
+    task: { id: 'task-lineage', task: 'Continue the delegated review.' },
+    attempt: { id: 'attempt-lineage' },
+    context: {
+      lineage: {
+        rootTaskId: 'task-root',
+        hops: ['helios.sidecar', 'agent.parent'],
+      },
+    },
+    durable: {
+      messageId: 'msg-child',
+      correlationId: 'corr-lineage',
+      parentMessageId: 'msg-parent',
+      rootMessageId: 'msg-root',
+    },
+    lineage: [
+      { messageId: 'msg-root', from: 'helios.sidecar', to: 'agent.parent' },
+      { messageId: 'msg-parent', from: 'agent.parent', to: 'agent.child' },
+    ],
+  });
+
+  assert.equal(envelope.durable.messageId, 'msg-child');
+  assert.equal(envelope.durable.parentMessageId, 'msg-parent');
+  assert.equal(envelope.durable.rootMessageId, 'msg-root');
+  assert.deepEqual(envelope.durable.lineage.map((hop) => hop.messageId), ['msg-root', 'msg-parent']);
+  assert.deepEqual(envelope.message.context.lineage.hops, ['helios.sidecar', 'agent.parent']);
 });
 
 test('delegated capability tokens bind signed trust to scopes as well as capability and mode', () => {

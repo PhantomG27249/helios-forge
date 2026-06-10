@@ -62,6 +62,44 @@ function uniqueSorted(values = []) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function replayFailureReasons(rho) {
+  if (rho?.validation?.passed !== false) return [];
+  return asArray(rho.validation.reasons ?? rho.validation.failures ?? rho.validation.error ?? 'rho_validation_failed')
+    .map((reason) => (typeof reason === 'string' ? reason : JSON.stringify(reason)));
+}
+
+function materialPromotionRejectionReasons(promotion = {}) {
+  const ignored = new Set(['evidence_only_lane', 'missing_required_evidence']);
+  return asArray(promotion.blockedReasons).filter((reason) => !ignored.has(reason));
+}
+
+function buildFutureHardCases({ lane, taskId, candidateId, rho, promotion }) {
+  const hardCases = [];
+  const replayReasons = replayFailureReasons(rho);
+  if (replayReasons.length > 0) {
+    hardCases.push({
+      caseId: `${normalizeId(taskId, 'task')}:${normalizeId(lane, 'lane')}:${normalizeId(candidateId, 'candidate')}:replay`,
+      source: 'rho_replay_failed',
+      candidateId,
+      lane,
+      reasons: replayReasons,
+    });
+  }
+
+  const rejectionReasons = materialPromotionRejectionReasons(promotion);
+  if (replayReasons.length === 0 && rejectionReasons.length > 0) {
+    hardCases.push({
+      caseId: `${normalizeId(taskId, 'task')}:${normalizeId(lane, 'lane')}:${normalizeId(candidateId, 'candidate')}:rejection`,
+      source: 'promotion_rejected',
+      candidateId,
+      lane,
+      reasons: rejectionReasons,
+    });
+  }
+
+  return hardCases;
+}
+
 export function summarizeBesLaneRuntimeResult(laneResult = {}) {
   const candidates = asArray(laneResult.candidates);
   const ranked = [...candidates].sort((left, right) => (
@@ -134,6 +172,7 @@ export async function runBesLaneRuntime({
   const contract = getBesLaneContract(lane);
   const normalizedHardCases = cloneJson(asArray(hardCases), []);
   const normalizedCandidates = [];
+  const futureHardCases = [];
 
   for (let index = 0; index < asArray(candidates).length; index += 1) {
     const candidate = asArray(candidates)[index] ?? {};
@@ -195,7 +234,7 @@ export async function runBesLaneRuntime({
       memoryGraph,
     });
 
-    normalizedCandidates.push({
+    const normalizedCandidate = {
       ...cloneJson(candidate, {}),
       candidateId,
       status: candidate.status ?? 'shadow_only',
@@ -217,7 +256,16 @@ export async function runBesLaneRuntime({
       ...(memoryGraph ? { memoryGraph } : {}),
       promotion,
       updatedAt: now,
-    });
+    };
+
+    futureHardCases.push(...buildFutureHardCases({
+      lane: contract.lane,
+      taskId,
+      candidateId,
+      rho,
+      promotion,
+    }));
+    normalizedCandidates.push(normalizedCandidate);
   }
 
   return {
@@ -225,6 +273,7 @@ export async function runBesLaneRuntime({
     taskId: normalizeId(taskId, 'task'),
     contract,
     hardCases: normalizedHardCases,
+    futureHardCases,
     candidateCount: normalizedCandidates.length,
     candidates: normalizedCandidates,
     updatedAt: now,

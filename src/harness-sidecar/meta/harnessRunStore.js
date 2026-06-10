@@ -67,6 +67,11 @@ export async function createHarnessRun({
   evals = {},
   promotion = {},
   rollback = {},
+  lineage = {},
+  traceManifest = {},
+  metricLineage = {},
+  replayEvidence = {},
+  sweep = {},
 } = {}) {
   const resolvedWorkspaceRoot = assertWorkspaceRoot(workspaceRoot);
   const safeRunId = assertSafeRunId(runId);
@@ -90,6 +95,11 @@ export async function createHarnessRun({
     evals: path.join(runDir, 'evals.json'),
     promotion: path.join(runDir, 'promotion.json'),
     rollback: path.join(runDir, 'rollback.json'),
+    lineage: path.join(runDir, 'lineage.json'),
+    traceManifest: path.join(runDir, 'trace-manifest.json'),
+    metricLineage: path.join(runDir, 'metric-lineage.json'),
+    replayEvidence: path.join(runDir, 'replay-evidence.json'),
+    sweep: path.join(runDir, 'sweep.json'),
   };
 
   for (const filePath of Object.values(files)) {
@@ -104,6 +114,11 @@ export async function createHarnessRun({
   await writeFile(files.evals, jsonContent(normalizeObject(evals)), 'utf8');
   await writeFile(files.promotion, jsonContent(normalizeObject(promotion)), 'utf8');
   await writeFile(files.rollback, jsonContent(normalizeObject(rollback)), 'utf8');
+  await writeFile(files.lineage, jsonContent(normalizeObject(lineage)), 'utf8');
+  await writeFile(files.traceManifest, jsonContent(normalizeObject(traceManifest)), 'utf8');
+  await writeFile(files.metricLineage, jsonContent(normalizeObject(metricLineage)), 'utf8');
+  await writeFile(files.replayEvidence, jsonContent(normalizeObject(replayEvidence)), 'utf8');
+  await writeFile(files.sweep, jsonContent(normalizeObject(sweep)), 'utf8');
 
   return {
     schemaVersion: 1,

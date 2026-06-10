@@ -36,6 +36,40 @@ function scopedContext(context = {}) {
   return redactSecrets(scoped);
 }
 
+function normalizedLineageObjects(value = []) {
+  const list = Array.isArray(value) ? value : [value];
+  return list
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => redactSecrets({
+      messageId: item.messageId,
+      parentMessageId: item.parentMessageId,
+      rootMessageId: item.rootMessageId,
+      from: item.from,
+      to: item.to,
+      taskId: item.taskId,
+      attemptId: item.attemptId,
+    }));
+}
+
+function durableEnvelopeContext({ durable = {}, lineage = [] } = {}) {
+  const safeDurable = safeObject(durable);
+  const hops = normalizedLineageObjects(lineage);
+  if (Object.keys(safeDurable).length === 0 && hops.length === 0) return {};
+  const context = {
+    direction: safeDurable.direction || 'outbox',
+    messageId: safeDurable.messageId,
+    parentMessageId: safeDurable.parentMessageId,
+    rootMessageId: safeDurable.rootMessageId,
+    correlationId: safeDurable.correlationId,
+    lineage: hops,
+  };
+  return Object.fromEntries(
+    Object.entries(context).filter(([, value]) => (
+      value !== undefined && (!Array.isArray(value) || value.length > 0)
+    )),
+  );
+}
+
 export function buildSwarmA2AEnvelope({
   task = {},
   attempt = {},
@@ -45,6 +79,8 @@ export function buildSwarmA2AEnvelope({
   outputContract = {},
   from = 'helios.sidecar',
   to,
+  durable,
+  lineage = [],
 } = {}) {
   const safeTask = safeObject(task);
   const safeAttempt = safeObject(attempt);
@@ -53,11 +89,13 @@ export function buildSwarmA2AEnvelope({
   const safeOutputContract = safeObject(outputContract);
   const taskId = safeTask.taskId || safeTask.id || 'task_swarm';
   const attemptId = safeAttempt.attemptId || safeAttempt.id || 'attempt_1';
+  const durableContext = durableEnvelopeContext({ durable, lineage });
   return redactSecrets({
     protocol: 'a2a',
     version: '0.1',
     from,
     to: to || `pi-native:${attemptId}`,
+    ...(Object.keys(durableContext).length ? { durable: durableContext } : {}),
     message: {
       kind: 'swarm_attempt',
       taskId,
