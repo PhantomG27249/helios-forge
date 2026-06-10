@@ -94,3 +94,61 @@ test('rejects top-level audit and secret redaction disables', () => {
   assert.equal(secrets.allowed, false);
   assert.equal(secrets.reason, 'secret_redaction_disable_rejected');
 });
+
+test('requires artifact-backed visual evidence for visual task source patches', () => {
+  const blocked = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      taskKind: 'visual',
+      paths: ['public/app.css'],
+      visualEvidenceRequired: true,
+      visualEvidence: {
+        nodes: [{ id: 'visual_evidence:task_visual:metadata', type: 'visual_evidence' }],
+        artifacts: [],
+        verdict: { passed: true },
+      },
+    },
+  });
+
+  assert.equal(blocked.allowed, false);
+  assert.equal(blocked.reason, 'missing_visual_evidence');
+  assert.equal(blocked.requiresApproval, true);
+
+  const artifactWithoutVerdict = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      taskKind: 'visual',
+      paths: ['public/app.css'],
+      visualEvidenceRequired: true,
+      visualEvidence: {
+        artifacts: [{ type: 'screenshot', path: '.harness/visual/task_visual/after.png' }],
+      },
+    },
+  });
+
+  assert.equal(artifactWithoutVerdict.allowed, false);
+  assert.equal(artifactWithoutVerdict.reason, 'missing_visual_evidence');
+
+  const allowedWithApproval = evaluateTrustKernelBoundary({
+    workspaceRoot: 'C:/Users/jackj/Github/helios-forge',
+    approved: true,
+    proposal: {
+      kind: 'source_patch',
+      taskKind: 'visual',
+      paths: ['public/app.css'],
+      visualEvidenceRequired: true,
+      visualEvidence: {
+        nodes: [{ id: 'visual_evidence:task_visual:screenshot', type: 'visual_evidence' }],
+        artifacts: [{ type: 'screenshot', path: '.harness/visual/task_visual/after.png' }],
+        verdict: { passed: true, score: 0.91, confidence: 0.8 },
+      },
+    },
+  });
+
+  assert.equal(allowedWithApproval.allowed, true);
+  assert.equal(allowedWithApproval.reason, null);
+});

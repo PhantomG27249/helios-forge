@@ -84,3 +84,57 @@ export function buildSwarmA2AEnvelope({
     },
   });
 }
+
+function normalizeEvent(event = 'chunk') {
+  const normalized = String(event || 'chunk').trim().toLowerCase();
+  if (normalized === 'cancelled') return 'cancel';
+  if (normalized === 'progress') return 'progress';
+  if (normalized === 'done' || normalized === 'complete') return 'complete';
+  if (normalized === 'error') return 'error';
+  if (normalized === 'cancel') return 'cancel';
+  return 'chunk';
+}
+
+function makeStreamMessageId({ streamId, sequence }) {
+  return `stream_${String(streamId || 'default')}_${Number(sequence || 0)}`;
+}
+
+export function buildA2AStreamEnvelope({
+  streamId,
+  sequence = 0,
+  correlationId,
+  from = 'helios.sidecar',
+  to,
+  event = 'chunk',
+  payload = {},
+  progress,
+  cancellation,
+  done = false,
+} = {}) {
+  const normalizedEvent = normalizeEvent(event);
+  const id = makeStreamMessageId({ streamId, sequence });
+  return redactSecrets({
+    protocol: 'a2a',
+    version: '0.1',
+    from,
+    to: to || 'helios.sidecar',
+    durable: {
+      direction: 'stream',
+      messageId: id,
+      correlationId: String(correlationId || streamId || id),
+      streamId: String(streamId || 'stream'),
+      sequence: Number(sequence || 0),
+    },
+    message: {
+      kind: `stream_${normalizedEvent}`,
+      stream: {
+        streamId: String(streamId || 'stream'),
+        sequence: Number(sequence || 0),
+        done: Boolean(done || normalizedEvent === 'complete'),
+      },
+      payload: safeObject(payload),
+      progress: progress === undefined ? undefined : safeObject(progress),
+      cancellation: cancellation === undefined ? undefined : safeObject(cancellation),
+    },
+  });
+}

@@ -79,6 +79,27 @@ function autoMergeRequested(proposal = {}) {
     || changes.autoMergeEnabled === true;
 }
 
+function visualTaskRequiresEvidence(proposal = {}) {
+  const taskKind = String(proposal.taskKind ?? proposal.task?.kind ?? proposal.lane ?? '').toLowerCase();
+  return proposal.visualEvidenceRequired === true
+    || taskKind === 'visual'
+    || taskKind === 'vlm';
+}
+
+function hasArtifactBackedVisualEvidence(visualEvidence = {}) {
+  const artifacts = Array.isArray(visualEvidence.artifacts) ? visualEvidence.artifacts : [];
+  const nodes = Array.isArray(visualEvidence.nodes) ? visualEvidence.nodes : [];
+  const hasArtifactPath = artifacts.some((artifact) => (
+    artifact?.path
+      || artifact?.artifacts?.image
+      || artifact?.artifacts?.diff
+      || artifact?.artifacts?.before
+      || artifact?.artifacts?.after
+  ));
+  const hasNodePath = nodes.some((node) => node?.path);
+  return Boolean((hasArtifactPath || hasNodePath) && visualEvidence.verdict?.passed === true);
+}
+
 function hasExplicitApproval({ approved, approval, proposal }) {
   return approved === true || approval?.approved === true;
 }
@@ -138,6 +159,13 @@ export function evaluateTrustKernelBoundary({
   }
   if (autoMergeRequested(proposal)) {
     return decision({ reason: 'auto_merge_rejected', reasons: ['auto_merge_rejected'] });
+  }
+  if (visualTaskRequiresEvidence(proposal) && !hasArtifactBackedVisualEvidence(proposal.visualEvidence)) {
+    return decision({
+      requiresApproval: true,
+      reason: 'missing_visual_evidence',
+      reasons: ['missing_visual_evidence'],
+    });
   }
 
   if (APPROVAL_REQUIRED_KINDS.has(kind)) {

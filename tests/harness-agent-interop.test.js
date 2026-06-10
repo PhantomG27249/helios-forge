@@ -483,7 +483,7 @@ test('external agent gateway blocks mutation unless approval and delegated token
   assert.equal(noApproval.status, 'blocked');
   assert.equal(noApproval.reason, 'mutation_requires_approval');
   assert.equal(noToken.status, 'blocked');
-  assert.equal(noToken.reason, 'delegated_capability_token_invalid');
+  assert.equal(noToken.reason, 'delegated_capability_token_required');
   assert.equal(dispatched.status, 'dispatched');
 });
 

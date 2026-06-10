@@ -76,6 +76,20 @@ function summarizeEvalSets(evalSets = []) {
   });
 }
 
+function runEvalHooks({ evalHooks = [], records = [] }) {
+  return normalizeList(evalHooks).map((hook) => {
+    const evalSetId = validateGraphSnapshotId(hook.evalSetId || hook.id);
+    return {
+      evalSetId,
+      summary: hook.summary || '',
+      results: records.map((record) => ({
+        memoryId: memoryIdFor(record),
+        ...(typeof hook.evaluate === 'function' ? hook.evaluate(record) : {}),
+      })),
+    };
+  });
+}
+
 function buildEvalScores(evalSets = []) {
   const totals = new Map();
   for (const evalSet of evalSets) {
@@ -106,6 +120,33 @@ function buildTraceCounts(traceSummaries = []) {
     }
   }
   return counts;
+}
+
+function daysBetween(now, then) {
+  const nowMs = new Date(now).getTime();
+  const thenMs = new Date(then).getTime();
+  if (!Number.isFinite(nowMs) || !Number.isFinite(thenMs)) return 0;
+  return Math.max(0, Math.floor((nowMs - thenMs) / 86400000));
+}
+
+function buildDecayScores(records = [], { now, halfLifeDays = 60, staleAfterDays = 120 } = {}) {
+  const scores = new Map();
+  const referenceTime = now || new Date().toISOString();
+  const halfLife = Math.max(1, Number(halfLifeDays) || 60);
+  const staleAfter = Math.max(1, Number(staleAfterDays) || 120);
+
+  for (const record of records) {
+    const memoryId = memoryIdFor(record);
+    const lastUsed = record.lastUsedAt || record.updatedAt || record.createdAt || referenceTime;
+    const ageDays = daysBetween(referenceTime, lastUsed);
+    const decayScore = Math.max(0, Math.round(100 * (0.5 ** (ageDays / halfLife))));
+    scores.set(memoryId, {
+      ageDays,
+      decayScore,
+      decayedStale: ageDays >= staleAfter,
+    });
+  }
+  return scores;
 }
 
 function staleReasons(record = {}) {
@@ -196,7 +237,47 @@ function buildConflictReviewItems(records = []) {
     .sort((left, right) => left.queueId.localeCompare(right.queueId));
 }
 
-function buildRankings({ records, feedbackScores, evalScores, traceCounts }) {
+function consolidationKey(record = {}) {
+  return [
+    record.type,
+    record.subject,
+    record.predicate || record.relation,
+    record.object,
+  ].map((part) => String(part || '')).join('\0');
+}
+
+function buildConsolidationItems(records = []) {
+  const groups = new Map();
+  for (const record of records) {
+    if (!record.subject || !(record.predicate || record.relation) || !record.object) continue;
+    const key = consolidationKey(record);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(record);
+  }
+
+  return [...groups.values()]
+    .filter((group) => group.length > 1)
+    .map((group) => {
+      const ordered = group.slice().sort((left, right) => memoryIdFor(left).localeCompare(memoryIdFor(right)));
+      const first = ordered[0];
+      const memoryIds = ordered.map(memoryIdFor);
+      return {
+        ...withoutUndefined({
+          queueId: `consolidate_${memoryIds.join('_')}`,
+          type: 'memory_consolidation',
+          status: 'needs_review',
+          memoryIds,
+          subject: first.subject,
+          predicate: first.predicate || first.relation,
+          object: first.object,
+          evidence: [...new Set(ordered.flatMap((record) => normalizeList(record.evidence)))].sort(),
+        }),
+      };
+    })
+    .sort((left, right) => left.queueId.localeCompare(right.queueId));
+}
+
+function buildRankings({ records, feedbackScores, evalScores, traceCounts, decayScores }) {
   const rankings = {};
   for (const record of records) {
     const memoryId = memoryIdFor(record);
@@ -204,8 +285,9 @@ function buildRankings({ records, feedbackScores, evalScores, traceCounts }) {
     const feedbackScore = feedbackScores.get(memoryId) || 0;
     const evalScore = evalScores.get(memoryId) || 0;
     const traceCount = traceCounts.get(memoryId) || 0;
-    const stalePenalty = record.stale || record.supersededBy ? 40 : 0;
-    const score = Math.max(0, qualityScore + (feedbackScore * 5) + evalScore + traceCount - stalePenalty);
+    const decay = decayScores.get(memoryId) || { decayScore: 100, ageDays: 0, decayedStale: false };
+    const stalePenalty = record.stale || record.supersededBy || decay.decayedStale ? 40 : 0;
+    const score = Math.max(0, qualityScore + (feedbackScore * 5) + evalScore + traceCount + decay.decayScore - stalePenalty);
 
     rankings[memoryId] = {
       score,
@@ -213,6 +295,8 @@ function buildRankings({ records, feedbackScores, evalScores, traceCounts }) {
       feedbackScore,
       evalScore,
       traceCount,
+      decayScore: decay.decayScore,
+      ageDays: decay.ageDays,
     };
   }
   return rankings;
@@ -277,7 +361,7 @@ function buildRankedContextItems({ records, rankings }) {
         provenance: normalizeList(record.provenance),
         reviewStatus: record.reviewStatus,
         validatorBacked: record.validatorBacked === true,
-        stale: Boolean(record.stale || record.supersededBy),
+        stale: Boolean(record.stale || record.supersededBy || ranking.decayScore < 20),
         supersededBy: record.supersededBy ? validateGraphSnapshotId(record.supersededBy) : null,
         ranking,
         score: ranking.score,
@@ -357,6 +441,9 @@ export async function maintainGraphMemorySnapshot({
   traceSummaries = [],
   feedback = [],
   evalSets = [],
+  evalHooks = [],
+  now,
+  decay = {},
   globalMemory,
   memoryGuidedGraph,
   store,
@@ -365,17 +452,22 @@ export async function maintainGraphMemorySnapshot({
   const promoted = normalizeList(promotedMemories);
   const candidateRecords = normalizeList(candidates);
   const records = [...promoted, ...candidateRecords];
+  const resolvedEvalSets = [
+    ...normalizeList(evalSets),
+    ...runEvalHooks({ evalHooks, records }),
+  ];
   const nodes = new Map();
   const edges = new Map();
   const feedbackScores = buildFeedbackScores(normalizeList(feedback));
-  const evalScores = buildEvalScores(normalizeList(evalSets));
+  const evalScores = buildEvalScores(resolvedEvalSets);
   const traceCounts = buildTraceCounts(normalizeList(traceSummaries));
+  const decayScores = buildDecayScores(records, { now, ...decay });
 
   addMemoryNodesAndEdges({ records: promoted, source: 'promoted_memory', nodes, edges });
   addMemoryNodesAndEdges({ records: candidateRecords, source: 'candidate_memory', nodes, edges });
   addTraceNodesAndEdges({ traceSummaries: normalizeList(traceSummaries), nodes, edges });
 
-  const rankings = buildRankings({ records, feedbackScores, evalScores, traceCounts });
+  const rankings = buildRankings({ records, feedbackScores, evalScores, traceCounts, decayScores });
   const snapshot = await graphStore.save({
     nodes: [...nodes.values()].sort((left, right) => left.id.localeCompare(right.id)),
     edges: [...edges.values()].sort((left, right) => (
@@ -387,7 +479,8 @@ export async function maintainGraphMemorySnapshot({
     rankedContextItems: buildRankedContextItems({ records, rankings }),
     staleReviewItems: buildStaleReviewItems(records),
     conflictReviewItems: buildConflictReviewItems(records),
-    evalSummaries: summarizeEvalSets(normalizeList(evalSets)),
+    consolidationItems: buildConsolidationItems(records),
+    evalSummaries: summarizeEvalSets(resolvedEvalSets),
     ...(globalMemory ? { globalMemory } : {}),
     ...(memoryGuidedGraph ? { memoryGuidedGraph } : {}),
   });

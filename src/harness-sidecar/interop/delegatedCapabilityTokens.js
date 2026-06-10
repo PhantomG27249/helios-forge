@@ -17,6 +17,7 @@ function canonicalTokenPayload(token) {
     taskId: String(token.taskId || ''),
     agentId: String(token.agentId || ''),
     capabilities: normalizeList(token.capabilities).sort(),
+    scopes: normalizeList(token.scopes).sort(),
     mode: String(token.mode || 'read'),
     issuedBy: String(token.issuedBy || ''),
     issuedAt: Number(token.issuedAt || 0),
@@ -42,6 +43,7 @@ export function createDelegatedCapabilityToken({
   taskId,
   agentId,
   capabilities = [],
+  scopes = [],
   mode = 'read',
   issuedBy,
   ttlMs = 5 * 60 * 1000,
@@ -55,6 +57,7 @@ export function createDelegatedCapabilityToken({
     taskId: String(taskId || ''),
     agentId: String(agentId || ''),
     capabilities: normalizeList(capabilities),
+    scopes: normalizeList(scopes),
     mode: String(mode || 'read'),
     issuedBy: String(issuedBy || ''),
     issuedAt,
@@ -70,6 +73,7 @@ export function verifyDelegatedCapabilityToken(token, {
   taskId,
   agentId,
   capability,
+  scope,
   mode = 'read',
   now = Date.now(),
   issuerSecret,
@@ -87,6 +91,9 @@ export function verifyDelegatedCapabilityToken(token, {
   if (String(token.mode || '') !== String(mode || 'read')) reasons.push('mode_mismatch');
   if (!normalizeList(token.capabilities).includes(String(capability || ''))) {
     reasons.push('capability_not_delegated');
+  }
+  if (scope !== undefined && !normalizeList(token.scopes).includes(String(scope || ''))) {
+    reasons.push('scope_not_delegated');
   }
   if (Number(token.expiresAt) <= timestamp) reasons.push('expired');
 

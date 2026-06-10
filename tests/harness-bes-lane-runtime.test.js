@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { normalizeLaneEvidence } from '../src/harness-sidecar/bes/laneEvidence.js';
-import { runBesLaneRuntime } from '../src/harness-sidecar/bes/laneRuntime.js';
+import { runBesLaneRuntime, runBesLaneRuntimeWithEvents } from '../src/harness-sidecar/bes/laneRuntime.js';
 
 test('wraps a shadow candidate in a BES lane envelope', async () => {
   const result = await runBesLaneRuntime({
@@ -139,4 +139,77 @@ test('normalizes lane evidence sources and required evidence summary', () => {
 
   assert.deepEqual(evidence.sources.sort(), ['dense_subgoals', 'domain_eval', 'rho_replay']);
   assert.equal(evidence.hasRequiredEvidence, true);
+});
+
+test('visual lane evidence is first-class and carries artifact-backed memory nodes', async () => {
+  const visualEvidence = {
+    nodes: [
+      {
+        id: 'visual_evidence:task_visual:screenshot',
+        type: 'visual_evidence',
+        artifactType: 'screenshot',
+        path: '.harness/visual/task_visual/web-preview.png',
+        passed: true,
+      },
+    ],
+    artifacts: [{ type: 'screenshot', path: '.harness/visual/task_visual/web-preview.png' }],
+    verdict: { passed: true, score: 0.88, confidence: 0.81 },
+  };
+
+  const evidence = normalizeLaneEvidence({ visualEvidence });
+  assert.equal(evidence.sources.includes('visual_evidence'), true);
+  assert.equal(evidence.summary.visualEvidenceCount, 1);
+  assert.equal(evidence.summary.visualArtifactCount, 1);
+  assert.equal(evidence.summary.visualEvidencePassed, true);
+
+  const result = await runBesLaneRuntime({
+    lane: 'visual',
+    taskId: 'task_visual',
+    candidates: [{ candidateId: 'visual_policy_candidate', status: 'shadow_only', visualEvidence }],
+  });
+
+  assert.equal(result.candidates[0].evidence.sources.includes('visual_evidence'), true);
+  assert.deepEqual(result.candidates[0].visualEvidence.nodes.map((node) => node.type), ['visual_evidence']);
+  assert.equal(result.candidates[0].memoryGraph.nodeIds[0], 'visual_evidence:task_visual:screenshot');
+});
+
+test('emits BES lane lifecycle events around runtime execution', async () => {
+  const events = [];
+
+  const result = await runBesLaneRuntimeWithEvents({
+    lane: 'harness',
+    taskId: 'task-lifecycle',
+    candidates: [{ candidateId: 'harness_candidate_1', evidence: ['runtime wiring'] }],
+    evaluator: () => ({ score: 0.8, reasons: ['runtime wiring covered'] }),
+    emitEvent: async (event) => events.push(event),
+  });
+
+  assert.equal(result.candidateCount, 1);
+  assert.deepEqual(events.map((event) => event.type), ['bes_lane.started', 'bes_lane.completed']);
+  assert.equal(events[0].lane, 'harness');
+  assert.equal(events[0].taskId, 'task-lifecycle');
+  assert.equal(events[1].candidateCount, 1);
+  assert.equal(events[1].bestCandidateId, 'harness_candidate_1');
+  assert.deepEqual(events[1].evidenceSources, ['domain_eval']);
+});
+
+test('emits a blocked BES lane event when runtime execution fails', async () => {
+  const events = [];
+
+  await assert.rejects(
+    () => runBesLaneRuntimeWithEvents({
+      lane: 'memory',
+      taskId: 'task-blocked',
+      candidates: [{ candidateId: 'memory_candidate_1' }],
+      evaluator: () => {
+        throw new Error('memory evaluator unavailable');
+      },
+      emitEvent: async (event) => events.push(event),
+    }),
+    /memory evaluator unavailable/,
+  );
+
+  assert.deepEqual(events.map((event) => event.type), ['bes_lane.started', 'bes_lane.blocked']);
+  assert.equal(events[1].lane, 'memory');
+  assert.equal(events[1].reason, 'memory evaluator unavailable');
 });

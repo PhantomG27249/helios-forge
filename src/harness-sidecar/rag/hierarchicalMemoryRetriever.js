@@ -164,14 +164,35 @@ function compactIds(value = {}, key = 'nodeIds', maxItems = 12) {
 }
 
 function provenanceList(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) return value.flatMap(provenanceList);
   if (!value) return [];
   if (typeof value === 'string') return [value];
   if (typeof value === 'object') return [value.id || value.traceId || value.sourceId || JSON.stringify(value)];
   return [String(value)];
 }
 
+function cleanLaneSection(section = {}, maxItems = 12) {
+  const cleaned = {};
+  const nodeIds = compactIds(section, 'nodeIds', maxItems);
+  if (nodeIds.length > 0) cleaned.nodeIds = nodeIds;
+  if (section.summary) cleaned.summary = String(section.summary);
+  if (section.status) cleaned.status = String(section.status);
+  const provenance = provenanceList(section.provenance);
+  if (provenance.length > 0) cleaned.provenance = uniqueSorted(provenance).slice(0, maxItems);
+  return cleaned;
+}
+
+function cleanConflict(conflict = {}) {
+  return Object.fromEntries(Object.entries({
+    id: conflict.id || conflict.queueId,
+    status: conflict.status,
+    type: conflict.type,
+    memoryIds: conflict.memoryIds || conflict.conflictingMemoryIds,
+  }).filter(([, value]) => value !== undefined));
+}
+
 export function createLaneMemoryGraphContextPacket({
+  lane = 'memory',
   local = {},
   swarmCell = {},
   global = {},
@@ -187,26 +208,27 @@ export function createLaneMemoryGraphContextPacket({
   const packetProvenance = provenanceList(provenance);
   const retrievalTrace = normalizeList(retrieval.trace || retrieval.retrievalTrace || retrieval.items?.map((item) => item.id))
     .map(String)
+    .sort()
     .slice(0, maxItems);
+  const cleanGlobal = cleanLaneSection(global, maxItems);
 
   return {
     schemaVersion: HIERARCHICAL_MEMORY_RETRIEVER_SCHEMA_VERSION,
     source: 'memory_graph_lane_context',
-    local: {
-      ...local,
-      nodeIds: localNodeIds,
+    besLane: {
+      lane: String(lane || 'memory'),
+      authority: 'evidence_only',
+      promotionAllowed: false,
     },
-    swarmCell: {
-      ...swarmCell,
-      nodeIds: swarmCellNodeIds,
-    },
+    local: cleanLaneSection({ ...local, nodeIds: localNodeIds }, maxItems),
+    swarmCell: cleanLaneSection({ ...swarmCell, nodeIds: swarmCellNodeIds }, maxItems),
     global: {
-      ...global,
-      nodeIds: globalNodeIds,
+      ...cleanGlobal,
+      ...(globalNodeIds.length > 0 ? { nodeIds: globalNodeIds } : {}),
       provenance: uniqueSorted([...globalProvenance, ...packetProvenance]).slice(0, maxItems),
     },
     provenance: uniqueSorted([...globalProvenance, ...packetProvenance]).slice(0, maxItems),
-    conflicts: normalizeList(conflicts).slice(0, maxItems),
+    conflicts: normalizeList(conflicts).map(cleanConflict).slice(0, maxItems),
     retrievalTrace,
   };
 }

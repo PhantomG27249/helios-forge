@@ -18,10 +18,27 @@ function hasDenseSubgoalEvidence(denseSubgoals) {
     || (Array.isArray(denseSubgoals.denseFeedback) && denseSubgoals.denseFeedback.length > 0);
 }
 
+function visualNodes(visualEvidence = {}) {
+  const evidence = visualEvidence && typeof visualEvidence === 'object' ? visualEvidence : {};
+  return asArray(evidence.nodes)
+    .filter((node) => node && typeof node === 'object');
+}
+
+function visualArtifacts(visualEvidence = {}) {
+  const evidence = visualEvidence && typeof visualEvidence === 'object' ? visualEvidence : {};
+  return asArray(evidence.artifacts)
+    .filter((artifact) => artifact && typeof artifact === 'object');
+}
+
+function hasVisualEvidence(visualEvidence) {
+  return visualNodes(visualEvidence).length > 0 || visualArtifacts(visualEvidence).length > 0;
+}
+
 export function normalizeLaneEvidence({
   domain,
   rho,
   denseSubgoals,
+  visualEvidence,
   adaptiveSearch,
   toolTree,
   trajectory,
@@ -37,6 +54,7 @@ export function normalizeLaneEvidence({
   if (isPresent(domain)) sources.add('domain_eval');
   if (isPresent(rho)) sources.add('rho_replay');
   if (hasDenseSubgoalEvidence(denseSubgoals)) sources.add('dense_subgoals');
+  if (hasVisualEvidence(visualEvidence)) sources.add('visual_evidence');
   if (isPresent(adaptiveSearch)) sources.add('adaptive_search');
   if (isPresent(toolTree)) sources.add('tooltree');
   if (isPresent(trajectory)) sources.add('trajectory_operator');
@@ -54,6 +72,11 @@ export function normalizeLaneEvidence({
       domainScore: Number.isFinite(Number(domain?.score)) ? Number(domain.score) : null,
       rhoValidationPassed: typeof rho?.validation?.passed === 'boolean' ? rho.validation.passed : null,
       denseSubgoalScore: Number.isFinite(Number(denseSubgoals?.score)) ? Number(denseSubgoals.score) : null,
+      visualEvidenceCount: visualNodes(visualEvidence).length,
+      visualArtifactCount: visualArtifacts(visualEvidence).length,
+      visualEvidencePassed: typeof visualEvidence?.verdict?.passed === 'boolean'
+        ? visualEvidence.verdict.passed
+        : null,
     },
   };
 }

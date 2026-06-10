@@ -206,3 +206,63 @@ test('maintenance rebuilds graph snapshot with rankings, review items, and eval 
     ]);
   });
 });
+
+test('maintenance applies eval hooks then decays and consolidates memory records', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const result = await maintainGraphMemorySnapshot({
+      workspaceRoot,
+      promotedMemories: [
+        reviewedMemory({
+          memoryId: 'mem_runtime_a',
+          type: 'fact',
+          subject: 'memoryGraphRuntime',
+          predicate: 'composes',
+          object: 'extraction society',
+          summary: 'Runtime composes the extraction society.',
+          lastUsedAt: '2026-06-09T00:00:00.000Z',
+        }),
+        reviewedMemory({
+          memoryId: 'mem_runtime_b',
+          type: 'fact',
+          subject: 'memoryGraphRuntime',
+          predicate: 'composes',
+          object: 'extraction society',
+          summary: 'The memory runtime composes extraction agents.',
+          evidence: ['tests/harness-local-global-memory-graph.test.js'],
+          lastUsedAt: '2026-01-01T00:00:00.000Z',
+        }),
+      ],
+      now: '2026-06-10T00:00:00.000Z',
+      decay: { halfLifeDays: 30, staleAfterDays: 90 },
+      evalHooks: [{
+        evalSetId: 'eval_hook_memory_runtime',
+        summary: 'Runtime primitive hook.',
+        evaluate: (record) => ({
+          passed: record.subject === 'memoryGraphRuntime',
+          score: record.memoryId === 'mem_runtime_a' ? 1 : 0.25,
+          reasons: ['subject_grounded'],
+        }),
+      }],
+    });
+
+    const snapshot = result.snapshot;
+
+    assert.equal(snapshot.evalSummaries[0].evalSetId, 'eval_hook_memory_runtime');
+    assert.equal(snapshot.rankings.mem_runtime_a.evalScore, 100);
+    assert.equal(snapshot.rankings.mem_runtime_b.decayScore < snapshot.rankings.mem_runtime_a.decayScore, true);
+    assert.equal(snapshot.rankedContextItems.find((item) => item.memoryId === 'mem_runtime_b').stale, true);
+    assert.deepEqual(snapshot.consolidationItems, [{
+      queueId: 'consolidate_mem_runtime_a_mem_runtime_b',
+      type: 'memory_consolidation',
+      status: 'needs_review',
+      memoryIds: ['mem_runtime_a', 'mem_runtime_b'],
+      subject: 'memoryGraphRuntime',
+      predicate: 'composes',
+      object: 'extraction society',
+      evidence: [
+        'tests/harness-graph-memory-maintenance.test.js',
+        'tests/harness-local-global-memory-graph.test.js',
+      ],
+    }]);
+  });
+});

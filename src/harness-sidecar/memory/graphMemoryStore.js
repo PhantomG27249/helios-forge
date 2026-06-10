@@ -45,6 +45,7 @@ export function createEmptyGraphMemorySnapshot() {
     rankings: {},
     staleReviewItems: [],
     conflictReviewItems: [],
+    consolidationItems: [],
     evalSummaries: [],
   };
 }
@@ -95,6 +96,7 @@ export function normalizeGraphMemorySnapshot(snapshot = {}) {
   validateRankingIds(normalized.rankings);
   normalized.staleReviewItems.forEach(validateReviewItem);
   normalized.conflictReviewItems.forEach(validateReviewItem);
+  normalized.consolidationItems.forEach(validateReviewItem);
   normalized.evalSummaries.forEach(validateEvalSummary);
 
   return normalized;

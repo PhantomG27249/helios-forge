@@ -15,15 +15,15 @@ Every layer should be able to propose improvements. No layer should be able to s
 Current state after the latest implementation pass:
 
 - **Architecture maturity:** high. The docs now describe the right shape: swarm of swarms, harnesses of harnesses, Memory Graph RAG, A2A lineage, RHO/BES/adaptive search, trust kernel.
-- **Primitive maturity:** medium-high. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, local A2A scaffolding, and trust gates.
-- **Cohesive organism behavior:** early. The pieces exist, but they do not yet all flow through one shared evolutionary envelope.
+- **Primitive maturity:** high for a deterministic local harness. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, durable local A2A queues, governance loops, and trust gates.
+- **Cohesive organism behavior:** emerging. The pieces now flow through shared BES lane envelopes and live lane events in representative runtime paths; production-scale continuity and paper-grade learned judgment remain future work.
 
 Approximate level:
 
 | Stage | Current Read |
 | --- | --- |
-| Current implementation | Level 2.5: swarm harness with self-improvement primitives |
-| After BES mesh plan | Level 3.5: self-improving swarm harness with unified evolution envelopes |
+| Current implementation | Level 3.5: self-improving swarm harness with unified evolution envelopes and first live lane wiring |
+| After scale/continuity hardening | Level 4: network-of-networks harness |
 | Target architecture | Level 4: network-of-networks harness |
 | Paper-grade autonomous research system | Level 5: long-running governed research organism |
 
@@ -42,7 +42,7 @@ These pieces already exist in the current codebase and should be reused rather t
 | Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers |
 | Skill evolution | `src/harness-sidecar/skills/*` | Implemented workspace-local skill candidate lifecycle |
 | Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js` | Implemented visual artifact/verifier substrate |
-| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js` | Local contract and routing scaffolding |
+| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `delegatedCapabilityTokens.js` | Local durable inbox/outbox, retries, progress/cancel, streaming envelopes, scoped delegated trust |
 | Trust kernel | `src/harness-sidecar/core/trustKernelBoundary.js`, `security/*`, approval modules | Implemented non-self-authorizing boundary |
 
 ## Gap Layer 1: BES Mesh Composition Now Landed
@@ -76,31 +76,38 @@ The first BES mesh composition pass is now implemented. It closes the missing-mo
 7. **Optimization metadata transport**
    - Lane envelopes preserve domain evidence, dense subgoals, optional RHO replay, adaptive search, ToolTree, trajectory operator, champion archive, frontier, verifier genome, A2A lineage, and memory graph context where supplied.
 
-## Gap Layer 2: Remaining After The BES Mesh Composition Pass
+## Gap Layer 2: Runtime Integration Pass Now Landed
 
-The composition layer is now present. The remaining work shifts from missing envelopes to deeper runtime use, scale, continuity, learned judgment, and production durability.
+The second pass wires the composition layer into live runtime paths and upgrades several “gap” surfaces into tested first-pass modules.
+
+Implemented:
+
+- `bes_lane.started`, `bes_lane.completed`, and `bes_lane.blocked` events around lane execution.
+- Full sidecar runtime calls representative memory, skill, swarm, harness, and research BES lanes and emits `harness_status.updated` snapshots.
+- Visual evidence is first-class in BES evidence, visual memory nodes, RHO hard cases, and trust-kernel visual gates.
+- Memory graph runtime can ingest observations through extraction society -> local graph -> SwarmCell merge -> global promotion, with migration history, eval hooks, decay, and consolidation records.
+- A2A now has local durable inbox/outbox records, retry scheduling, progress/cancel records, peer discovery filters, streaming envelopes, and scoped delegated capability signatures.
+- Governance now has scheduled replay job planning, budget-aware improvement accounting, rollback drills, autonomy levels, escalation, override, and audit summaries.
 
 Still needed:
 
-- attach lane wrappers to more live runtime call sites rather than only exposing safe adapter functions;
 - run larger RHO replays and harness experiments over held-out suites;
-- connect lane results to global frontier dashboards over time;
+- connect lane results to persisted longitudinal frontier dashboards over time;
 - evolve full runnable harness variants in isolated candidate directories;
 - broaden verifier-genome and harness-of-harnesses coverage;
-- build durable A2A inbox/outbox and peer transport.
+- promote local A2A durability into actual long-lived network endpoints and multi-hop peer transport.
 
 ## Gap Layer 3: Long-Running Maturity Gaps
 
 ### 1. Paper-Grade Memory Graph RAG
 
-Current memory is a strong deterministic skeleton. Remaining work:
+Current memory is a strong deterministic skeleton with runtime extraction composition, eval hooks, migrations, decay, and consolidation. Remaining work:
 
 - model-assisted extraction society with guarded roles;
 - provenance-retrieving conflict adjudication;
-- evals for active fact precision, conflict quality, connectivity, retrieval hit rate, and budget efficiency;
-- graph schema migrations and snapshot versioning;
-- memory decay, consolidation, and long-term lesson distillation;
-- multimodal evidence nodes for screenshots, PDFs, diagrams, charts, UI states, and visual verifier artifacts.
+- larger eval suites for active fact precision, conflict quality, connectivity, retrieval hit rate, and budget efficiency;
+- broader graph schema migration coverage;
+- long-term lesson distillation beyond first-pass decay/consolidation records.
 
 ### 2. Paper-Grade RHO
 
@@ -138,15 +145,15 @@ Current BES primitives are strong but not uniformly fused. Remaining work:
 
 ### 5. Multimodal And VLM As First-Class System Senses
 
-This must not remain a visual-verifier side branch. Multimodal evidence should be a first-class signal in the organism.
+This is now a first-class signal in the local organism, with production-scale expansion still ahead.
 
 Required upgrades:
 
 - **Visual SwarmCell:** a dedicated SwarmCell for screenshots, UI states, diagrams, plots, PDFs, OCR, charts, and generated artifacts.
-- **Visual RHO cases:** collect false positives, false negatives, missing screenshots, bad crops, OCR misses, PDF extraction errors, diagram misreads, chart misreads, and UI regressions.
-- **Visual BES lane:** evolve crop policy, artifact capture policy, OCR/VLM routing, visual rubric weights, confidence thresholds, retry policy, and artifact retention.
-- **Multimodal Memory Graph RAG:** store visual evidence references as graph nodes linked to claims, tasks, source files, UI states, verifier outcomes, and replay cases.
-- **A2A visual references:** pass artifact references and hashes, not giant raw blobs, between agents/swarms/harnesses.
+- **Visual RHO cases:** first-pass visual cases are emitted from verifier evidence; scale still needs broader OCR/PDF/diagram/chart/UI regression suites.
+- **Visual BES lane:** first-pass visual evidence enters BES envelopes; deeper crop/artifact/OCR/VLM routing evolution remains.
+- **Multimodal Memory Graph RAG:** visual evidence references are graph nodes; richer links to claims, source files, UI states, and replay cases should expand.
+- **A2A visual references:** reference passing is supported by the durable envelope shape; artifact hash policy still needs hardening.
 - **Meta-Harness visual benchmarks:** compare visual policy candidates over held-out UI/artifact/PDF/diagram tasks.
 - **Trust-kernel visual gates:** block promotion for UI, PDF, image, diagram, chart, or VLM-impacting changes when visual evidence is absent or failed.
 - **Multimodal request policy:** decide when to spend VLM budget versus text-only reasoning, and feed that decision back into budget/adaptive search.
@@ -159,7 +166,7 @@ Visual evidence is retrieved, replayed, evolved, and trusted through the same la
 
 ### 6. Durable A2A Network Behavior
 
-Current A2A is local contract/routing scaffolding. Remaining work:
+Current A2A is now a durable local interop substrate, not only scaffolding. Implemented locally:
 
 - durable inbox/outbox;
 - message retries, cancellation, progress protocol, and correlation IDs;
@@ -167,6 +174,12 @@ Current A2A is local contract/routing scaffolding. Remaining work:
 - streaming support where useful;
 - signed or otherwise trust-scoped delegated capability tokens;
 - external-agent quarantine and evidence validation;
+
+Remaining work:
+
+- persistent external A2A server endpoints per agent;
+- restart-persistent queue storage and stable issuer-secret injection;
+- independent subagent-to-subagent negotiation;
 - A2A lineage surviving multi-hop agent -> SwarmCell -> swarm -> local harness -> global harness flows.
 
 ### 7. Benchmarked Long-Running Improvement
@@ -199,13 +212,13 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 
 - [x] Every lane emits a common BES evidence envelope.
 - [x] Every candidate has lineage, evidence references, evaluator output, and promotion status.
-- [ ] RHO hard cases can originate from every layer.
+- [x] RHO hard cases can originate from every major local layer.
 - [x] Memory Graph RAG context is available to every lane.
-- [ ] Multimodal evidence is represented in memory, replay, A2A, and trust gates.
+- [x] Multimodal evidence is represented in memory, replay, A2A-compatible envelopes, and trust gates.
 - [x] A2A envelopes preserve lineage and trust metadata across nested swarms.
 - [x] Harness policies/configs are candidates in a harness-of-harnesses loop.
 - [ ] Adaptive search can allocate budget across text, tool, swarm, visual, replay, and verifier actions.
-- [ ] Global frontier records compare quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
+- [ ] Global frontier records persist longitudinal quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
 - [ ] Promotions require replay, verifier, provenance, rollback, and approval evidence.
 - [ ] Rejected candidates and failed replays become future hard cases.
 - [ ] The system demonstrates improvement over a held-out benchmark suite across multiple cycles.
@@ -213,13 +226,13 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 ## Recommended Fill-In Order
 
 1. Implement the BES mesh composition plan.
-2. Promote VLM/multimodal evidence to first-class lane, memory, RHO, and trust inputs.
-3. Harden Memory Graph RAG runtime and evals.
+2. Promote VLM/multimodal evidence to first-class lane, memory, RHO, and trust inputs. **First pass landed.**
+3. Harden Memory Graph RAG runtime and evals. **First pass landed; scale remains.**
 4. Scale RHO replay across held-out multimodal and text/code/tool tasks.
 5. Add concrete harness-of-harnesses candidate schemas.
-6. Add durable A2A lineage/reference metadata before full peer transport.
-7. Build long-running benchmark/frontier loops.
-8. Tune autonomy levels and governance.
+6. Add durable A2A lineage/reference metadata before full peer transport. **Local durability landed; network transport remains.**
+7. Build long-running benchmark/frontier loops. **Governance/job primitives landed; longitudinal dashboards remain.**
+8. Tune autonomy levels and governance. **First pass landed.**
 
 ## North Star
 

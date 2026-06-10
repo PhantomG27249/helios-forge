@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -20,7 +20,10 @@ import { proposeGlobalMemoryPromotions } from '../src/harness-sidecar/memory/glo
 import { createMemoryGraphRuntime } from '../src/harness-sidecar/memory/memoryGraphRuntime.js';
 import { runMemoryExtractionSociety } from '../src/harness-sidecar/memory/memoryExtractionSociety.js';
 import { mergeSwarmCellMemoryGraphs } from '../src/harness-sidecar/memory/swarmCellMemoryGraph.js';
-import { retrieveHierarchicalMemoryContext } from '../src/harness-sidecar/rag/hierarchicalMemoryRetriever.js';
+import {
+  createLaneMemoryGraphContextPacket,
+  retrieveHierarchicalMemoryContext,
+} from '../src/harness-sidecar/rag/hierarchicalMemoryRetriever.js';
 
 async function makeTempWorkspace(fn) {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'helios-local-global-memory-'));
@@ -123,6 +126,72 @@ test('memory graph runtime loads persisted global graph snapshots', async () => 
   });
 });
 
+test('memory graph runtime composes extraction society into local cell and global promotion', async () => {
+  await makeTempWorkspace(async (workspaceRoot) => {
+    const runtime = createMemoryGraphRuntime({ workspaceRoot, schemaThreshold: 1 });
+
+    const result = await runtime.ingestObservations({
+      agentId: 'memory.impl',
+      cellId: 'memory',
+      supportThreshold: 1,
+      observations: [{
+        text: 'The memory runtime composes extraction roles.',
+        source: 'trace-runtime-1',
+        subject: 'memoryGraphRuntime',
+        subjectType: 'module',
+        relation: 'composes',
+        object: 'extraction society',
+        objectType: 'runtime_primitive',
+        confidence: 0.94,
+      }],
+    });
+
+    assert.deepEqual(result.extraction.roles, [
+      'passage_extractor',
+      'schema_inducer',
+      'fact_extractor',
+      'contradiction_checker',
+    ]);
+    assert.equal(result.localGraph.agentId, 'memory.impl');
+    assert.equal(result.cellGraph.cellId, 'memory');
+    assert.deepEqual(result.promotion.facts.map((fact) => fact.status), ['pending']);
+    assert.equal(result.layers.facts[0].status, 'active');
+    assert.equal(result.graph.stats.activeFactCount, 1);
+  });
+});
+
+test('memory graph runtime reports and persists legacy schema migrations', async () => {
+  await makeTempWorkspace(async (workspaceRoot) => {
+    const memoryDir = path.join(workspaceRoot, '.harness', 'memory');
+    await mkdir(memoryDir, { recursive: true });
+    await writeFile(
+      path.join(memoryDir, 'global-layers.json'),
+      `${JSON.stringify({
+        passages: [{ passageId: 'legacy-p1', text: 'Legacy runtime fact.' }],
+        schemas: [{ headType: 'module', relation: 'keeps', tailType: 'version', frequency: 1 }],
+        facts: [{
+          subject: 'memoryGraphRuntime',
+          subjectType: 'module',
+          relation: 'keeps',
+          object: 'schema migrations',
+          objectType: 'version',
+          passageIds: ['legacy-p1'],
+        }],
+      }, null, 2)}\n`,
+      'utf8',
+    );
+
+    const runtime = createMemoryGraphRuntime({ workspaceRoot, schemaThreshold: 1 });
+    const result = await runtime.ingestPromotion({});
+    const persisted = JSON.parse(await readFile(path.join(memoryDir, 'global-layers.json'), 'utf8'));
+
+    assert.deepEqual(result.migrations.map((migration) => migration.id), ['global_layers_v0_to_v1']);
+    assert.equal(persisted.schemaVersion, result.schemaVersion);
+    assert.equal(persisted.migrationHistory[0].id, 'global_layers_v0_to_v1');
+    assert.equal(result.layers.facts[0].status, 'active');
+  });
+});
+
 test('hierarchical memory retriever returns active facts passages and summary counts', () => {
   const layers = createGlobalMemoryLayers();
   upsertPassage(layers, { passageId: 'p1', text: 'A requires B.' });
@@ -215,4 +284,40 @@ test('hierarchical memory retriever honors zero item budgets', () => {
 
   assert.deepEqual(noItems.items, []);
   assert.equal(noGraphItems.items.some((item) => item.source === 'memory_graph'), false);
+});
+
+test('memory graph BES lane packets are sorted deduped and evidence-only', () => {
+  const packet = createLaneMemoryGraphContextPacket({
+    lane: 'memory',
+    local: {
+      nodeIds: ['local_b', 'local_a', 'local_a'],
+      items: [{ id: 'too-bulky' }],
+      authority: 'write',
+      summary: 'local extraction context',
+    },
+    swarmCell: { nodeIds: ['cell_b', 'cell_a'] },
+    global: {
+      nodeIds: ['global_b', 'global_a'],
+      provenance: [{ id: 'trace-2' }, 'trace-1'],
+      authority: 'promote',
+    },
+    provenance: ['trace-1', { id: 'trace-3' }],
+    conflicts: [{ id: 'conflict-1', status: 'needs_review', authority: 'discard' }],
+    retrieval: { trace: ['fact-2', 'fact-1'] },
+  });
+
+  assert.deepEqual(packet.besLane, {
+    lane: 'memory',
+    authority: 'evidence_only',
+    promotionAllowed: false,
+  });
+  assert.deepEqual(packet.local, {
+    nodeIds: ['local_a', 'local_b'],
+    summary: 'local extraction context',
+  });
+  assert.deepEqual(packet.global.nodeIds, ['global_a', 'global_b']);
+  assert.equal(packet.global.authority, undefined);
+  assert.deepEqual(packet.provenance, ['trace-1', 'trace-2', 'trace-3']);
+  assert.deepEqual(packet.retrievalTrace, ['fact-1', 'fact-2']);
+  assert.deepEqual(packet.conflicts, [{ id: 'conflict-1', status: 'needs_review' }]);
 });

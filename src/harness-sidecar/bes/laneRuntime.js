@@ -57,9 +57,49 @@ function normalizeRhoReplay(result) {
   };
 }
 
+function uniqueSorted(values = []) {
+  return [...new Set(asArray(values).filter(Boolean).map(String))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
+export function summarizeBesLaneRuntimeResult(laneResult = {}) {
+  const candidates = asArray(laneResult.candidates);
+  const ranked = [...candidates].sort((left, right) => (
+    Number(right.evidence?.summary?.domainScore ?? right.evidence?.domain?.score ?? 0)
+      - Number(left.evidence?.summary?.domainScore ?? left.evidence?.domain?.score ?? 0)
+      || String(left.candidateId || left.policyId || '').localeCompare(String(right.candidateId || right.policyId || ''))
+  ));
+
+  return {
+    lane: laneResult.lane || null,
+    taskId: laneResult.taskId || null,
+    candidateCount: candidates.length,
+    bestCandidateId: ranked[0]?.candidateId || ranked[0]?.policyId || null,
+    evidenceSources: uniqueSorted(candidates.flatMap((candidate) => candidate.evidence?.sources || [])),
+    blockedReasons: uniqueSorted(candidates.flatMap((candidate) => candidate.promotion?.blockedReasons || [])),
+    promotionAllowed: candidates.some((candidate) => candidate.promotion?.allowed === true),
+    updatedAt: laneResult.updatedAt || ranked[0]?.updatedAt || null,
+  };
+}
+
 function a2aContext(a2a = {}) {
   if (!a2a || typeof a2a !== 'object') return {};
   return a2a.payload || a2a.message?.context || a2a.task?.context?.a2a || {};
+}
+
+function visualMemoryGraph(visualEvidence = {}) {
+  if (!visualEvidence || typeof visualEvidence !== 'object') return null;
+  if (visualEvidence.memoryGraph && typeof visualEvidence.memoryGraph === 'object') {
+    return cloneJson(visualEvidence.memoryGraph, null);
+  }
+  const nodes = asArray(visualEvidence.nodes).filter((node) => node?.id);
+  if (nodes.length === 0) return null;
+  return {
+    nodeIds: nodes.map((node) => node.id),
+    nodes: cloneJson(nodes, []),
+    edges: [],
+    conflicts: [],
+  };
 }
 
 async function evaluateCandidate({ evaluator, candidate, lane, taskId, hardCases, contract }) {
@@ -122,11 +162,16 @@ export async function runBesLaneRuntime({
     });
     const a2a = cloneJson(candidate.a2a ?? a2aEnvelope, null);
     const a2aMetadata = a2aContext(a2a);
-    const memoryGraph = cloneJson(candidate.memoryGraph ?? memoryGraphContext, null);
+    const visualEvidence = cloneJson(candidate.visualEvidence, null);
+    const memoryGraph = cloneJson(
+      candidate.memoryGraph ?? memoryGraphContext ?? visualMemoryGraph(visualEvidence),
+      null,
+    );
     const evidenceSummary = normalizeLaneEvidence({
       domain,
       rho,
       denseSubgoals: denseSubgoalResult,
+      visualEvidence,
       adaptiveSearch: candidate.adaptiveSearch ?? adaptiveSearch,
       toolTree: candidate.toolTree ?? toolTree,
       trajectory: candidate.trajectory ?? trajectory,
@@ -168,6 +213,7 @@ export async function runBesLaneRuntime({
         ...evidenceSummary,
       },
       ...(a2a ? { a2a } : {}),
+      ...(visualEvidence ? { visualEvidence } : {}),
       ...(memoryGraph ? { memoryGraph } : {}),
       promotion,
       updatedAt: now,
@@ -183,4 +229,53 @@ export async function runBesLaneRuntime({
     candidates: normalizedCandidates,
     updatedAt: now,
   };
+}
+
+export async function runBesLaneRuntimeWithEvents({
+  emitEvent,
+  runLane,
+  ...runtimeInput
+} = {}) {
+  const lane = getBesLaneContract(runtimeInput.lane).lane;
+  const taskId = normalizeId(runtimeInput.taskId, 'task');
+  const startedAt = runtimeInput.now || new Date().toISOString();
+
+  if (typeof emitEvent === 'function') {
+    await emitEvent({
+      type: 'bes_lane.started',
+      lane,
+      taskId,
+      candidateCount: asArray(runtimeInput.candidates).length,
+      hardCaseCount: asArray(runtimeInput.hardCases).length,
+      startedAt,
+    });
+  }
+
+  try {
+    const result = typeof runLane === 'function'
+      ? await runLane()
+      : await runBesLaneRuntime({ ...runtimeInput, lane, taskId });
+    const summary = summarizeBesLaneRuntimeResult(result);
+
+    if (typeof emitEvent === 'function') {
+      await emitEvent({
+        type: 'bes_lane.completed',
+        ...summary,
+        completedAt: summary.updatedAt || new Date().toISOString(),
+      });
+    }
+
+    return result;
+  } catch (error) {
+    if (typeof emitEvent === 'function') {
+      await emitEvent({
+        type: 'bes_lane.blocked',
+        lane,
+        taskId,
+        reason: error.message || String(error),
+        blockedAt: new Date().toISOString(),
+      });
+    }
+    throw error;
+  }
 }

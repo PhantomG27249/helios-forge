@@ -9,10 +9,17 @@ import {
   upsertSchema,
 } from './globalMemoryLayers.js';
 import {
+  addLocalObservation,
+  createLocalMemoryGraph,
+} from './localMemoryGraph.js';
+import { proposeGlobalMemoryPromotions } from './globalMemoryPromotion.js';
+import { mergeSwarmCellMemoryGraphs } from './swarmCellMemoryGraph.js';
+import {
   adjudicateMemoryConflict,
   applyConflictDecision,
   detectGlobalMemoryConflicts,
 } from './memoryConflictAdjudicator.js';
+import { runMemoryExtractionSociety } from './memoryExtractionSociety.js';
 import { constructMemoryGuidedGraph } from './memoryGraphConstructor.js';
 
 export const MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION = 1;
@@ -53,13 +60,73 @@ async function readJsonIfPresent(filePath, fallback) {
   }
 }
 
+function uniqueMigrations(...groups) {
+  const byId = new Map();
+  for (const migration of groups.flatMap(normalizeList)) {
+    if (migration?.id && !byId.has(migration.id)) byId.set(migration.id, migration);
+  }
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function migrationRecord(id, fromVersion, toVersion, target) {
+  return {
+    id,
+    fromVersion,
+    toVersion,
+    target,
+  };
+}
+
 function withSchemaVersion(layers) {
   return {
-    schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
     ...layers,
+    schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
     schemas: normalizeList(layers.schemas),
     facts: normalizeList(layers.facts),
     passages: normalizeList(layers.passages),
+    migrationHistory: normalizeList(layers.migrationHistory),
+  };
+}
+
+function migrateLayers(rawLayers) {
+  const migrations = [];
+  const fromVersion = rawLayers?.schemaVersion;
+  if (rawLayers && fromVersion !== MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION) {
+    migrations.push(migrationRecord(
+      'global_layers_v0_to_v1',
+      fromVersion ?? 0,
+      MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
+      'global_layers',
+    ));
+  }
+  const layers = createGlobalMemoryLayers(rawLayers || {});
+  layers.migrationHistory = uniqueMigrations(rawLayers?.migrationHistory, migrations);
+  return {
+    layers: withSchemaVersion(layers),
+    migrations,
+  };
+}
+
+function migrateGraph(rawGraph) {
+  const migrations = [];
+  const fromVersion = rawGraph?.schemaVersion;
+  if (rawGraph && fromVersion !== MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION) {
+    migrations.push(migrationRecord(
+      'global_graph_v0_to_v1',
+      fromVersion ?? 0,
+      MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
+      'global_graph',
+    ));
+  }
+  return {
+    graph: {
+      schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
+      nodes: normalizeList(rawGraph?.nodes),
+      edges: normalizeList(rawGraph?.edges),
+      stats: rawGraph?.stats || {},
+      migrationHistory: uniqueMigrations(rawGraph?.migrationHistory, migrations),
+    },
+    migrations,
   };
 }
 
@@ -96,16 +163,17 @@ export function createMemoryGraphRuntime({
 
   async function loadLayers() {
     const loaded = await readJsonIfPresent(paths.layersPath, null);
-    return withSchemaVersion(createGlobalMemoryLayers(loaded || {}));
+    return migrateLayers(loaded).layers;
+  }
+
+  async function loadLayersWithMigrations() {
+    const loaded = await readJsonIfPresent(paths.layersPath, null);
+    return migrateLayers(loaded);
   }
 
   async function loadGraph() {
-    return readJsonIfPresent(paths.graphPath, {
-      schemaVersion: MEMORY_GRAPH_RUNTIME_SCHEMA_VERSION,
-      nodes: [],
-      edges: [],
-      stats: {},
-    });
+    const loaded = await readJsonIfPresent(paths.graphPath, null);
+    return migrateGraph(loaded).graph;
   }
 
   async function saveRuntimeState({ layers, graph }) {
@@ -118,7 +186,8 @@ export function createMemoryGraphRuntime({
   }
 
   async function ingestPromotion(promotion = {}) {
-    const layers = await loadLayers();
+    const loadedLayers = await loadLayersWithMigrations();
+    const layers = loadedLayers.layers;
     const conflictDecisions = applyPromotion(layers, promotion, conflictPolicy);
     const activation = activateStableSchemas({ layers, schemaThreshold });
     const graph = constructMemoryGuidedGraph({ layers, ...graphOptions });
@@ -131,7 +200,38 @@ export function createMemoryGraphRuntime({
       graph,
       activation,
       conflictDecisions,
+      migrations: loadedLayers.migrations,
       paths,
+    };
+  }
+
+  async function ingestObservations({
+    agentId,
+    cellId = 'memory',
+    observations = [],
+    supportThreshold = 2,
+  } = {}) {
+    const extraction = runMemoryExtractionSociety({ observations });
+    const localGraph = createLocalMemoryGraph({ agentId });
+    for (const observation of normalizeList(observations)) {
+      addLocalObservation(localGraph, observation);
+    }
+    const cellGraph = mergeSwarmCellMemoryGraphs({
+      cellId,
+      localGraphs: [localGraph],
+    });
+    const promotion = proposeGlobalMemoryPromotions({
+      cellGraph,
+      supportThreshold,
+    });
+    const result = await ingestPromotion(promotion);
+
+    return {
+      ...result,
+      extraction,
+      localGraph,
+      cellGraph,
+      promotion,
     };
   }
 
@@ -142,5 +242,6 @@ export function createMemoryGraphRuntime({
     loadLayers,
     loadGraph,
     ingestPromotion,
+    ingestObservations,
   };
 }

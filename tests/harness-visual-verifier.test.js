@@ -5,6 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import { runVisualVerifier } from '../src/harness-sidecar/vlm/visualVerifier.js';
+import { buildVisualEvidenceBundle } from '../src/harness-sidecar/vlm/visualEvidence.js';
 import { createVisualVerifierRubric } from '../src/harness-sidecar/vlm/visualVerifierRubric.js';
 
 const PNG_1X1 = Buffer.from(
@@ -197,4 +198,49 @@ test('visual verifier rubric exposes strictness thresholds', () => {
       confidenceThreshold: 0.75,
     },
   );
+});
+
+test('visual verifier output becomes memory nodes and RHO hard cases', () => {
+  const bundle = buildVisualEvidenceBundle({
+    taskId: 'task_visual_checkout',
+    verifierResult: {
+      name: 'visual.verifier',
+      passed: false,
+      score: 0.42,
+      confidence: 0.91,
+      reason: 'visual_artifact_unavailable',
+      artifacts: [
+        {
+          artifactId: 'after-shot',
+          type: 'screenshot',
+          artifacts: { image: '.harness/visual/task_visual_checkout/after.png' },
+        },
+      ],
+      findings: [{ severity: 'error', message: 'Primary button is clipped.' }],
+    },
+  });
+
+  assert.deepEqual(bundle.memoryGraph.nodeIds, ['visual_evidence:task_visual_checkout:after-shot']);
+  assert.equal(bundle.nodes[0].type, 'visual_evidence');
+  assert.equal(bundle.nodes[0].path, '.harness/visual/task_visual_checkout/after.png');
+  assert.equal(bundle.rhoCases[0].caseId, 'visual_evidence:task_visual_checkout:after-shot');
+  assert.equal(bundle.rhoCases[0].reason, 'vlm_missed_artifact');
+  assert.equal(bundle.rhoCases[0].verifierCase.visualArtifacts[0].path, '.harness/visual/task_visual_checkout/after.png');
+});
+
+test('visual evidence labels model pass with failed verifier threshold as a false positive', () => {
+  const bundle = buildVisualEvidenceBundle({
+    taskId: 'task_visual_false_positive',
+    verifierResult: {
+      name: 'visual.verifier',
+      passed: false,
+      modelPassed: true,
+      score: 0.42,
+      confidence: 0.51,
+      artifacts: [{ artifactId: 'after', type: 'screenshot', path: '.harness/visual/task/after.png' }],
+    },
+  });
+
+  assert.equal(bundle.verdict.reason, 'visual_false_positive');
+  assert.equal(bundle.rhoCases[0].reason, 'visual_false_positive');
 });

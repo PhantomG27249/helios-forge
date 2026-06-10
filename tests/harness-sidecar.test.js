@@ -192,6 +192,9 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
       'context.window_evaluated',
       'budget.dashboard_updated',
       'collaboration.workspace_lease_acquired',
+      'bes_lane.started',
+      'bes_lane.completed',
+      'governance.status_updated',
     ];
     for (const type of requiredTypes) {
       assert.equal(events.some((event) => event.type === type), true, `missing ${type}`);
@@ -235,6 +238,15 @@ test('task endpoint runs all enabled harness subsystems at runtime', async () =>
     const besMetaEvent = events.find((event) => event.type === 'bes.meta_candidates_generated');
     assert.equal(besMetaEvent.candidateCount, 4);
     assert.equal(Boolean(besMetaEvent.champion), true);
+    const laneEvents = events.filter((event) => event.type === 'bes_lane.completed');
+    assert.equal(laneEvents.some((event) => event.lane === 'harness'), true);
+    assert.equal(laneEvents.some((event) => event.lane === 'memory'), true);
+    assert.equal(laneEvents.every((event) => event.promotionAllowed === false), true);
+    assert.equal(laneEvents.some((event) => event.evidenceSources.includes('rho_replay')), true);
+    const governanceEvent = events.find((event) => event.type === 'governance.status_updated');
+    assert.equal(governanceEvent.governance.replayJobs.queuedCount >= 1, true);
+    assert.equal(governanceEvent.governance.rollbackDrills.passedCount, 1);
+    assert.equal(governanceEvent.governance.autonomy.levelName, 'supervised');
 
     const preferenceEvent = events.find((event) => event.type === 'rho.preference_judged');
     assert.equal(Boolean(preferenceEvent.winner.candidateId), true);

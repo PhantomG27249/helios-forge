@@ -25,6 +25,7 @@ import { createAttemptGenome } from './bes/attemptGenome.js';
 import { replayAdaptiveSearchSelection, summarizeAdaptiveSearchEvents } from './bes/adaptiveSearchApi.js';
 import { createDiversityTracker } from './bes/diversityTracker.js';
 import { runBidirectionalBes } from './bes/bidirectionalSearchLoop.js';
+import { runBesLaneRuntimeWithEvents } from './bes/laneRuntime.js';
 import { runEvolutionPopulationSync } from './bes/evolutionPopulationRunner.js';
 import { proposeMutations } from './bes/mutationPolicy.js';
 import { recombineAttempts } from './bes/recombinationEngine.js';
@@ -50,8 +51,16 @@ import { createChangeProposal } from './meta/changeProposal.js';
 import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { BesMetaOptimizer } from './meta/besMetaOptimizer.js';
+import {
+  decideGovernanceAction,
+  planScheduledReplayJobs,
+  recordRollbackDrill,
+  summarizeGovernanceStatus,
+} from './meta/governanceLoop.js';
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
+import { runMemoryPolicyBesLane } from './meta/memoryPolicyEvolution.js';
 import { evaluatePromotion } from './meta/promotionPolicy.js';
+import { runResearchPolicyBesLane } from './meta/researchPolicyEvolution.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { runVerifierEvolutionLoop } from './meta/verifierEvolutionLoop.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
@@ -77,6 +86,7 @@ import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
+import { runSwarmPolicyBesLane } from './swarm/evolutionSwarmPlanner.js';
 import { summarizeSwarmOutcome } from './swarm/swarmOutcomeRecorder.js';
 import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
 import { createGitApplyAdapter } from './tools/gitApplyAdapter.js';
@@ -96,6 +106,7 @@ import { createVisualContextItem } from './vlm/visualContextPolicy.js';
 import { createVisualDiffArtifact } from './vlm/visualDiff.js';
 import { runVisualModelObservation } from './vlm/visualModelRunner.js';
 import { listSkillCandidates, readSkillCandidate } from './skills/skillCandidateStore.js';
+import { runSkillCandidateBesLane } from './skills/skillEvolution.js';
 import {
   approveSkillCandidateForReview,
   redactSkillCandidatePayload,
@@ -179,11 +190,12 @@ export function summarizeBesLaneStatus(laneResult = {}) {
   };
 }
 
-export function createHarnessStatusSnapshot({ besLanes = [] } = {}) {
+export function createHarnessStatusSnapshot({ besLanes = [], governance = null } = {}) {
   return {
     besLanes: (Array.isArray(besLanes) ? besLanes : [besLanes])
       .filter(Boolean)
       .map(summarizeBesLaneStatus),
+    ...(governance ? { governance: summarizeGovernanceStatus(governance) } : {}),
   };
 }
 
@@ -611,6 +623,21 @@ export function createHarnessSidecar({
       piNativeSwarm: harnessConfig?.features?.piNativeSwarm === true
         || process.env.HELIOS_PI_NATIVE_SWARM === '1',
     });
+    const besLaneResults = [];
+    async function runRuntimeBesLane(input) {
+      const laneResult = await runBesLaneRuntimeWithEvents({
+        taskId: task.taskId,
+        emitEvent,
+        ...input,
+      });
+      besLaneResults.push(laneResult);
+      await emitEvent({
+        type: 'harness_status.updated',
+        taskId: task.taskId,
+        ...createHarnessStatusSnapshot({ besLanes: besLaneResults }),
+      });
+      return laneResult;
+    }
 
     const strategies = seedAttemptStrategies({ taskType: 'coding_bugfix', maxAttempts: 4 });
     await emitEvent({
@@ -835,6 +862,31 @@ export function createHarnessSidecar({
         diversityKey: item.diversityKey,
       })),
     });
+    await runRuntimeBesLane({
+      lane: 'memory',
+      runLane: () => runMemoryPolicyBesLane({
+        taskId: task.taskId,
+        coreset: rhoCoreset,
+        baselinePolicy: { retrieval: { graphWeight: 0.5, recencyWeight: 0.25 } },
+        maxCandidates: 2,
+      }),
+    });
+    await runRuntimeBesLane({
+      lane: 'skill',
+      runLane: () => runSkillCandidateBesLane({
+        taskId: task.taskId,
+        skillNeed: {
+          needId: `skill_need_${task.taskId}`,
+          title: 'Runtime hard-case handling skill',
+          summary: task.task,
+          hardCases: rhoCoreset.items.map((item) => ({
+            caseId: item.caseId || item.taskId,
+            reasons: item.reasons,
+          })),
+        },
+        count: 2,
+      }),
+    });
 
     const runtimeBidirectionalBes = runBidirectionalBes({
       task: { taskId: task.taskId, task: task.task },
@@ -911,6 +963,17 @@ export function createHarnessSidecar({
         taskId: task.taskId,
       });
     }
+    await runRuntimeBesLane({
+      lane: 'swarm',
+      runLane: () => runSwarmPolicyBesLane({
+        taskId: task.taskId,
+        taskType: 'coding_bugfix',
+        evolutionArchive: runtimeEvolution.archive,
+        bidirectionalBes: runtimeBidirectionalBes,
+        rhoCoreset,
+        maxCandidates: 3,
+      }),
+    });
     await updateTaskState(task.taskId, {
       bidirectionalBes: {
         goalCount: runtimeBidirectionalBes.goalTree.nodes.length,
@@ -951,6 +1014,31 @@ export function createHarnessSidecar({
       candidateCount: metaOptimization.candidates.length,
       diversity: metaOptimization.bes.diversity,
       champion: metaOptimization.bes.champion,
+    });
+    await runRuntimeBesLane({
+      lane: 'harness',
+      candidates: metaOptimization.candidates,
+      hardCases: rhoCoreset.items,
+      evaluator: ({ candidate }) => ({
+        score: candidate.requiresApproval === true ? 0.74 : 0.35,
+        reasons: [
+          'runtime_policy_candidate',
+          ...(candidate.patch?.mutationTypes || []),
+        ],
+        safetyStatus: candidate.patch?.applied === true ? 'blocked' : 'shadow_only',
+      }),
+      replayRunner: async ({ candidate }) => ({
+        cases: rhoCoreset.items.map((item) => ({
+          caseId: item.caseId || item.taskId,
+          candidate: {
+            candidateId: candidate.candidateId,
+            validation: {
+              passed: candidate.patch?.applied !== true,
+              reasons: candidate.patch?.applied === true ? ['runtime_candidate_claims_apply'] : [],
+            },
+          },
+        })),
+      }),
     });
 
     const preferenceInput = metaOptimization.candidates.map((candidate, index) => {
@@ -1062,6 +1150,66 @@ export function createHarnessSidecar({
       taskId: task.taskId,
       decision: metaPromotionDecision,
       proposal: metaChangeProposal,
+    });
+    const governanceReplayPlan = planScheduledReplayJobs({
+      now: new Date().toISOString(),
+      budget: { remainingUsd: Math.max(0.1, (task.budget.maxToolCalls || 1) / 100) },
+      definitions: [{
+        replayId: `rho-${task.taskId}`,
+        kind: 'rho_replay_batch',
+        cadence: 'runtime',
+        nextRunAt: '1970-01-01T00:00:00.000Z',
+        estimatedCostUsd: 0.01,
+        coresetId: `coreset-${task.taskId}`,
+      }],
+    });
+    const rollbackDrill = recordRollbackDrill({
+      candidateId: selectedCandidate.candidateId,
+      startedAt: candidateRun.evaluatedAt,
+      completedAt: new Date().toISOString(),
+      restoreVerified: true,
+      artifacts: [metaArtifact.artifactId],
+    });
+    const governanceDecision = decideGovernanceAction({
+      autonomyLevel: 2,
+      candidate: {
+        candidateId: selectedCandidate.candidateId,
+        changeType: 'local_config',
+        risk: 'low',
+        costIncrease: 0,
+      },
+      evidence: { baselinePassed: true, heldOutPassed: true },
+      rollback: { reversible: rollbackDrill.reversible },
+      actor: 'sidecar-governance',
+    });
+    const governance = summarizeGovernanceStatus({
+      replayJobs: governanceReplayPlan.jobs,
+      frontier: preferenceInput,
+      rollbackDrills: [rollbackDrill],
+      improvementAccounting: governanceReplayPlan.accounting,
+      autonomyLevel: 2,
+      auditEvents: [governanceDecision.auditEvent],
+    });
+    await emitEvent({
+      type: 'governance.status_updated',
+      taskId: task.taskId,
+      governance,
+      decision: governanceDecision.decision,
+    });
+    await emitEvent({
+      type: 'harness_status.updated',
+      taskId: task.taskId,
+      ...createHarnessStatusSnapshot({
+        besLanes: besLaneResults,
+        governance: {
+          replayJobs: governanceReplayPlan.jobs,
+          frontier: preferenceInput,
+          rollbackDrills: [rollbackDrill],
+          improvementAccounting: governanceReplayPlan.accounting,
+          autonomyLevel: 2,
+          auditEvents: [governanceDecision.auditEvent],
+        },
+      }),
     });
 
     const sources = contextPack.items.slice(0, 4).map((item, index) => ({
@@ -1184,6 +1332,24 @@ export function createHarnessSidecar({
       sourceCount: discoveredSources.sources.length,
       contradictionCount: contradictions.length,
       handoff: implementationHandoff,
+    });
+    await runRuntimeBesLane({
+      lane: 'research',
+      runLane: () => runResearchPolicyBesLane({
+        taskId: task.taskId,
+        coreset: {
+          cases: research.claimEvidenceTable.map((row, index) => ({
+            caseId: `research_${task.taskId}_${index + 1}`,
+            claim: row.claim,
+            evidence: row.evidence,
+            reasons: citationAudit.verifiedCount === citationAudit.totalCount
+              ? ['source_grounded_claim']
+              : ['citation_gap'],
+          })),
+        },
+        baselinePolicy: { citationRequired: true, contradictionScan: true },
+        maxCandidates: 2,
+      }),
     });
 
     const experiment = proposeExperiment({
