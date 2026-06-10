@@ -6,6 +6,16 @@ const DANGEROUS_DENY = Object.freeze([
   'secrets.read',
 ]);
 
+const BROWSER_VISUAL_TOOLS = Object.freeze([
+  'browser.session.create',
+  'browser.navigate',
+  'browser.screenshot',
+  'browser.console.read',
+  'browser.network.summary',
+  'browser.dom.snapshot',
+  'browser.session.close',
+]);
+
 function profile({
   id,
   role,
@@ -68,7 +78,7 @@ export function loadDefaultAgentProfiles() {
       id: 'visual-specialist',
       role: 'implementer',
       mission: 'Inspect visual artifacts and produce evidence-backed UI or VLM findings.',
-      allowedTools: ['workspace.read', 'visual.verifier.run', 'verifier.run'],
+      allowedTools: ['workspace.read', 'visual.verifier.run', 'verifier.run', ...BROWSER_VISUAL_TOOLS],
       vlmAllowed: true,
       visualArtifactsAllowed: true,
       requiredFields: ['summary', 'visualEvidence', 'verifierEvidence'],

@@ -168,6 +168,112 @@ test('tool loop reports unknown, blocked, and approval-required tool calls witho
   ]);
 });
 
+test('tool loop filters model-visible contracts to allowed tools when provided', async () => {
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'shell.run',
+    description: 'Run a shell command',
+    execute: async () => ({ ok: true }),
+  });
+  registry.register({
+    name: 'browser.navigate',
+    description: 'Navigate a browser session',
+    execute: async () => ({ ok: true }),
+  });
+
+  let visibleTools = [];
+  const result = await runToolLoop({
+    taskId: 'task_allowed_contracts',
+    toolRegistry: registry,
+    allowedTools: ['shell.run'],
+    modelGateway: {
+      call: async ({ tools }) => {
+        visibleTools = tools.map((tool) => tool.name);
+        return { text: 'No browser needed.' };
+      },
+    },
+    messages: [{ role: 'user', content: 'Use safe tools only.' }],
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(visibleTools, ['shell.run']);
+});
+
+test('tool loop blocks registered tools that are not allowed', async () => {
+  const registry = new ToolRegistry();
+  let browserExecuteCount = 0;
+  registry.register({
+    name: 'shell.run',
+    execute: async () => ({ ok: true }),
+  });
+  registry.register({
+    name: 'browser.navigate',
+    execute: async () => {
+      browserExecuteCount += 1;
+      return { ok: true };
+    },
+  });
+
+  const result = await runToolLoop({
+    taskId: 'task_disallowed_browser_tool',
+    toolRegistry: registry,
+    allowedTools: ['shell.run'],
+    modelGateway: {
+      call: async () => ({
+        text: '',
+        toolCalls: [{ id: 'browser_1', name: 'browser.navigate', args: { url: 'http://localhost:3000' } }],
+      }),
+    },
+    messages: [{ role: 'user', content: 'Navigate anyway.' }],
+  });
+
+  assert.equal(result.status, 'blocked');
+  assert.equal(browserExecuteCount, 0);
+  assert.deepEqual(result.toolResults, [{
+    id: 'browser_1',
+    name: 'browser.navigate',
+    status: 'blocked',
+    reason: 'tool_not_allowed',
+  }]);
+});
+
+test('tool loop allows browser tools included in allowed tools', async () => {
+  const registry = new ToolRegistry();
+  registry.register({
+    name: 'browser.navigate',
+    execute: async (args) => ({ navigated: args.url }),
+  });
+
+  let callCount = 0;
+  const result = await runToolLoop({
+    taskId: 'task_allowed_browser_tool',
+    toolRegistry: registry,
+    allowedTools: ['browser.navigate'],
+    modelGateway: {
+      call: async () => {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'browser_ok', name: 'browser.navigate', args: { url: 'http://localhost:3000' } }],
+          };
+        }
+        return { text: 'Browser navigation completed.' };
+      },
+    },
+    messages: [{ role: 'user', content: 'Navigate with browser.' }],
+  });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.finalText, 'Browser navigation completed.');
+  assert.deepEqual(result.toolResults, [{
+    id: 'browser_ok',
+    name: 'browser.navigate',
+    status: 'completed',
+    result: { navigated: 'http://localhost:3000' },
+  }]);
+});
+
 test('tool loop stops when max iterations is reached', async () => {
   const registry = new ToolRegistry();
   registry.register({

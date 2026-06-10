@@ -361,7 +361,19 @@ test('full runtime invokes VLM observation when configured model supports vision
       assert.equal(vlmEvent.model.model, 'local-test-vlm');
       const toolRegistryEvent = events.find((event) => event.type === 'tools.default_registry_available');
       assert.equal(Boolean(toolRegistryEvent), true);
-      assert.deepEqual(toolRegistryEvent.toolNames, ['mcp.call', 'shell.run', 'verifier.run', 'visual.verifier.run']);
+      assert.deepEqual(toolRegistryEvent.toolNames, [
+        'browser.console.read',
+        'browser.dom.snapshot',
+        'browser.navigate',
+        'browser.network.summary',
+        'browser.screenshot',
+        'browser.session.close',
+        'browser.session.create',
+        'mcp.call',
+        'shell.run',
+        'verifier.run',
+        'visual.verifier.run',
+      ]);
       assert.equal(toolRegistryEvent.toolLoopReady, true);
 
       unsubscribe();

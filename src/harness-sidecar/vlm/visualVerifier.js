@@ -3,6 +3,7 @@ import path from 'node:path';
 import { buildMultimodalRequest } from '../model/multimodalRequestBuilder.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { readImageArtifact } from './imageIO.js';
+import { sanitizeBrowserEvidenceMetadata } from './browserPreviewCapture.js';
 import { captureProductionVisualArtifacts } from './productionArtifactCapture.js';
 import { createVisualVerifierRubric } from './visualVerifierRubric.js';
 
@@ -60,14 +61,64 @@ function sanitizeArtifactPaths(value, workspaceRoot) {
   ]).filter(([, item]) => item !== undefined));
 }
 
+function browserEvidenceSummary(browserEvidence = {}) {
+  return {
+    consoleErrorCount: browserEvidence.consoleErrors?.length || 0,
+    failedRequestCount: browserEvidence.failedRequests?.length || 0,
+    networkRequestCount: browserEvidence.networkSummary?.length || 0,
+    hasDomSnapshot: Boolean(browserEvidence.domSnapshotPath),
+  };
+}
+
+function compactConsoleError(error = {}, workspaceRoot) {
+  const compact = {
+    type: error.type,
+    text: error.text || error.message,
+    location: sanitizeArtifactPaths(error.location, workspaceRoot),
+  };
+  return Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined));
+}
+
+function compactNetworkRecord(record = {}, workspaceRoot) {
+  const compact = {
+    url: record.url,
+    method: record.method,
+    status: record.status,
+    statusText: record.statusText,
+    requestHeaders: record.requestHeaders,
+    responseHeaders: record.responseHeaders,
+    errorText: record.errorText,
+  };
+  return sanitizeArtifactPaths(
+    Object.fromEntries(Object.entries(compact).filter(([, value]) => value !== undefined)),
+    workspaceRoot,
+  );
+}
+
+function modelBrowserEvidenceMetadata(browserEvidence, workspaceRoot) {
+  const sanitized = sanitizeBrowserEvidenceMetadata(browserEvidence);
+  if (!sanitized) return undefined;
+  return {
+    summary: browserEvidenceSummary(sanitized),
+    consoleErrors: sanitized.consoleErrors.map((error) => compactConsoleError(error, workspaceRoot)),
+    failedRequests: sanitized.failedRequests.map((record) => compactNetworkRecord(record, workspaceRoot)),
+    networkSummary: sanitized.networkSummary.map((record) => compactNetworkRecord(record, workspaceRoot)),
+    domSnapshotPath: sanitizeArtifactPaths(sanitized.domSnapshotPath, workspaceRoot),
+  };
+}
+
 function artifactMetadata(artifact, workspaceRoot) {
+  const metadata = sanitizeArtifactPaths(artifact.metadata, workspaceRoot);
+  if (artifact.metadata?.browserEvidence) {
+    metadata.browserEvidence = modelBrowserEvidenceMetadata(artifact.metadata.browserEvidence, workspaceRoot);
+  }
   return {
     artifactId: artifact.artifactId,
     taskId: artifact.taskId,
     type: artifact.type,
     summary: artifact.summary,
     artifacts: sanitizeArtifactPaths(artifact.artifacts, workspaceRoot),
-    metadata: sanitizeArtifactPaths(artifact.metadata, workspaceRoot),
+    metadata,
     visualContext: artifact.visualContext,
   };
 }

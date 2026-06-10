@@ -1,13 +1,42 @@
 import { parseToolCalls } from '../model/toolCallParser.js';
 import { createToolCallRecovery } from '../reliability/toolCallRecovery.js';
 
-function toolContracts(toolRegistry) {
+function normalizeAllowedToolSet({ allowedTools, toolCaps } = {}) {
+  const source = Array.isArray(allowedTools)
+    ? allowedTools
+    : Array.isArray(toolCaps)
+      ? toolCaps
+      : Array.isArray(toolCaps?.allowed)
+        ? toolCaps.allowed
+        : Array.isArray(toolCaps?.allowedTools)
+          ? toolCaps.allowedTools
+          : undefined;
+  if (source === undefined) return null;
+  return new Set(source.filter(Boolean).map(String));
+}
+
+function isToolAllowed(name, allowedToolSet) {
+  return !allowedToolSet || allowedToolSet.has(name);
+}
+
+function listAllowedTools(toolRegistry, allowedToolSet) {
   if (!toolRegistry?.list) return [];
-  return toolRegistry.list().map((tool) => ({
+  return toolRegistry.list().filter((tool) => isToolAllowed(tool.name, allowedToolSet));
+}
+
+function toolContracts(toolRegistry, allowedToolSet) {
+  return listAllowedTools(toolRegistry, allowedToolSet).map((tool) => ({
     name: tool.name,
     description: tool.description || '',
     inputSchema: tool.inputSchema || { type: 'object' },
   }));
+}
+
+function recoveryToolRegistry(toolRegistry, allowedToolSet) {
+  if (!allowedToolSet) return toolRegistry;
+  return {
+    list: () => listAllowedTools(toolRegistry, allowedToolSet),
+  };
 }
 
 function resultStatusForTool(tool) {
@@ -46,7 +75,16 @@ function policyMetadata(policy) {
   };
 }
 
-async function executeToolCall({ call, toolRegistry }) {
+async function executeToolCall({ call, toolRegistry, allowedToolSet }) {
+  if (!isToolAllowed(call.name, allowedToolSet)) {
+    return {
+      id: call.id,
+      name: call.name,
+      status: 'blocked',
+      reason: 'tool_not_allowed',
+    };
+  }
+
   const tool = toolRegistry?.get?.(call.name);
   const gate = resultStatusForTool(tool);
   if (gate.status !== 'ready') {
@@ -96,18 +134,21 @@ export async function runToolLoop({
   maxIterations = 5,
   recovery,
   policy = null,
+  allowedTools,
+  toolCaps,
 } = {}) {
   if (!modelGateway?.call) {
     throw new Error('Tool loop requires a modelGateway with call()');
   }
 
+  const allowedToolSet = normalizeAllowedToolSet({ allowedTools, toolCaps });
   let currentMessages = [...messages];
   const toolResults = [];
   let finalText = '';
   const recoveryManager = recovery?.enabled
     ? createToolCallRecovery({
       taskId,
-      toolRegistry,
+      toolRegistry: recoveryToolRegistry(toolRegistry, allowedToolSet),
       emitEvent: recovery.emitEvent,
       noProgressThreshold: recovery.noProgressThreshold,
     })
@@ -130,7 +171,7 @@ export async function runToolLoop({
       purpose,
       profileName,
       messages: currentMessages,
-      tools: toolContracts(toolRegistry),
+      tools: toolContracts(toolRegistry, allowedToolSet),
     });
     let calls;
     if (recoveryManager) {
@@ -159,7 +200,7 @@ export async function runToolLoop({
 
     const iterationResults = [];
     for (const call of calls) {
-      let result = await executeToolCall({ call, toolRegistry });
+      let result = await executeToolCall({ call, toolRegistry, allowedToolSet });
       if (recoveryManager) {
         result = recoveryManager.annotateToolResult(result);
       }

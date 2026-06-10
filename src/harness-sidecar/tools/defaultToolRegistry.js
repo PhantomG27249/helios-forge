@@ -4,6 +4,7 @@ import { loadVerifierRegistry, normalizeVerifierRecord } from './verifierRegistr
 import { runVerifiers } from './verifierRunner.js';
 import { selectVerifiersForTask } from './verifierSelector.js';
 import { runVisualVerifier } from '../vlm/visualVerifier.js';
+import { registerBrowserTools } from '../browser/browserToolHandlers.js';
 
 function mcpRuntimeRequired() {
   throw new Error('mcpRuntime is required for mcp.call');
@@ -18,12 +19,24 @@ export function createDefaultToolRegistry({
   visualCaptureAdapter,
   visualWorkerRuntimes,
   modelGateway,
+  browserRuntime,
+  browserPolicy,
+  browserToolOptions,
 } = {}) {
   if (!workspaceRoot) {
     throw new Error('workspaceRoot is required');
   }
 
   const registry = new ToolRegistry();
+  registerBrowserTools({
+    registry,
+    workspaceRoot,
+    browserRuntime,
+    browserPolicy,
+    emitEvent,
+    options: browserToolOptions,
+  });
+
   registry.register({
     name: 'shell.run',
     description: 'Run a scoped shell command inside the workspace.',

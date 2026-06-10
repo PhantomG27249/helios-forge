@@ -84,6 +84,7 @@ import { ModelGateway } from './model/modelGateway.js';
 import { getModelProfile } from './model/modelProfiles.js';
 import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
+import { getAgentProfile } from './swarm/agentProfiles.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
@@ -240,6 +241,15 @@ function normalizeMountResult(mountResult, profileId) {
     manifestPath,
     enabledCounts,
   };
+}
+
+function resolveAgentProfileToolCaps(profileId) {
+  if (!profileId || profileId === 'default') return null;
+  try {
+    return getAgentProfile({ profileId })?.toolCaps || null;
+  } catch {
+    return null;
+  }
 }
 
 function budgetDashboardSnapshot({ task, budgetManager, contextState, activeSubagents = [], recovery = {} }) {
@@ -509,6 +519,7 @@ export function createHarnessSidecar({
       'audit',
     ];
     const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
+    const activeToolCaps = resolveAgentProfileToolCaps(task.profileId);
     const defaultToolRegistry = createDefaultToolRegistry({
       workspaceRoot: resolvedWorkspaceRoot,
       emitEvent,
@@ -538,6 +549,7 @@ export function createHarnessSidecar({
         profileName: runtimeSwarmModel.profileName,
         modelGateway: runtimeSwarmModel.gateway,
         toolRegistry: defaultToolRegistry,
+        toolCaps: activeToolCaps,
         maxIterations: Math.max(1, Math.min(8, task.budget.maxToolCalls || 4)),
         recovery: {
           enabled: true,
