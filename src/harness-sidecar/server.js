@@ -51,6 +51,7 @@ import { createChangeProposal } from './meta/changeProposal.js';
 import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { BesMetaOptimizer } from './meta/besMetaOptimizer.js';
+import { summarizeCapabilityGoalStatus } from './meta/capabilityGoalStatus.js';
 import {
   decideGovernanceAction,
   planScheduledReplayJobs,
@@ -190,12 +191,13 @@ export function summarizeBesLaneStatus(laneResult = {}) {
   };
 }
 
-export function createHarnessStatusSnapshot({ besLanes = [], governance = null } = {}) {
+export function createHarnessStatusSnapshot({ besLanes = [], governance = null, capabilityGoals = null } = {}) {
   return {
     besLanes: (Array.isArray(besLanes) ? besLanes : [besLanes])
       .filter(Boolean)
       .map(summarizeBesLaneStatus),
     ...(governance ? { governance: summarizeGovernanceStatus(governance) } : {}),
+    ...(capabilityGoals ? { capabilityGoals: summarizeCapabilityGoalStatus(capabilityGoals) } : {}),
   };
 }
 

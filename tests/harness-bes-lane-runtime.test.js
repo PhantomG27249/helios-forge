@@ -242,8 +242,14 @@ test('attaches lane-specific dense verifier units and trajectory provenance', as
   });
 
   const candidate = result.candidates[0];
+  assert.equal(candidate.bes.fusion.forward.candidateUnit, 'patch_policy');
+  assert.equal(candidate.bes.fusion.backward.verifierUnit, 'test_eval');
+  assert.equal(candidate.bes.fusion.evidenceOnly, true);
+  assert.equal(candidate.bes.fusion.promotionAuthority, false);
   assert.equal(candidate.bes.denseSubgoals.total, 1);
   assert.equal(candidate.bes.denseSubgoals.verifierUnit, 'test_eval');
+  assert.equal(candidate.bes.denseSubgoals.contract.lane, 'code');
+  assert.equal(candidate.bes.denseSubgoals.contract.verifierUnit, 'test_eval');
   assert.deepEqual(candidate.bes.denseSubgoals.satisfiedSubgoalIds, ['code-tests']);
   assert.deepEqual(candidate.bes.denseSubgoals.verifierUnits, [
     {
@@ -256,8 +262,11 @@ test('attaches lane-specific dense verifier units and trajectory provenance', as
   ]);
   assert.equal(candidate.bes.trajectoryOperators[0].operator, 'crossover');
   assert.equal(candidate.bes.trajectoryOperators[0].source, 'candidate.trajectory');
+  assert.equal(candidate.bes.trajectoryOperators[0].operatorFamily, 'recombination');
+  assert.equal(candidate.bes.trajectoryOperators[0].compatibleFamily, 'code');
   assert.deepEqual(candidate.bes.trajectoryOperators[0].parents, ['seed_a', 'seed_b']);
   assert.equal(candidate.evidence.sources.includes('trajectory_operator'), true);
+  assert.ok(candidate.promotion.blockedReasons.includes('missing_external_policy_evidence'));
 });
 
 test('bridges champion archive records to frontier evidence without promotion authority', async () => {
@@ -287,6 +296,34 @@ test('bridges champion archive records to frontier evidence without promotion au
   assert.deepEqual(bridge.championIds, ['champion_candidate']);
   assert.deepEqual(bridge.frontierRecordIds, ['frontier_1']);
   assert.deepEqual(bridge.compatibleFamilies, ['harness-routing']);
+  assert.equal(bridge.evidenceHook, 'champion_archive_frontier');
+  assert.deepEqual(result.candidates[0].evidence.summary.championArchiveIds, ['champion_candidate']);
+  assert.deepEqual(result.candidates[0].evidence.summary.frontierRecordIds, ['frontier_1']);
+  assert.ok(result.candidates[0].promotion.blockedReasons.includes('missing_external_policy_evidence'));
+});
+
+test('external policy evidence is recorded but does not grant BES lane apply authority', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'harness',
+    taskId: 'task-policy-evidence',
+    candidates: [
+      {
+        candidateId: 'candidate_policy_reviewed',
+        externalPolicyEvidence: {
+          policyDecisionId: 'policy-review-1',
+          reviewer: 'trust-kernel',
+          verdict: 'eligible_for_review',
+        },
+      },
+    ],
+    evaluator: () => ({ score: 0.95, reasons: ['policy evidence attached'] }),
+  });
+
+  const candidate = result.candidates[0];
+  assert.equal(candidate.evidence.sources.includes('external_policy_evidence'), true);
+  assert.equal(candidate.evidence.summary.externalPolicyEvidenceId, 'policy-review-1');
+  assert.equal(candidate.promotion.allowed, false);
+  assert.deepEqual(candidate.promotion.blockedReasons, ['evidence_only_lane']);
 });
 
 test('emits a blocked BES lane event when runtime execution fails', async () => {

@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const SAFE_RUN_ID = /^[A-Za-z0-9_-]+$/;
@@ -25,6 +25,52 @@ function assertInsideRoot(root, target) {
     throw new Error(`Harness run path escapes workspace: ${target}`);
   }
   return target;
+}
+
+async function existingPathInfo(filePath) {
+  try {
+    return await lstat(filePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function assertNoSymlinkAncestors({ root, target }) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedTarget = path.resolve(target);
+  assertInsideRoot(resolvedRoot, resolvedTarget);
+  const relative = path.relative(resolvedRoot, resolvedTarget);
+  if (!relative) return;
+  const parts = relative.split(path.sep).filter(Boolean);
+  let cursor = resolvedRoot;
+  for (const part of parts) {
+    cursor = path.join(cursor, part);
+    const info = await existingPathInfo(cursor);
+    if (!info) return;
+    if (info.isSymbolicLink()) {
+      throw new Error(`Harness run path uses symlink or junction: ${cursor}`);
+    }
+  }
+}
+
+async function assertRealPathInsideRoot({ root, target }) {
+  const rootReal = await realpath(root);
+  const targetReal = await realpath(target);
+  assertInsideRoot(rootReal, targetReal);
+}
+
+async function prepareSafeDirectory({ root, directory }) {
+  await assertNoSymlinkAncestors({ root, target: directory });
+  await mkdir(directory, { recursive: true });
+  await assertNoSymlinkAncestors({ root, target: directory });
+  await assertRealPathInsideRoot({ root, target: directory });
+}
+
+async function prepareSafeWriteTarget({ root, target }) {
+  const parent = path.dirname(target);
+  await prepareSafeDirectory({ root, directory: parent });
+  await assertNoSymlinkAncestors({ root, target });
 }
 
 function jsonContent(value) {
@@ -81,10 +127,11 @@ export async function createHarnessRun({
   );
 
   if (await pathExists(runDir)) {
+    await assertNoSymlinkAncestors({ root: resolvedWorkspaceRoot, target: runDir });
     throw new Error(`Harness run already exists: ${safeRunId}`);
   }
 
-  await mkdir(runDir, { recursive: true });
+  await prepareSafeDirectory({ root: resolvedWorkspaceRoot, directory: runDir });
 
   const files = {
     candidate: path.join(runDir, 'candidate.json'),
@@ -104,6 +151,7 @@ export async function createHarnessRun({
 
   for (const filePath of Object.values(files)) {
     assertInsideRoot(resolvedWorkspaceRoot, filePath);
+    await prepareSafeWriteTarget({ root: resolvedWorkspaceRoot, target: filePath });
   }
 
   await writeFile(files.candidate, jsonContent(normalizeObject(candidate)), 'utf8');

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
@@ -9,7 +12,11 @@ import {
   createDelegatedCapabilityToken,
   verifyDelegatedCapabilityToken,
 } from '../src/harness-sidecar/interop/delegatedCapabilityTokens.js';
-import { A2AEndpointRegistry } from '../src/harness-sidecar/interop/a2aEndpointRegistry.js';
+import { createJsonFileA2ADurableStore } from '../src/harness-sidecar/interop/a2aDurableStore.js';
+import {
+  A2AEndpointRegistry,
+  buildA2ANegotiationResponseEnvelope,
+} from '../src/harness-sidecar/interop/a2aEndpointRegistry.js';
 import { ExternalAgentGateway } from '../src/harness-sidecar/interop/externalAgentGateway.js';
 
 test('gateway durably records outbound A2A work and retries it with stable correlation metadata', async () => {
@@ -286,6 +293,109 @@ test('gateway can hydrate and save durable A2A queues through an injected store'
   assert.equal(persisted.outbox[0].status, 'dispatched');
 });
 
+test('json-file durable store restores restart-persistent A2A queues without leaking secrets', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'helios-a2a-queue-'));
+  const storePath = join(root, 'a2a-durable-state.json');
+  try {
+    const durableStore = createJsonFileA2ADurableStore({ path: storePath });
+    const firstGateway = new ExternalAgentGateway({
+      now: () => 5_500,
+      durableStore,
+      agents: [{
+        id: 'agent.file-store',
+        name: 'File Store Agent',
+        protocol: 'a2a',
+        endpoint: {
+          url: 'https://file-store.example.test/a2a',
+          headers: { Authorization: 'Bearer should-not-persist' },
+        },
+        capabilities: ['repo.read'],
+      }],
+    });
+    const queued = firstGateway.enqueueTask({
+      agentId: 'agent.file-store',
+      task: {
+        id: 'task-file-store',
+        requiredCapabilities: ['repo.read'],
+        prompt: 'Read with token=ghp_should_not_persist',
+        context: { 'repo.read': { note: 'secret=plain-secret' } },
+      },
+    });
+
+    assert.equal(existsSync(storePath), true);
+    const restoredGateway = new ExternalAgentGateway({
+      durableStore: createJsonFileA2ADurableStore({ path: storePath }),
+      dispatch: async () => ({ ok: true }),
+    });
+
+    assert.equal(restoredGateway.getOutboxRecord(queued.messageId).taskId, 'task-file-store');
+    assert.equal(
+      JSON.stringify(restoredGateway.snapshotDurableState()).includes('should-not-persist'),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(restoredGateway.snapshotDurableState()).includes('plain-secret'),
+      false,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('json-file durable store can be constrained to an allowed root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'helios-a2a-root-'));
+  try {
+    const safeStore = createJsonFileA2ADurableStore({
+      root,
+      path: join(root, 'queues', 'a2a.json'),
+    });
+    safeStore.save({ outbox: [{ message: 'token=secret-value' }] });
+    assert.deepEqual(safeStore.load(), { outbox: [{ message: 'token=[redacted]' }] });
+
+    assert.throws(
+      () => createJsonFileA2ADurableStore({
+        root,
+        path: join(root, '..', 'outside-a2a.json'),
+      }),
+      /escapes allowed root/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('json-file durable store rejects symlinked parent directories under the allowed root', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'helios-a2a-root-'));
+  const outside = mkdtempSync(join(tmpdir(), 'helios-a2a-outside-'));
+  const linkedParent = join(root, 'queues');
+  try {
+    try {
+      symlinkSync(outside, linkedParent, 'junction');
+    } catch (error) {
+      t.skip(`symlink creation unavailable: ${error.code || error.message}`);
+      return;
+    }
+
+    const store = createJsonFileA2ADurableStore({
+      root,
+      path: join(linkedParent, 'a2a.json'),
+    });
+    assert.throws(
+      () => store.save({ outbox: [{ message: 'must not escape root' }] }),
+      /symlink or junction/,
+    );
+
+    writeFileSync(join(outside, 'a2a.json'), '{}\n', 'utf8');
+    assert.throws(
+      () => store.load(),
+      /symlink or junction/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test('gateway uses injected issuer secret stores for restart-stable delegated tokens', () => {
   let secret = 'stable-test-issuer-secret';
   const issuerSecretStore = {
@@ -486,6 +596,65 @@ test('stream envelopes preserve ordered chunks, progress, cancellation, and corr
   assert.equal(cancelled.message.cancellation.reason, 'user_requested');
 });
 
+test('gateway ingests stream envelopes into restart-persistent ordered stream state', () => {
+  let persisted = null;
+  const durableStore = {
+    load: () => persisted,
+    save: (state) => {
+      persisted = state;
+    },
+  };
+  const gateway = new ExternalAgentGateway({
+    durableStore,
+    now: () => 7_500,
+    agents: [{
+      id: 'agent.stream-peer',
+      name: 'Stream Peer',
+      protocol: 'a2a',
+      endpoint: { url: 'https://stream-peer.example.test/a2a' },
+      capabilities: ['repo.read'],
+    }],
+  });
+
+  gateway.receiveStreamEnvelope(buildA2AStreamEnvelope({
+    streamId: 'stream-state',
+    sequence: 2,
+    correlationId: 'corr-stream-state',
+    from: 'agent.stream-peer',
+    to: 'helios.sidecar',
+    event: 'chunk',
+    payload: { text: 'second' },
+  }));
+  gateway.receiveStreamEnvelope(buildA2AStreamEnvelope({
+    streamId: 'stream-state',
+    sequence: 1,
+    correlationId: 'corr-stream-state',
+    from: 'agent.stream-peer',
+    to: 'helios.sidecar',
+    event: 'progress',
+    payload: { text: 'first' },
+    progress: { percent: 50, detail: 'halfway' },
+  }));
+  gateway.receiveStreamEnvelope(buildA2AStreamEnvelope({
+    streamId: 'stream-state',
+    sequence: 3,
+    correlationId: 'corr-stream-state',
+    from: 'agent.stream-peer',
+    to: 'helios.sidecar',
+    event: 'complete',
+    done: true,
+  }));
+
+  const restoredGateway = new ExternalAgentGateway({ durableStore });
+  const stream = restoredGateway.getStreamState('stream-state');
+
+  assert.equal(stream.status, 'complete');
+  assert.equal(stream.correlationId, 'corr-stream-state');
+  assert.deepEqual(stream.chunks.map((chunk) => chunk.sequence), [1, 2, 3]);
+  assert.equal(stream.progress.percent, 50);
+  assert.equal(stream.chunks[0].payload.text, 'first');
+});
+
 test('swarm A2A envelopes preserve multi-hop durable lineage alongside scoped context lineage', () => {
   const envelope = buildSwarmA2AEnvelope({
     from: 'agent.parent',
@@ -614,6 +783,49 @@ test('A2A endpoint registry persists external peer endpoints without live socket
   assert.equal(persisted.endpoints[0].issuerKeyRef, 'issuer:endpoint');
 });
 
+test('A2A endpoint descriptors expose redacted long-lived network contracts', () => {
+  const registry = new A2AEndpointRegistry({
+    endpoints: [{
+      id: 'agent.contract',
+      name: 'Contract Agent',
+      protocol: 'a2a',
+      endpoint: {
+        url: 'https://contract.example.test/a2a',
+        headers: { Authorization: 'Bearer should-redact' },
+      },
+      capabilities: ['repo.read'],
+      trustLevel: 'verified',
+      contract: {
+        version: '2026-06-a2a',
+        transports: ['https+sse', 'websocket'],
+        queues: {
+          inbox: { durable: true, ack: 'explicit' },
+          outbox: { durable: true, retry: 'at-least-once' },
+        },
+        auth: {
+          tokenIssuerKeyRef: 'vault:helios/a2a/issuer',
+          clientSecret: 'must-redact',
+        },
+        streaming: {
+          progress: true,
+          cancellation: true,
+          correlation: true,
+        },
+        heartbeat: { intervalMs: 30_000, timeoutMs: 90_000 },
+      },
+    }],
+  });
+
+  const descriptor = registry.describeEndpoint('agent.contract');
+
+  assert.equal(descriptor.contract.version, '2026-06-a2a');
+  assert.deepEqual(descriptor.contract.transports, ['https+sse', 'websocket']);
+  assert.equal(descriptor.contract.queues.inbox.durable, true);
+  assert.equal(descriptor.contract.auth.tokenIssuerKeyRef, 'vault:helios/a2a/issuer');
+  assert.equal(descriptor.contract.auth.clientSecret, '[redacted]');
+  assert.equal(descriptor.contract.streaming.cancellation, true);
+});
+
 test('A2A negotiation envelopes preserve multi-hop lineage while denying authority', () => {
   const registry = new A2AEndpointRegistry({
     now: () => 7_000,
@@ -672,4 +884,54 @@ test('A2A negotiation envelopes preserve multi-hop lineage while denying authori
   assert.equal(JSON.stringify(envelope).includes('sk-secret'), false);
   assert.equal(JSON.stringify(envelope).includes('hunter2'), false);
   assert.equal(JSON.stringify(envelope).includes('plainsecret'), false);
+});
+
+test('A2A negotiation responses preserve subagent lineage and keep external claims unverified', () => {
+  const response = buildA2ANegotiationResponseEnvelope({
+    from: 'agent.child',
+    to: 'agent.parent',
+    accepted: true,
+    acceptedCapabilities: ['repo.read'],
+    terms: {
+      maxTokens: 8_000,
+      streamId: 'stream-negotiation',
+      claimedTrustLevel: 'internal',
+      promotionalClaim: 'best available patch applier',
+      apiKey: 'sk-should-redact',
+    },
+    requestEnvelope: {
+      durable: {
+        messageId: 'neg-parent',
+        rootMessageId: 'neg-root',
+        correlationId: 'corr-neg-response',
+        lineage: [
+          { messageId: 'neg-root', from: 'helios.sidecar', to: 'agent.parent' },
+          { messageId: 'neg-parent', from: 'agent.parent', to: 'agent.child' },
+        ],
+      },
+      message: {
+        task: {
+          id: 'task-neg-response',
+        },
+      },
+    },
+  });
+
+  assert.equal(response.message.kind, 'delegation_negotiation_response');
+  assert.equal(response.message.accepted, true);
+  assert.deepEqual(response.message.acceptedCapabilities, ['repo.read']);
+  assert.equal(response.durable.parentMessageId, 'neg-parent');
+  assert.equal(response.durable.rootMessageId, 'neg-root');
+  assert.deepEqual(response.durable.lineage.map((hop) => hop.messageId), [
+    'neg-root',
+    'neg-parent',
+    response.durable.messageId,
+  ]);
+  assert.equal(response.message.trust.external, true);
+  assert.equal(response.message.trust.verified, false);
+  assert.equal(response.message.trust.claimedTrustLevel, 'internal');
+  assert.equal(response.message.authority.canPromote, false);
+  assert.equal(response.message.authority.canMutateWorkspace, false);
+  assert.equal(response.message.terms.promotionalClaim, undefined);
+  assert.equal(JSON.stringify(response).includes('sk-should-redact'), false);
 });

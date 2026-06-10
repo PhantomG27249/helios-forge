@@ -1,5 +1,6 @@
 import { decideAutoApproval } from './autoApprovalPolicy.js';
 import { updateHarnessFrontier } from './harnessFrontier.js';
+import { summarizeLongitudinalFrontier } from './longitudinalFrontier.js';
 
 const AUTONOMY_LEVELS = Object.freeze({
   0: {
@@ -220,6 +221,7 @@ function summarizeAudit(auditEvents = []) {
 export function summarizeGovernanceStatus({
   replayJobs = [],
   frontier = [],
+  longitudinalFrontier = null,
   rollbackDrills = [],
   improvementAccounting = {},
   autonomyLevel = 0,
@@ -236,6 +238,7 @@ export function summarizeGovernanceStatus({
         : roundMoney(improvementAccounting.remainingUsd),
       blockedJobCount: Number(improvementAccounting.blockedJobCount || 0),
     },
+    longitudinalFrontier: summarizeLongitudinalFrontier(longitudinalFrontier || {}),
     autonomy: normalizeAutonomyLevel(autonomyLevel),
     audit: summarizeAudit(auditEvents),
   };

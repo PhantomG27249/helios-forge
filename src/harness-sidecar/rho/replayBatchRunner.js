@@ -72,18 +72,47 @@ function summarizeValidation(rollouts) {
   };
 }
 
+function summarizeMetrics(rollouts) {
+  const totals = new Map();
+  const counts = new Map();
+  for (const rollout of rollouts) {
+    for (const [key, value] of Object.entries(rollout?.metrics ?? {})) {
+      const number = Number(value);
+      if (Number.isFinite(number)) {
+        totals.set(key, (totals.get(key) ?? 0) + number);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+  }
+  return Object.fromEntries(
+    [...totals.entries()]
+      .map(([key, total]) => [key, Number((total / counts.get(key)).toFixed(12))])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
 async function runVariant({ item, itemIndex, groupSize, variant, runner, heldoutVariants, candidate }) {
   const rollouts = [];
   for (const heldoutVariant of heldoutVariants) {
     for (let rolloutIndex = 0; rolloutIndex < groupSize; rolloutIndex += 1) {
-      rollouts.push(await runner({
+      const rollout = await runner({
         item,
         itemIndex,
         rolloutIndex,
         variant,
         heldoutVariant,
         candidate,
-      }));
+      });
+      rollouts.push({
+        ...rollout,
+        rhoReplay: {
+          ...(rollout?.rhoReplay ?? {}),
+          variant,
+          rolloutIndex,
+          heldoutVariantId: String(heldoutVariant.variantId ?? heldoutVariant.id ?? heldoutVariant),
+          candidateId: candidate?.candidateId,
+        },
+      });
     }
   }
 
@@ -96,6 +125,7 @@ async function runVariant({ item, itemIndex, groupSize, variant, runner, heldout
     rollouts,
     validation: summarizeValidation(rollouts),
     consistency: scoreSelfConsistency({ rollouts }),
+    metrics: summarizeMetrics(rollouts),
   };
 }
 
@@ -120,12 +150,15 @@ function replayAggregate(summary = {}) {
   };
 }
 
-function aggregatePromotionEvidence(entry) {
+function aggregatePromotionEvidence(entry, blockingEvidence = []) {
   const evidence = [];
-  if (entry.caseCount > 0 && entry.preferredCount > entry.caseCount / 2) {
+  if (blockingEvidence.length === 0) {
+    evidence.push('aggregate_no_blockers');
+  }
+  if (blockingEvidence.length === 0 && entry.caseCount > 0 && entry.preferredCount > entry.caseCount / 2) {
     evidence.push('candidate_family_majority_preferred');
   }
-  if (entry.scoreDelta > 0) {
+  if (blockingEvidence.length === 0 && entry.scoreDelta > 0) {
     evidence.push('positive_self_preference_delta');
   }
   if (entry.rerollCount >= Math.max(2, entry.caseCount * 2)) {
@@ -194,15 +227,18 @@ function summarizeFamily(preferences) {
       const caseWinRate = entry.caseCount > 0
         ? Number((entry.preferredCount / entry.caseCount).toFixed(12))
         : 0;
+      const hasBlockingEvidence = blockingEvidence.length > 0;
       return {
         ...entry,
         preferred: entry.preferredCount > 0 ? 'candidate' : 'baseline',
         candidateScore: Number(entry.candidateScore.toFixed(12)),
         scoreDelta: Number(entry.scoreDelta.toFixed(12)),
         blockingEvidence: [...new Set(blockingEvidence)].sort(),
-        promotionEvidence: aggregatePromotionEvidence(entry),
+        promotionEvidence: aggregatePromotionEvidence(entry, [...new Set(blockingEvidence)]),
         promotionAllowed: false,
         authority: 'evidence_only',
+        advisoryOnly: true,
+        hasBlockingEvidence,
         aggregate: {
           rerollCount: entry.rerollCount,
           heldoutVariantCount: entry.heldoutVariantIds.size,
@@ -215,7 +251,9 @@ function summarizeFamily(preferences) {
       };
     })
     .sort((left, right) => (
-      right.scoreDelta - left.scoreDelta
+      Number(left.hasBlockingEvidence) - Number(right.hasBlockingEvidence)
+        || right.aggregate.caseWinRate - left.aggregate.caseWinRate
+        || right.scoreDelta - left.scoreDelta
         || right.candidateScore - left.candidateScore
         || left.blockingEvidence.length - right.blockingEvidence.length
         || left.candidateId.localeCompare(right.candidateId)
@@ -233,6 +271,7 @@ function summarizeFamily(preferences) {
       promotionEvidence: entry.promotionEvidence,
       promotionAllowed: entry.promotionAllowed,
       authority: entry.authority,
+      advisoryOnly: entry.advisoryOnly,
       aggregate: entry.aggregate,
     })),
     promotionAllowed: false,

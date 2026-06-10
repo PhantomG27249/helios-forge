@@ -178,3 +178,47 @@ test('harness status snapshot includes governance dashboard summaries', () => {
   assert.equal(snapshot.governance.audit.escalationCount, 1);
   assert.equal(snapshot.governance.audit.overrideCount, 1);
 });
+
+test('governance status exposes longitudinal frontier dashboard rows without promotion authority', () => {
+  const summary = summarizeGovernanceStatus({
+    longitudinalFrontier: {
+      suites: [{ suiteId: 'stable-holdout', cases: [{ caseId: 'case-a' }] }],
+      cycles: [
+        {
+          cycleId: 'cycle-001',
+          suiteId: 'stable-holdout',
+          recordedAt: '2026-06-09T20:00:00.000Z',
+          accounting: { spentUsd: 0.4, remainingUsd: 1.6, entryCount: 1, caseCount: 1 },
+          entries: [
+            {
+              candidateId: 'candidate-a',
+              suiteId: 'stable-holdout',
+              cycleId: 'cycle-001',
+              recordedAt: '2026-06-09T20:00:00.000Z',
+              canPromote: true,
+              metrics: {
+                quality: 0.7,
+                safety: 0.9,
+                reliability: 0.8,
+                cost: 0.3,
+                latency: 11,
+                maintainability: 0.7,
+                visualConfidence: 0.6,
+                memoryHealth: 0.8,
+                trustRisk: 0.2,
+              },
+            },
+          ],
+        },
+      ],
+      frontier: [{ candidateId: 'candidate-a', metrics: { quality: 0.7, safety: 0.9, cost: 0.3, latency: 11 } }],
+    },
+  });
+
+  assert.equal(summary.longitudinalFrontier.cycleCount, 1);
+  assert.equal(summary.longitudinalFrontier.dashboardRows.length, 1);
+  assert.equal(summary.longitudinalFrontier.dashboardRows[0].suiteId, 'stable-holdout');
+  assert.equal(summary.longitudinalFrontier.dashboardRows[0].classification, 'new');
+  assert.equal(summary.longitudinalFrontier.dashboardRows[0].canPromote, false);
+  assert.equal(summary.longitudinalFrontier.accounting.spentUsd, 0.4);
+});

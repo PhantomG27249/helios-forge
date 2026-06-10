@@ -14,6 +14,18 @@ test('returns deterministic BES lane contracts for memory evolution', () => {
   assert.equal(contract.verifierUnit, 'memory_eval');
 });
 
+test('lane contracts expose fusion, dense verifier, and champion evidence metadata', () => {
+  const contract = getBesLaneContract('harness');
+
+  assert.equal(contract.fusion.evidenceOnly, true);
+  assert.equal(contract.fusion.promotionAuthority, false);
+  assert.equal(contract.fusion.forward.candidateUnit, 'harness_configuration');
+  assert.equal(contract.fusion.backward.verifierUnit, 'harness_experiment_eval');
+  assert.equal(contract.denseVerifierContract.lane, 'harness');
+  assert.equal(contract.denseVerifierContract.verifierUnit, 'harness_experiment_eval');
+  assert.deepEqual(contract.championEvidenceHooks, ['champion_archive', 'frontier']);
+});
+
 test('returns BES lane contracts for policy sublanes', () => {
   const context = getBesLaneContract('context');
   const mcpTrust = getBesLaneContract('mcp_trust');
@@ -31,10 +43,23 @@ test('applies deletion trajectory operator to remove a step', () => {
     operator: 'deletion',
     trajectory: ['read', 'irrelevant', 'patch'],
     targetIndex: 1,
+    lane: 'code',
+    candidateId: 'code_candidate_1',
+    compatibleFamily: 'code-patch',
   });
 
   assert.deepEqual(result.trajectory, ['read', 'patch']);
   assert.equal(result.operator, 'deletion');
+  assert.deepEqual(result.provenance, {
+    lane: 'code',
+    candidateId: 'code_candidate_1',
+    operator: 'deletion',
+    operatorFamily: 'mutation',
+    compatibleFamily: 'code-patch',
+    inputLength: 3,
+    outputLength: 2,
+    promotionAuthority: false,
+  });
 });
 
 test('scores dense subgoals from matching evidence strings', () => {

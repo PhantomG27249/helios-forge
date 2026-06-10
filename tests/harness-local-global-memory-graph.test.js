@@ -177,6 +177,72 @@ test('memory extraction society guards role outputs with passage provenance', ()
   assert.deepEqual(result.roleTrace, ['evaluator', 'fact_extractor', 'passage_collector']);
 });
 
+test('memory extraction society normalizes the full advisory role pipeline behind policy gates', () => {
+  const result = runMemoryExtractionSociety({
+    observations: [{ text: 'MemGraphRAG stores provenance-backed facts.', source: 'trace-full-1' }],
+    modelAssistance: { enabled: true },
+    roleHandlers: {
+      passage_collector: () => [{ passageId: 'trace-full-1', text: 'MemGraphRAG stores provenance-backed facts.' }],
+      schema_proposer: () => [{
+        headType: 'system',
+        relation: 'stores',
+        tailType: 'memory_feature',
+        frequency: 2,
+      }],
+      fact_extractor: () => [{
+        subject: 'MemGraphRAG',
+        subjectType: 'system',
+        relation: 'stores',
+        object: 'provenance-backed facts',
+        objectType: 'memory_feature',
+        passageIds: ['trace-full-1'],
+        confidence: 0.94,
+      }],
+      contradiction_critic: () => [{ type: 'none_found', severity: 'info' }],
+      merge_planner: ({ facts }) => [
+        { action: 'merge_fact', factId: facts[0].id, reason: 'supported_fact' },
+        { action: 'merge_fact', factId: 'fact_missing', reason: 'unsupported_advisory_claim' },
+      ],
+      graph_constructor: ({ facts }) => [{
+        nodes: [{ id: `node_${facts[0].subject}`, kind: 'fact_subject' }],
+        edges: [{ from: `node_${facts[0].subject}`, to: 'node_memory_feature', type: facts[0].relation }],
+      }],
+      retriever: () => [{
+        query: 'MemGraphRAG provenance facts',
+        provenanceIds: ['trace-full-1', 'missing-trace'],
+      }],
+      evaluator: ({ facts, rejectedFacts }) => [{
+        metric: 'supportedFactCount',
+        value: facts.length,
+        rejected: rejectedFacts.length,
+      }],
+    },
+  });
+
+  assert.deepEqual(result.roleTrace, [
+    'contradiction_critic',
+    'evaluator',
+    'fact_extractor',
+    'graph_constructor',
+    'merge_planner',
+    'passage_collector',
+    'retriever',
+    'schema_proposer',
+  ]);
+  assert.equal(result.roleAudit.every((entry) => entry.authority === 'advisory'), true);
+  assert.equal(result.mergePlan.actions[0].policyGate.status, 'evidence_backed');
+  assert.equal(result.mergePlan.actions[0].policyGate.durableWriteAllowed, false);
+  assert.equal(result.mergePlan.actions[1].policyGate.status, 'needs_review');
+  assert.equal(result.mergePlan.actions[1].policyGate.reasons.includes('advisory_target_not_supported'), true);
+  assert.deepEqual(result.graphPlan.provenanceIds, ['trace-full-1']);
+  assert.equal(result.graphPlan.advisoryOnly, true);
+  assert.deepEqual(result.retrievalPlan.items[0].provenanceIds, ['trace-full-1']);
+  assert.deepEqual(result.retrievalPlan.items[0].missingProvenanceIds, ['missing-trace']);
+  assert.equal(result.evaluation.metrics.supportedFactCount, 1);
+  assert.equal(result.evaluation.policyGate.durableWriteAllowed, false);
+  assert.equal(result.evaluation.signals[0].metric, 'supportedFactCount');
+});
+
 test('memory graph runtime persists promoted global layers and constructed graph', async () => {
   await makeTempWorkspace(async (workspaceRoot) => {
     const runtime = createMemoryGraphRuntime({ workspaceRoot });

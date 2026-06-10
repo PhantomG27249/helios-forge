@@ -79,6 +79,52 @@ const LANE_CONTRACTS = Object.freeze({
   }),
 });
 
+const CHAMPION_EVIDENCE_HOOKS = Object.freeze(['champion_archive', 'frontier']);
+const LANE_FUSION_KIND = Object.freeze({
+  code: 'patch_test_fusion',
+  verifier: 'verifier_case_fusion',
+  memory: 'graph_retrieval_fusion',
+  research: 'claim_evidence_fusion',
+  skill: 'skill_example_fusion',
+  swarm: 'role_handoff_fusion',
+  context: 'retrieval_context_fusion',
+  compaction: 'continuation_retention_fusion',
+  tool: 'tool_recovery_fusion',
+  budget: 'budget_allocator_fusion',
+  visual: 'artifact_verdict_fusion',
+  mcp_trust: 'capability_trust_fusion',
+  harness: 'experiment_frontier_fusion',
+});
+
+function buildFusionMetadata(contract) {
+  return {
+    kind: LANE_FUSION_KIND[contract.lane] || 'lane_evidence_fusion',
+    evidenceOnly: true,
+    promotionAuthority: false,
+    forward: {
+      lane: contract.lane,
+      candidateUnit: contract.candidateUnit,
+      role: 'generate_candidate_evidence',
+    },
+    backward: {
+      lane: contract.lane,
+      verifierUnit: contract.verifierUnit,
+      role: 'decompose_and_verify_subgoals',
+    },
+  };
+}
+
+function buildDenseVerifierContract(contract) {
+  return {
+    lane: contract.lane,
+    verifierUnit: contract.verifierUnit,
+    feedbackUnit: `${contract.verifierUnit}_dense_feedback`,
+    contractKind: 'lane_dense_subgoal_verifier',
+    evidenceOnly: true,
+    promotionAuthority: false,
+  };
+}
+
 export function getBesLaneContract(lane) {
   const key = String(lane ?? '').trim().toLowerCase();
   const contract = LANE_CONTRACTS[key];
@@ -88,6 +134,9 @@ export function getBesLaneContract(lane) {
   return {
     ...contract,
     artifacts: [...contract.artifacts],
+    fusion: buildFusionMetadata(contract),
+    denseVerifierContract: buildDenseVerifierContract(contract),
+    championEvidenceHooks: [...CHAMPION_EVIDENCE_HOOKS],
   };
 }
 

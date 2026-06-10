@@ -4,7 +4,14 @@ function numericScore(value) {
 }
 
 function replayScore(summary = {}) {
-  return numericScore(summary.validation?.score) + numericScore(summary.consistency?.score);
+  const validationScore = numericScore(summary.validation?.score);
+  const consistencyScore = numericScore(summary.consistency?.score);
+  const validationPassRate = numericScore(summary.validation?.passRate);
+  const metrics = summary.metrics ?? summary.aggregate?.metrics ?? {};
+  const qualityScore = numericScore(metrics.quality) * 0.25;
+  const safetyScore = numericScore(metrics.safety) * 0.25;
+  const blockerPenalty = summary.validation?.passed === false || summary.consistency?.consistent === false ? 1 : 0;
+  return validationScore + consistencyScore + validationPassRate + qualityScore + safetyScore - blockerPenalty;
 }
 
 function preferenceReasons({ baseline = {}, candidate = {} }) {
@@ -41,5 +48,8 @@ export function judgeSelfPreference({ baseline = {}, candidate = {} } = {}) {
     baselineScore,
     candidateScore,
     reasons: preferenceReasons({ baseline, candidate }),
+    promotionAllowed: false,
+    authority: 'evidence_only',
+    advisoryOnly: true,
   };
 }

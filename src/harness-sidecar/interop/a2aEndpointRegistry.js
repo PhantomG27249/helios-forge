@@ -39,6 +39,46 @@ function sanitizeEndpoint(endpoint = {}) {
   ));
 }
 
+function isContractSecretKey(key) {
+  return /authorization|token|secret|password|passwd|api[_-]?key|credential|private/i.test(key)
+    && !/keyRef$/i.test(key);
+}
+
+function redactContractValue(value, parentKey = '') {
+  if (/keyRef$/i.test(parentKey)) return String(value || '').trim();
+  if (isContractSecretKey(parentKey)) return '[redacted]';
+  if (Array.isArray(value)) return value.map((item) => redactContractValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [
+        key,
+        redactContractValue(nestedValue, key),
+      ]),
+    );
+  }
+  return sanitizeExternalPayload(value);
+}
+
+function normalizeContract(contract = {}) {
+  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return {};
+  const normalized = redactContractValue({
+    version: String(contract.version || '0.1').trim(),
+    transports: normalizeList(contract.transports),
+    queues: contract.queues && typeof contract.queues === 'object' ? contract.queues : {},
+    auth: contract.auth && typeof contract.auth === 'object' ? contract.auth : {},
+    streaming: contract.streaming && typeof contract.streaming === 'object' ? contract.streaming : {},
+    heartbeat: contract.heartbeat && typeof contract.heartbeat === 'object' ? contract.heartbeat : {},
+    metadata: contract.metadata && typeof contract.metadata === 'object' ? contract.metadata : {},
+  });
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([, value]) => (
+      value !== undefined
+      && !(Array.isArray(value) && value.length === 0)
+      && !(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0)
+    )),
+  );
+}
+
 function normalizeEndpointRecord(record = {}) {
   const card = normalizeAgentCard({
     ...record,
@@ -56,6 +96,7 @@ function normalizeEndpointRecord(record = {}) {
     supportsStreaming: record.supportsStreaming !== false,
     restartPersistent: record.restartPersistent !== false,
     lineageRoot: record.lineageRoot ? String(record.lineageRoot).trim() : card.id,
+    contract: normalizeContract(record.contract || record.endpointContract),
     metadata: redactSecrets({
       ...(card.metadata || {}),
       ...(record.metadata || {}),
@@ -78,6 +119,7 @@ function endpointView(record) {
     supportsStreaming: record.supportsStreaming,
     restartPersistent: record.restartPersistent,
     available: record.available,
+    contract: record.contract,
     metadata: record.metadata,
   });
 }
@@ -99,6 +141,10 @@ function normalizeLineage(lineage = []) {
 
 function makeNegotiationId({ correlationId, sequence }) {
   return `neg_${String(correlationId || 'task').replace(/[^A-Za-z0-9_.:-]/g, '_')}_${sequence}`;
+}
+
+function makeNegotiationResponseId({ correlationId, parentMessageId }) {
+  return `neg_resp_${String(correlationId || parentMessageId || 'task').replace(/[^A-Za-z0-9_.:-]/g, '_')}`;
 }
 
 function scopedTask(task = {}, requestedCapabilities = []) {
@@ -140,6 +186,72 @@ function sanitizeExternalPayload(value) {
     );
   }
   return value;
+}
+
+function sanitizeNegotiationTerms(terms = {}) {
+  if (!terms || typeof terms !== 'object' || Array.isArray(terms)) return {};
+  return sanitizeExternalPayload(redactSecrets(Object.fromEntries(
+    Object.entries(terms)
+      .filter(([key]) => !/promotion|promotional|marketing|claim/i.test(key)),
+  )));
+}
+
+export function buildA2ANegotiationResponseEnvelope({
+  from,
+  to,
+  accepted = false,
+  acceptedCapabilities = [],
+  terms = {},
+  requestEnvelope = {},
+} = {}) {
+  const durable = requestEnvelope.durable || {};
+  const parentMessageId = String(durable.messageId || requestEnvelope.message?.messageId || '');
+  const correlationId = String(durable.correlationId || requestEnvelope.message?.correlationId || parentMessageId || 'negotiation');
+  const rootMessageId = String(durable.rootMessageId || parentMessageId || correlationId);
+  const messageId = makeNegotiationResponseId({ correlationId, parentMessageId });
+  const lineageHops = normalizeLineage(durable.lineage);
+  const currentHop = {
+    messageId,
+    parentMessageId,
+    rootMessageId,
+    from: String(from || ''),
+    to: String(to || requestEnvelope.from || ''),
+    taskId: requestEnvelope.message?.task?.id,
+    agentId: String(from || ''),
+    endpointId: String(from || ''),
+  };
+  const claimedTrustLevel = String(terms.claimedTrustLevel || 'public').trim().toLowerCase();
+
+  return redactSecrets({
+    protocol: 'a2a',
+    version: '0.1',
+    from: String(from || ''),
+    to: String(to || requestEnvelope.from || ''),
+    durable: {
+      direction: 'outbox',
+      messageId,
+      parentMessageId,
+      rootMessageId,
+      correlationId,
+      lineage: [...lineageHops, currentHop],
+    },
+    message: {
+      kind: 'delegation_negotiation_response',
+      accepted: Boolean(accepted),
+      acceptedCapabilities: normalizeList(acceptedCapabilities),
+      terms: sanitizeNegotiationTerms(terms),
+      trust: {
+        external: true,
+        verified: false,
+        claimedTrustLevel,
+      },
+      authority: {
+        canPromote: false,
+        canMutateWorkspace: false,
+        requiresVerifierEvidence: true,
+      },
+    },
+  });
 }
 
 export class A2AEndpointRegistry {
@@ -210,6 +322,10 @@ export class A2AEndpointRegistry {
     const endpoint = this.endpoints.get(String(agentId || ''));
     if (!endpoint) throw new Error(`Unknown A2A endpoint ${agentId || '(empty)'}`);
     return endpoint;
+  }
+
+  describeEndpoint(agentId) {
+    return endpointView(this.get(agentId));
   }
 
   buildNegotiationEnvelope({

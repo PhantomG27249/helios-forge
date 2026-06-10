@@ -143,6 +143,7 @@ function buildChampionFrontierBridge({ candidateId, lane, taskId, championArchiv
   return {
     evidenceOnly: true,
     promotionAuthority: false,
+    evidenceHook: 'champion_archive_frontier',
     lane,
     taskId: normalizeId(taskId, 'task'),
     candidateId,
@@ -157,7 +158,7 @@ function buildChampionFrontierBridge({ candidateId, lane, taskId, championArchiv
   };
 }
 
-function normalizeTrajectoryEntry({ candidate, trajectory, lineage }) {
+function normalizeTrajectoryEntry({ candidate, trajectory, lineage, lane }) {
   const candidateTrajectory = candidate.trajectoryOperator
     ?? candidate.trajectoryProvenance
     ?? candidate.trajectory;
@@ -178,6 +179,18 @@ function normalizeTrajectoryEntry({ candidate, trajectory, lineage }) {
       ?? lineage?.operator,
     'seed',
   ).toLowerCase();
+  const operatorFamily = ['crossover', 'recombination'].includes(operator) ? 'recombination' : 'mutation';
+  const compatibleFamilyValue = normalizeId(
+    sourceObject.compatibleFamily
+      ?? sourceObject.family
+      ?? candidate.compatibleFamily
+      ?? candidate.family
+      ?? candidate.metadata?.compatibleFamily
+      ?? candidate.metadata?.family
+      ?? lineage?.compatibleFamily
+      ?? lineage?.family,
+    candidate.lane ?? lane ?? 'lane',
+  ).toLowerCase();
   const parents = uniqueSorted([
     ...asArray(lineage?.parents),
     ...asArray(sourceObject.parents),
@@ -188,6 +201,8 @@ function normalizeTrajectoryEntry({ candidate, trajectory, lineage }) {
 
   return {
     operator,
+    operatorFamily,
+    compatibleFamily: compatibleFamilyValue,
     source,
     parents,
     ...(trajectoryValue !== undefined ? { trajectoryLength: asArray(trajectoryValue).length } : {}),
@@ -264,6 +279,7 @@ export async function runBesLaneRuntime({
   championArchive,
   frontier,
   verifierGenome,
+  externalPolicyEvidence,
   now = new Date().toISOString(),
 } = {}) {
   const contract = getBesLaneContract(lane);
@@ -297,6 +313,7 @@ export async function runBesLaneRuntime({
       evidence: collectEvidenceText({ candidate, hardCases: normalizedHardCases, domain }),
       lane: contract.lane,
       verifierUnit: contract.verifierUnit,
+      verifierContract: contract.denseVerifierContract,
     });
     const a2a = cloneJson(candidate.a2a ?? a2aEnvelope, null);
     const a2aMetadata = a2aContext(a2a);
@@ -311,16 +328,19 @@ export async function runBesLaneRuntime({
       operator: candidate.operator ?? candidate.lineage?.operator ?? 'seed',
       lane: contract.lane,
       localLineage: candidate.lineage ?? a2aMetadata?.lineage,
+      compatibleFamily: candidate.compatibleFamily ?? candidate.family ?? candidate.metadata?.compatibleFamily,
     });
     const trajectoryOperators = [
       normalizeTrajectoryEntry({
         candidate,
         trajectory,
         lineage,
+        lane: contract.lane,
       }),
     ];
     const candidateChampionArchive = candidate.championArchive ?? championArchive;
     const candidateFrontier = candidate.frontier ?? frontier;
+    const candidateExternalPolicyEvidence = candidate.externalPolicyEvidence ?? externalPolicyEvidence;
     const championFrontierBridge = buildChampionFrontierBridge({
       candidateId,
       lane: contract.lane,
@@ -339,6 +359,7 @@ export async function runBesLaneRuntime({
       championArchive: candidateChampionArchive,
       frontier: candidateFrontier,
       verifierGenome: candidate.verifierGenome ?? verifierGenome,
+      externalPolicyEvidence: candidateExternalPolicyEvidence,
       a2a,
       memoryGraph,
     });
@@ -347,6 +368,7 @@ export async function runBesLaneRuntime({
       evidence: evidenceSummary,
       rho,
       memoryGraph,
+      externalPolicyEvidence: candidateExternalPolicyEvidence,
     });
 
     const normalizedCandidate = {
@@ -358,6 +380,7 @@ export async function runBesLaneRuntime({
       lineage,
       bes: {
         goalTree: buildGoalTree({ lane: contract.lane, taskId, hardCases: normalizedHardCases }),
+        fusion: contract.fusion,
         denseSubgoals: denseSubgoalResult,
         trajectoryOperators,
         ...(isPresentObject(championFrontierBridge) ? { championFrontierBridge } : {}),
@@ -371,6 +394,7 @@ export async function runBesLaneRuntime({
       ...(a2a ? { a2a } : {}),
       ...(visualEvidence ? { visualEvidence } : {}),
       ...(memoryGraph ? { memoryGraph } : {}),
+      ...(candidateExternalPolicyEvidence ? { externalPolicyEvidence: candidateExternalPolicyEvidence } : {}),
       promotion,
       updatedAt: now,
     };

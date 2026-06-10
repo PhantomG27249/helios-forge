@@ -294,6 +294,19 @@ test('harness panel exposes verifier evolution operator visibility', async () =>
   assert.match(appJs, /visualVerifierArtifacts/);
 });
 
+test('harness panel exposes capability goal status rows', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-capability-goals"/);
+  assert.match(html, /id="harness-capability-goals-status"/);
+  assert.match(html, /id="harness-capability-goals-implemented"/);
+  assert.match(html, /id="harness-capability-goal-rows"/);
+  assert.match(appJs, /capabilityGoals/);
+  assert.match(appJs, /renderCapabilityGoalRows/);
+  assert.match(appJs, /harnessCapabilityGoalsOpen/);
+});
+
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 

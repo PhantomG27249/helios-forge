@@ -261,3 +261,64 @@ test('emits aggregate candidate-family preference evidence without promotion aut
   assert.equal(blocked.blockingEvidence.includes('aggregate_validation_failed'), true);
   assert.equal(blocked.promotionEvidence.includes('candidate_family_majority_preferred'), false);
 });
+
+test('ranks blocked noisy candidates below advisory candidates with clean aggregate evidence', async () => {
+  const result = await runRhoReplayBatch({
+    coreset: {
+      items: [
+        { taskId: 'case_a', heldoutVariants: [{ variantId: 'seed_1' }, { variantId: 'seed_2' }] },
+        { taskId: 'case_b', heldoutVariants: [{ variantId: 'seed_1' }, { variantId: 'seed_2' }] },
+      ],
+    },
+    groupSize: 2,
+    baselineRunner: async () => ({
+      status: 'completed',
+      compactHandoff: {
+        summary: 'baseline stable',
+        testsRun: ['npm test'],
+      },
+      verifierEvidence: [{ passed: true }],
+      metrics: { quality: 0.72, safety: 0.9 },
+    }),
+    candidateFamily: [
+      {
+        candidateId: 'cand_blocked_noisy',
+        runner: async ({ heldoutVariant, rolloutIndex }) => ({
+          status: rolloutIndex === 1 ? 'completed' : 'failed',
+          compactHandoff: {
+            summary: `noisy ${heldoutVariant.variantId} ${rolloutIndex}`,
+            testsRun: rolloutIndex === 1
+              ? ['npm test']
+              : [{ command: 'npm test', status: 'failed', passed: false }],
+          },
+          verifierEvidence: [{ passed: rolloutIndex === 1 }],
+          metrics: { quality: 0.99, safety: rolloutIndex === 1 ? 0.95 : 0.2 },
+        }),
+      },
+      {
+        candidateId: 'cand_clean',
+        runner: async ({ candidate, item }) => ({
+          status: 'completed',
+          compactHandoff: {
+            summary: `${candidate.candidateId} ${item.taskId} stable`,
+            testsRun: ['npm test'],
+          },
+          verifierEvidence: [{ passed: true }],
+          metrics: { quality: 0.82, safety: 0.94 },
+        }),
+      },
+    ],
+  });
+
+  const [winner, blocked] = result.familySummary.rankings;
+
+  assert.equal(result.familySummary.preferredCandidateId, 'cand_clean');
+  assert.equal(winner.candidateId, 'cand_clean');
+  assert.equal(winner.promotionEvidence.includes('aggregate_no_blockers'), true);
+  assert.equal(winner.promotionEvidence.includes('heldout_variant_coverage'), true);
+  assert.equal(winner.promotionAllowed, false);
+  assert.equal(blocked.candidateId, 'cand_blocked_noisy');
+  assert.equal(blocked.blockingEvidence.includes('aggregate_validation_failed'), true);
+  assert.equal(blocked.blockingEvidence.includes('aggregate_consistency_failed'), true);
+  assert.equal(blocked.promotionEvidence.includes('aggregate_no_blockers'), false);
+});

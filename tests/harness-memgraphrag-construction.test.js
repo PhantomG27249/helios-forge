@@ -167,6 +167,13 @@ test('conflict adjudication classifies and applies evidence-backed decisions saf
   });
   assert.equal(decision.action, 'discard');
   assert.deepEqual(decision.provenanceIds, ['passage_old', 'passage_new']);
+  assert.equal(decision.decisionId.startsWith('memory_conflict_decision_'), true);
+  assert.deepEqual(decision.policy, {
+    autoDiscardBelowConfidence: 0.7,
+    requirePassageSupport: false,
+  });
+  assert.equal(decision.evidenceSummary.requiredCount, 2);
+  assert.equal(decision.evidenceSummary.coveredCount, 2);
 
   applyConflictDecision({ layers, decision });
 

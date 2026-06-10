@@ -32,6 +32,8 @@ test('harness manager starts, reports, restarts, and stops the sidecar process',
     assert.equal(runningStatus.state, 'running');
     assert.equal(runningStatus.port, port);
     assert.equal(runningStatus.workspaceRoot, workspaceRoot);
+    assert.equal(runningStatus.capabilityGoals.canPromote, false);
+    assert.equal(runningStatus.capabilityGoals.totalCount > 0, true);
     assert.match(runningStatus.url, /^http:\/\/127\.0\.0\.1:/);
 
     const healthResponse = await fetch(`${runningStatus.url}/v1/health`);

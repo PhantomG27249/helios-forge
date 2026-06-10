@@ -335,3 +335,54 @@ test('uses verifier case embeddings when selecting DPP-like replay cases', () =>
   assert.deepEqual(coreset.items.map((item) => item.caseId), ['verifier-a', 'verifier-c']);
   assert.equal(coreset.items.every((item) => item.metadata.diversity.embeddingAvailable), true);
 });
+
+test('uses supplied embedding indexes and deterministic fallback embeddings for diverse replay selection', () => {
+  const traces = [
+    {
+      taskId: 'external-a',
+      status: 'failed',
+      failureModes: ['same'],
+      prompt: 'repair websocket reconnect loop',
+    },
+    {
+      taskId: 'external-a-copy',
+      status: 'failed',
+      failureModes: ['same'],
+      prompt: 'repair websocket reconnect retry path',
+    },
+    {
+      taskId: 'fallback-memory',
+      status: 'failed',
+      failureModes: ['same'],
+      prompt: 'rebuild memory graph retrieval facts',
+    },
+  ];
+
+  const first = buildRhoCoreset({
+    traces,
+    limit: 2,
+    embeddingIndex: {
+      'external-a': [1, 0, 0],
+      'external-a-copy': [0.99, 0.01, 0],
+    },
+    fallbackEmbeddingDimensions: 8,
+  });
+  const second = buildRhoCoreset({
+    traces: [...traces].reverse(),
+    limit: 2,
+    embeddingIndex: {
+      'external-a': [1, 0, 0],
+      'external-a-copy': [0.99, 0.01, 0],
+    },
+    fallbackEmbeddingDimensions: 8,
+  });
+
+  assert.deepEqual(first.items.map((item) => item.taskId), ['external-a', 'fallback-memory']);
+  assert.deepEqual(second.items.map((item) => item.taskId), ['external-a', 'fallback-memory']);
+  assert.deepEqual(
+    first.items.map((item) => item.metadata.diversity.embeddingSource),
+    ['provided', 'fallback'],
+  );
+  assert.equal(first.selection.strategy, 'embedding_dpp_like');
+  assert.equal(first.selection.fallbackEmbeddedCandidates, 1);
+});

@@ -1,4 +1,4 @@
-import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { runHarnessExperiment } from './harnessExperimentRunner.js';
@@ -95,6 +95,12 @@ function normalizeObject(value) {
   return value;
 }
 
+function normalizeArtifactContent(value) {
+  if (typeof value === 'string') return value;
+  if (value instanceof Uint8Array) return value;
+  return jsonContent(normalizeObject(value));
+}
+
 function candidateIdOf(candidate) {
   return assertSafeId(candidate?.candidateId, 'candidate id');
 }
@@ -102,6 +108,77 @@ function candidateIdOf(candidate) {
 async function writeJsonArtifact(filePath, value) {
   await writeFile(filePath, jsonContent(normalizeObject(value)), 'utf8');
   return filePath;
+}
+
+async function writeMaterializedArtifacts({
+  root,
+  variantDir,
+  artifactRootName,
+  artifacts = {},
+} = {}) {
+  const artifactRoot = assertInsideRoot(root, path.join(variantDir, artifactRootName));
+  await prepareSafeDirectory({ root, directory: artifactRoot });
+
+  const written = [];
+  for (const [relativePath, content] of Object.entries(artifacts || {})) {
+    const safeRelativePath = assertRelativeArtifactPath(relativePath);
+    const destination = assertInsideRoot(root, path.join(artifactRoot, safeRelativePath));
+    await prepareSafeWriteTarget({ root, target: destination });
+    await writeFile(destination, normalizeArtifactContent(content), 'utf8');
+    written.push({
+      path: path.relative(variantDir, destination).replaceAll(path.sep, '/'),
+    });
+  }
+  return written;
+}
+
+async function readJsonArtifact(filePath) {
+  return JSON.parse(await readFile(filePath, 'utf8'));
+}
+
+function excerpt(value, maxBytes) {
+  return String(value || '').slice(0, maxBytes);
+}
+
+async function readTextSummary({
+  workspaceRoot,
+  variantDir,
+  relativePath,
+  maxExcerptBytes,
+} = {}) {
+  const safeRelativePath = assertRelativeArtifactPath(relativePath);
+  const artifactPath = assertInsideRoot(variantDir, path.join(variantDir, safeRelativePath));
+  await assertNoSymlinkAncestors({ root: workspaceRoot, target: artifactPath });
+  const content = await readFile(artifactPath, 'utf8');
+  return {
+    path: safeRelativePath.replaceAll(path.sep, '/'),
+    excerpt: excerpt(content, maxExcerptBytes),
+  };
+}
+
+async function readMetricSummary(args) {
+  const summary = await readTextSummary(args);
+  try {
+    summary.json = JSON.parse(summary.excerpt);
+  } catch {
+    // Metrics may be line-oriented or partial text; keep the excerpt when JSON parsing is not possible.
+  }
+  return summary;
+}
+
+function variantDirectoryFromRef({ workspaceRoot, ref }) {
+  if (typeof ref === 'string') {
+    return assertInsideRoot(getHarnessVariantRoot(workspaceRoot), path.resolve(ref));
+  }
+  if (ref?.variantDir) {
+    return assertInsideRoot(getHarnessVariantRoot(workspaceRoot), path.resolve(ref.variantDir));
+  }
+  if (ref?.cycleId && ref?.variantId) {
+    const cycleId = assertSafeId(ref.cycleId, 'cycle id');
+    const variantId = assertSafeId(ref.variantId, 'variant id');
+    return path.join(getHarnessVariantRoot(workspaceRoot), cycleId, variantId);
+  }
+  throw new Error('variant ref must include variantDir or cycleId and variantId');
 }
 
 export function getHarnessVariantRoot(workspaceRoot) {
@@ -118,6 +195,9 @@ export async function createHarnessVariantWorkspace({
   config = {},
   traceManifest = {},
   metricManifest = {},
+  traceArtifacts = {},
+  metricArtifacts = {},
+  lineage = {},
 } = {}) {
   const resolvedWorkspaceRoot = assertWorkspaceRoot(workspaceRoot);
   const safeCycleId = assertSafeId(cycleId, 'cycle id');
@@ -156,6 +236,18 @@ export async function createHarnessVariantWorkspace({
   await writeJsonArtifact(files.config, config);
   await writeJsonArtifact(files.traceManifest, traceManifest);
   await writeJsonArtifact(files.metricManifest, metricManifest);
+  const traceFiles = await writeMaterializedArtifacts({
+    root: resolvedWorkspaceRoot,
+    variantDir,
+    artifactRootName: 'traces',
+    artifacts: traceArtifacts,
+  });
+  const metricFiles = await writeMaterializedArtifacts({
+    root: resolvedWorkspaceRoot,
+    variantDir,
+    artifactRootName: 'metrics',
+    artifacts: metricArtifacts,
+  });
 
   const manifest = {
     schemaVersion: 1,
@@ -165,6 +257,7 @@ export async function createHarnessVariantWorkspace({
       ...normalizeObject(candidate),
       candidateId: safeCandidateId,
     },
+    lineage: normalizeObject(lineage),
     safeApply: {
       evidenceOnly: true,
       authority: 'advisory',
@@ -174,8 +267,8 @@ export async function createHarnessVariantWorkspace({
     artifacts: {
       source: sourceArtifacts,
       config: { path: 'config.json' },
-      trace: { path: 'trace-manifest.json' },
-      metrics: { path: 'metric-manifest.json' },
+      trace: { path: 'trace-manifest.json', files: traceFiles },
+      metrics: { path: 'metric-manifest.json', files: metricFiles },
     },
   };
   await writeJsonArtifact(files.manifest, manifest);
@@ -187,6 +280,67 @@ export async function createHarnessVariantWorkspace({
     variantDir,
     files,
     manifest,
+  };
+}
+
+export async function readHarnessVariantProposerContext({
+  workspaceRoot,
+  variantRefs = [],
+  maxExcerptBytes = 2048,
+} = {}) {
+  const resolvedWorkspaceRoot = assertWorkspaceRoot(workspaceRoot);
+  const priorVariants = [];
+
+  for (const ref of variantRefs || []) {
+    const variantDir = variantDirectoryFromRef({ workspaceRoot: resolvedWorkspaceRoot, ref });
+    await assertNoSymlinkAncestors({ root: resolvedWorkspaceRoot, target: variantDir });
+    await assertRealPathInsideRoot({ root: resolvedWorkspaceRoot, target: variantDir });
+    const manifestPath = assertInsideRoot(variantDir, path.join(variantDir, 'manifest.json'));
+    const manifest = await readJsonArtifact(manifestPath);
+    const sourceArtifacts = Array.isArray(manifest?.artifacts?.source)
+      ? manifest.artifacts.source
+      : [];
+    const traceArtifacts = Array.isArray(manifest?.artifacts?.trace?.files)
+      ? manifest.artifacts.trace.files
+      : [];
+    const metricArtifacts = Array.isArray(manifest?.artifacts?.metrics?.files)
+      ? manifest.artifacts.metrics.files
+      : [];
+    const configPath = assertRelativeArtifactPath(manifest?.artifacts?.config?.path || 'config.json');
+    const configFile = assertInsideRoot(variantDir, path.join(variantDir, configPath));
+    await assertNoSymlinkAncestors({ root: resolvedWorkspaceRoot, target: configFile });
+
+    priorVariants.push({
+      schemaVersion: 1,
+      cycleId: manifest.cycleId,
+      variantId: manifest.variantId,
+      candidate: manifest.candidate || {},
+      lineage: normalizeObject(manifest.lineage),
+      config: await readJsonArtifact(configFile),
+      sourceSummaries: await Promise.all(sourceArtifacts.map((artifact) => readTextSummary({
+        workspaceRoot: resolvedWorkspaceRoot,
+        variantDir,
+        relativePath: artifact.path,
+        maxExcerptBytes,
+      }))),
+      traceSummaries: await Promise.all(traceArtifacts.map((artifact) => readTextSummary({
+        workspaceRoot: resolvedWorkspaceRoot,
+        variantDir,
+        relativePath: artifact.path,
+        maxExcerptBytes,
+      }))),
+      metricSummaries: await Promise.all(metricArtifacts.map((artifact) => readMetricSummary({
+        workspaceRoot: resolvedWorkspaceRoot,
+        variantDir,
+        relativePath: artifact.path,
+        maxExcerptBytes,
+      }))),
+    });
+  }
+
+  return {
+    schemaVersion: 1,
+    priorVariants,
   };
 }
 
@@ -225,11 +379,16 @@ export async function runHarnessVariantCycles({
   for (let cycleIndex = 0; cycleIndex < totalCycles; cycleIndex += 1) {
     const cycleId = `${safeCyclePrefix}_${cycleIndex}`;
     const previousCandidateIds = results.map((cycle) => cycle.candidate.candidateId);
+    const priorContext = await readHarnessVariantProposerContext({
+      workspaceRoot: resolvedWorkspaceRoot,
+      variantRefs: results.map((cycle) => cycle.variant),
+    });
     const proposal = await invokeProposer(propose, {
       cycleIndex,
       cycleId,
       target,
       traceSummary,
+      priorContext,
       previousMetrics,
       previousCandidateIds,
     });
@@ -251,6 +410,12 @@ export async function runHarnessVariantCycles({
       config: proposal.config || {},
       traceManifest: proposal.traceManifest || {},
       metricManifest: proposal.metricManifest || {},
+      traceArtifacts: proposal.traceArtifacts || {},
+      metricArtifacts: proposal.metricArtifacts || {},
+      lineage: {
+        ...normalizeObject(proposal.lineage),
+        previousCandidateIds,
+      },
     });
     const candidateMetrics = await invokeEvaluator(evaluate, {
       cycleIndex,

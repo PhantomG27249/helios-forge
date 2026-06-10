@@ -37,10 +37,21 @@ function factKey(fact = {}) {
   ].join('\0');
 }
 
+function factIdFor(fact = {}) {
+  const passagePart = normalizeList(fact.passageIds).map(normalizeToken).sort().join('_') || 'no_passage';
+  return [
+    'fact',
+    normalizeToken(fact.subject),
+    normalizeToken(fact.relation),
+    normalizeToken(fact.object),
+    passagePart,
+  ].join('_');
+}
+
 function normalizeFact(observation = {}) {
   const relation = observation.relation || observation.predicate;
   if (!observation.subject || !relation || !observation.object) return null;
-  return {
+  const fact = {
     subject: String(observation.subject),
     subjectType: observation.subjectType || observation.headType || 'entity',
     relation,
@@ -50,6 +61,10 @@ function normalizeFact(observation = {}) {
     passageIds: normalizeList(observation.passageIds || observation.passageId || observation.source).map(String).sort(),
     confidence: Number.isFinite(Number(observation.confidence)) ? Number(observation.confidence) : null,
     status: observation.status || 'local_pending',
+  };
+  return {
+    ...fact,
+    id: observation.id || factIdFor(fact),
   };
 }
 
@@ -78,11 +93,13 @@ function normalizePassage(passage = {}, index = 0) {
 
 function normalizeSchema(observation = {}) {
   const relation = observation.relation || observation.predicate;
-  if (!relation || !observation.subjectType || !observation.objectType) return null;
+  const headType = observation.subjectType || observation.headType;
+  const tailType = observation.objectType || observation.tailType;
+  if (!relation || !headType || !tailType) return null;
   return {
-    headType: observation.subjectType,
+    headType,
     relation,
-    tailType: observation.objectType,
+    tailType,
     frequency: Number.isFinite(Number(observation.frequency)) ? Number(observation.frequency) : 1,
     status: observation.status || 'candidate',
   };
@@ -146,6 +163,115 @@ function findContradictions(facts = []) {
     || left.relation.localeCompare(right.relation)
     || left.objects.join('\0').localeCompare(right.objects.join('\0'))
   ));
+}
+
+function availableProvenance(passages = [], facts = []) {
+  return new Set([
+    ...normalizeList(passages).map((passage) => String(passage.passageId || passage.id)),
+    ...normalizeList(facts).flatMap((fact) => normalizeList(fact.passageIds).map(String)),
+  ]);
+}
+
+function normalizeMergePlan({ outputs = [], facts = [] } = {}) {
+  const factsById = new Map(normalizeList(facts).map((fact) => [fact.id, fact]));
+  return {
+    advisoryOnly: true,
+    actions: normalizeList(outputs).map((output, index) => {
+      const factId = output.factId || output.targetFactId || output.id || null;
+      const supported = factId ? factsById.has(factId) : false;
+      const reasons = [...new Set([
+        ...normalizeList(output.reasons || output.reason),
+        ...(supported ? [] : ['advisory_target_not_supported']),
+      ].map(String))].sort();
+
+      return {
+        id: output.id || `merge_action_${String(index + 1).padStart(3, '0')}`,
+        action: output.action || 'advise',
+        factId,
+        reason: output.reason,
+        reasons,
+        policyGate: {
+          status: supported ? 'evidence_backed' : 'needs_review',
+          durableWriteAllowed: false,
+          promotionAllowed: false,
+          reasons: supported ? ['advisory_merge_requires_policy_runtime'] : reasons,
+        },
+      };
+    }),
+  };
+}
+
+function normalizeGraphPlan({ outputs = [], facts = [] } = {}) {
+  const provenanceIds = [...new Set(normalizeList(facts)
+    .flatMap((fact) => normalizeList(fact.passageIds).map(String)))].sort();
+  return {
+    advisoryOnly: true,
+    provenanceIds,
+    candidateNodes: normalizeList(outputs).flatMap((output) => normalizeList(output.nodes)),
+    candidateEdges: normalizeList(outputs).flatMap((output) => normalizeList(output.edges)),
+  };
+}
+
+function normalizeRetrievalPlan({ outputs = [], passages = [], facts = [] } = {}) {
+  const available = availableProvenance(passages, facts);
+  return {
+    advisoryOnly: true,
+    items: normalizeList(outputs).map((output, index) => {
+      const requested = normalizeList(output.provenanceIds || output.passageIds || output.provenance)
+        .map(String)
+        .sort();
+      return {
+        id: output.id || `retrieval_item_${String(index + 1).padStart(3, '0')}`,
+        query: output.query || '',
+        provenanceIds: requested.filter((id) => available.has(id)),
+        missingProvenanceIds: requested.filter((id) => !available.has(id)),
+        reasons: normalizeList(output.reasons || output.reason).map(String).sort(),
+      };
+    }),
+  };
+}
+
+function ratio(numerator, denominator) {
+  if (!denominator) return 0;
+  return Math.round((numerator / denominator) * 100) / 100;
+}
+
+function normalizeEvaluation({
+  outputs = [],
+  facts = [],
+  rejectedFacts = [],
+  contradictions = [],
+  roleTrace = [],
+} = {}) {
+  const supportedFactCount = normalizeList(facts).length;
+  const rejectedFactCount = normalizeList(rejectedFacts).length;
+  const contradictionCount = normalizeList(contradictions).length;
+  return {
+    advisoryOnly: true,
+    signals: normalizeList(outputs),
+    metrics: {
+      supportedFactCount,
+      rejectedFactCount,
+      contradictionCount,
+      advisoryRoleCount: new Set(roleTrace).size,
+      passageSupportRate: ratio(supportedFactCount, supportedFactCount + rejectedFactCount),
+    },
+    policyGate: {
+      durableWriteAllowed: false,
+      promotionEvidenceOnly: true,
+      status: contradictionCount === 0 && rejectedFactCount === 0 ? 'clean_advisory_evidence' : 'needs_review',
+    },
+  };
+}
+
+function buildRoleAudit(roleOutputs = {}) {
+  return MEMORY_EXTRACTION_ROLES
+    .filter((role) => Object.hasOwn(roleOutputs, role))
+    .map((role) => ({
+      role,
+      authority: 'advisory',
+      outputCount: normalizeList(roleOutputs[role]).length,
+    }));
 }
 
 export function runMemoryExtractionSociety({
@@ -284,6 +410,18 @@ export function runMemoryExtractionSociety({
     }
   }
 
+  const contradictions = [...findContradictions(facts), ...hookContradictions];
+  const mergePlan = normalizeMergePlan({ outputs: roleOutputs.merge_planner, facts });
+  const graphPlan = normalizeGraphPlan({ outputs: roleOutputs.graph_constructor, facts });
+  const retrievalPlan = normalizeRetrievalPlan({ outputs: roleOutputs.retriever, passages, facts });
+  const evaluation = normalizeEvaluation({
+    outputs: roleOutputs.evaluator,
+    facts,
+    rejectedFacts,
+    contradictions,
+    roleTrace,
+  });
+
   return {
     schemaVersion: MEMORY_EXTRACTION_SOCIETY_SCHEMA_VERSION,
     roles: MEMORY_EXTRACTION_ROLES,
@@ -298,10 +436,15 @@ export function runMemoryExtractionSociety({
       || left.relation.localeCompare(right.relation)
       || left.object.localeCompare(right.object)
     )),
-    contradictions: [...findContradictions(facts), ...hookContradictions],
+    contradictions,
     hookTrace: hookTrace.sort(),
     roleTrace: [...new Set(roleTrace)].sort(),
+    roleAudit: buildRoleAudit(roleOutputs),
     roleOutputs,
+    mergePlan,
+    graphPlan,
+    retrievalPlan,
+    evaluation,
     rejectedFacts: rejectedFacts.sort((left, right) => (
       left.subject.localeCompare(right.subject)
       || left.relation.localeCompare(right.relation)

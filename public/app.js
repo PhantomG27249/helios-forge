@@ -71,6 +71,7 @@ let harnessState = {
       experimentId: null,
     },
   },
+  capabilityGoals: null,
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -345,6 +346,10 @@ const harnessMemorySource = $('#harness-memory-source');
 const harnessExperimentsStatus = $('#harness-experiments-status');
 const harnessExperimentRuns = $('#harness-experiment-runs');
 const harnessExperimentDecision = $('#harness-experiment-decision');
+const harnessCapabilityGoalsStatus = $('#harness-capability-goals-status');
+const harnessCapabilityGoalsImplemented = $('#harness-capability-goals-implemented');
+const harnessCapabilityGoalsOpen = $('#harness-capability-goals-open');
+const harnessCapabilityGoalRows = $('#harness-capability-goal-rows');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -711,6 +716,7 @@ function handleMessage(msg) {
 
 function updateHarnessStatus(status) {
   harnessState.status = status.state || 'unknown';
+  if (status.capabilityGoals) harnessState.capabilityGoals = status.capabilityGoals;
   scheduleHarnessRender({ immediate: true });
 }
 
@@ -889,6 +895,10 @@ function updateHarnessHierarchyFeedback(event) {
       experimentId: event.experimentId || current.experimentId,
     };
     event.summary = event.summary || `experiment ${harnessState.hierarchy.experiments.decision}`;
+  }
+
+  if (event.type === 'harness_status.updated' && event.capabilityGoals) {
+    harnessState.capabilityGoals = event.capabilityGoals;
   }
 }
 
@@ -1280,6 +1290,39 @@ function renderHarnessHierarchyFeedback() {
   if (harnessExperimentDecision) harnessExperimentDecision.textContent = experiments.decision || 'n/a';
 }
 
+function renderCapabilityGoalRows() {
+  const goals = harnessState.capabilityGoals;
+  if (!goals) {
+    if (harnessCapabilityGoalsStatus) harnessCapabilityGoalsStatus.textContent = 'idle';
+    if (harnessCapabilityGoalsImplemented) harnessCapabilityGoalsImplemented.textContent = '0';
+    if (harnessCapabilityGoalsOpen) harnessCapabilityGoalsOpen.textContent = '0';
+    if (harnessCapabilityGoalRows) harnessCapabilityGoalRows.innerHTML = '<div class="harness-empty compact">No capability goal status yet</div>';
+    return;
+  }
+
+  const implemented = goals.implementedCount ?? goals.counts?.implemented ?? 0;
+  const open = goals.openCount ?? Math.max(0, (goals.totalCount || 0) - implemented);
+  if (harnessCapabilityGoalsStatus) {
+    harnessCapabilityGoalsStatus.textContent = open > 0 ? `${open} open` : 'complete';
+  }
+  if (harnessCapabilityGoalsImplemented) harnessCapabilityGoalsImplemented.textContent = String(implemented);
+  if (harnessCapabilityGoalsOpen) harnessCapabilityGoalsOpen.textContent = String(open);
+  if (!harnessCapabilityGoalRows) return;
+
+  const rows = (goals.goals || []).slice(0, 8).map((goal) => {
+    const missing = (goal.missingEvidence || []).length;
+    const blockers = (goal.blockers || []).length;
+    const suffix = blockers ? `${blockers} blockers` : missing ? `${missing} missing` : 'evidence complete';
+    return `
+      <div class="harness-list-row">
+        <span>${esc(goal.label || goal.goalId || 'goal')}</span>
+        <strong>${esc(goal.status || 'unknown')} · ${esc(suffix)}</strong>
+      </div>
+    `;
+  }).join('');
+  harnessCapabilityGoalRows.innerHTML = rows || '<div class="harness-empty compact">No capability goal rows</div>';
+}
+
 function renderHarnessPanel() {
   if (!harnessPanel) return;
   harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
@@ -1293,6 +1336,7 @@ function renderHarnessPanel() {
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
   renderHarnessSwarm();
+  renderCapabilityGoalRows();
   renderHarnessHierarchyFeedback();
   renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `

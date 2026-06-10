@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import path from 'path';
+import { summarizeCapabilityGoalStatus } from '../harness-sidecar/meta/capabilityGoalStatus.js';
 
 const DEFAULT_PORT = 49321;
 const MAX_LOG_LINES = 200;
@@ -45,6 +46,7 @@ export class HarnessManager {
       url: this.url,
       workspaceRoot: this.workspaceRoot,
       restartCount: this.restartCount,
+      capabilityGoals: summarizeCapabilityGoalStatus(),
       logs: [...this.logs],
     };
   }

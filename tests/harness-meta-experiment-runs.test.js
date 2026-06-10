@@ -9,6 +9,7 @@ import { runHarnessExperiment } from '../src/harness-sidecar/meta/harnessExperim
 import { createHarnessRun } from '../src/harness-sidecar/meta/harnessRunStore.js';
 import {
   createHarnessVariantWorkspace,
+  readHarnessVariantProposerContext,
   runHarnessVariantCycles,
 } from '../src/harness-sidecar/meta/harnessVariantWorkspace.js';
 
@@ -136,6 +137,87 @@ test('variant workspace writes isolated runnable source config trace and metric 
   });
 });
 
+test('variant workspace materializes trace and metric artifacts for proposer context', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const variant = await createHarnessVariantWorkspace({
+      workspaceRoot,
+      cycleId: 'cycle_artifacts',
+      candidate: {
+        candidateId: 'cand_artifacts',
+        target: 'meta-harness',
+      },
+      lineage: {
+        parentVariantId: 'cand_parent',
+        previousCandidateIds: ['cand_parent'],
+      },
+      sourceFiles: {
+        'runner.js': 'export function run() { return "artifact-context"; }\n',
+      },
+      config: {
+        evalCases: ['case_artifact'],
+      },
+      traceManifest: {
+        traces: [{ traceId: 'trace_artifact', path: 'traces/trace_artifact/events.jsonl' }],
+      },
+      metricManifest: {
+        metrics: [{ name: 'quality', path: 'metrics/quality.json' }],
+      },
+      traceArtifacts: {
+        'trace_artifact/events.jsonl': '{"event":"proposal_failed","reason":"thin_context"}\n',
+      },
+      metricArtifacts: {
+        'quality.json': { quality: 0.74, safety: 0.96 },
+      },
+    });
+
+    const manifest = JSON.parse(await readFile(variant.files.manifest, 'utf8'));
+    const traceArtifact = await readFile(path.join(variant.variantDir, 'traces', 'trace_artifact', 'events.jsonl'), 'utf8');
+    const metricArtifact = JSON.parse(await readFile(path.join(variant.variantDir, 'metrics', 'quality.json'), 'utf8'));
+    const context = await readHarnessVariantProposerContext({
+      workspaceRoot,
+      variantRefs: [variant],
+    });
+
+    assert.equal(manifest.lineage.parentVariantId, 'cand_parent');
+    assert.equal(manifest.artifacts.trace.files[0].path, 'traces/trace_artifact/events.jsonl');
+    assert.equal(manifest.artifacts.metrics.files[0].path, 'metrics/quality.json');
+    assert.match(traceArtifact, /thin_context/);
+    assert.equal(metricArtifact.quality, 0.74);
+    assert.equal(context.priorVariants[0].sourceSummaries[0].path, 'src/runner.js');
+    assert.match(context.priorVariants[0].sourceSummaries[0].excerpt, /artifact-context/);
+    assert.match(context.priorVariants[0].traceSummaries[0].excerpt, /proposal_failed/);
+    assert.equal(context.priorVariants[0].metricSummaries[0].json.quality, 0.74);
+  });
+});
+
+test('variant workspace rejects traversal in materialized trace and metric artifact paths', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    await assert.rejects(
+      () => createHarnessVariantWorkspace({
+        workspaceRoot,
+        cycleId: 'cycle_escape',
+        candidate: { candidateId: 'cand_escape' },
+        traceArtifacts: {
+          '../outside.jsonl': 'escaped',
+        },
+      }),
+      /Unsafe artifact path/,
+    );
+
+    await assert.rejects(
+      () => createHarnessVariantWorkspace({
+        workspaceRoot,
+        cycleId: 'cycle_escape_metric',
+        candidate: { candidateId: 'cand_escape_metric' },
+        metricArtifacts: {
+          '..\\outside.json': { escaped: true },
+        },
+      }),
+      /Unsafe artifact path/,
+    );
+  });
+});
+
 test('variant workspace refuses to write through symlinked source directories', async (t) => {
   await withWorkspace(async (workspaceRoot) => {
     const outsideRoot = await mkdtemp(path.join(tmpdir(), 'helios-variant-outside-'));
@@ -173,6 +255,44 @@ test('variant workspace refuses to write through symlinked source directories', 
     );
     await assert.rejects(
       () => readFile(path.join(outsideRoot, 'runner.js'), 'utf8'),
+      /ENOENT/,
+    );
+    await rm(outsideRoot, { recursive: true, force: true });
+  });
+});
+
+test('harness run store refuses to write through symlinked run directories', async (t) => {
+  await withWorkspace(async (workspaceRoot) => {
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'helios-run-outside-'));
+    const runDir = path.join(
+      workspaceRoot,
+      '.harness',
+      'meta',
+      'harness-runs',
+      'run_link',
+    );
+    await mkdir(path.dirname(runDir), { recursive: true });
+    try {
+      await symlink(outsideRoot, runDir, 'junction');
+    } catch (error) {
+      if (error?.code === 'EPERM' || error?.code === 'EACCES') {
+        await rm(outsideRoot, { recursive: true, force: true });
+        t.skip(`symlink creation unavailable: ${error.code}`);
+        return;
+      }
+      throw error;
+    }
+
+    await assert.rejects(
+      () => createHarnessRun({
+        workspaceRoot,
+        runId: 'run_link',
+        candidate: { candidateId: 'cand_link' },
+      }),
+      /symlink|junction|escapes workspace/i,
+    );
+    await assert.rejects(
+      () => readFile(path.join(outsideRoot, 'candidate.json'), 'utf8'),
       /ENOENT/,
     );
     await rm(outsideRoot, { recursive: true, force: true });
@@ -221,6 +341,45 @@ test('variant cycle runner repeats propose evaluate and logs evidence-only harne
     assert.equal(promotion.preference.evidenceOnly, true);
     assert.equal(sweep.cycleIndex, 1);
     assert.deepEqual(sweep.previousCandidateIds, ['cand_cycle_0']);
+  });
+});
+
+test('variant cycle runner supplies prior source trace and metric context to proposers', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const proposerContexts = [];
+    await runHarnessVariantCycles({
+      workspaceRoot,
+      cyclePrefix: 'context_loop',
+      cycles: 2,
+      target: 'meta-harness',
+      propose: async ({ cycleIndex, priorContext }) => {
+        proposerContexts.push(priorContext);
+        return {
+          candidateId: `cand_context_${cycleIndex}`,
+          sourceFiles: {
+            'runner.js': `export const proposal = "context-${cycleIndex}";\n`,
+          },
+          traceArtifacts: {
+            [`trace_${cycleIndex}/events.jsonl`]: `{"cycle":${cycleIndex},"event":"observed"}\n`,
+          },
+          metricArtifacts: {
+            [`quality_${cycleIndex}.json`]: { quality: 0.5 + cycleIndex },
+          },
+        };
+      },
+      evaluate: async ({ cycleIndex }) => ({
+        quality: 0.5 + cycleIndex,
+        safety: 0.95,
+        cost: 0.2,
+        latency: 0.2,
+      }),
+    });
+
+    assert.deepEqual(proposerContexts[0].priorVariants, []);
+    assert.equal(proposerContexts[1].priorVariants[0].variantId, 'cand_context_0');
+    assert.match(proposerContexts[1].priorVariants[0].sourceSummaries[0].excerpt, /context-0/);
+    assert.match(proposerContexts[1].priorVariants[0].traceSummaries[0].excerpt, /observed/);
+    assert.equal(proposerContexts[1].priorVariants[0].metricSummaries[0].json.quality, 0.5);
   });
 });
 

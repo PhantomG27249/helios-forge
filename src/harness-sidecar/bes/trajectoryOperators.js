@@ -3,6 +3,11 @@ function asArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
+function normalizeText(value, fallback) {
+  const normalized = String(value ?? fallback ?? '').trim();
+  return normalized || fallback;
+}
+
 function clampIndex(index, length) {
   const number = Number(index);
   if (!Number.isFinite(number)) return length;
@@ -60,14 +65,51 @@ const OPERATORS = Object.freeze({
   recombination,
 });
 
+const OPERATOR_FAMILIES = Object.freeze({
+  expansion: 'mutation',
+  deletion: 'mutation',
+  translocation: 'mutation',
+  crossover: 'recombination',
+  recombination: 'recombination',
+});
+
+export function describeTrajectoryOperator({
+  operator,
+  lane,
+  candidateId,
+  compatibleFamily,
+  trajectory,
+  outputTrajectory,
+} = {}) {
+  const key = String(operator ?? '').trim().toLowerCase();
+  const operatorFamily = OPERATOR_FAMILIES[key] || 'unknown';
+  const normalizedLane = normalizeText(lane);
+  return {
+    ...(normalizedLane ? { lane: normalizedLane.toLowerCase() } : {}),
+    ...(normalizeText(candidateId) ? { candidateId: normalizeText(candidateId) } : {}),
+    operator: key,
+    operatorFamily,
+    compatibleFamily: normalizeText(compatibleFamily, normalizedLane || operatorFamily).toLowerCase(),
+    inputLength: asArray(trajectory).length,
+    outputLength: asArray(outputTrajectory).length,
+    promotionAuthority: false,
+  };
+}
+
 export function applyTrajectoryOperator({ operator, ...options } = {}) {
   const key = String(operator ?? '').trim().toLowerCase();
   const apply = OPERATORS[key];
   if (!apply) {
     throw new Error(`Unknown trajectory operator: ${operator}`);
   }
+  const trajectory = apply(options);
   return {
     operator: key,
-    trajectory: apply(options),
+    trajectory,
+    provenance: describeTrajectoryOperator({
+      ...options,
+      operator: key,
+      outputTrajectory: trajectory,
+    }),
   };
 }

@@ -60,9 +60,24 @@ export function verifyDenseSubgoals({
   evidence = [],
   lane,
   verifierUnit,
+  verifierContract,
 } = {}) {
   const normalizedLane = normalizeText(lane);
   const defaultVerifierUnit = normalizeText(verifierUnit) || 'dense_subgoal_eval';
+  const contract = verifierContract && typeof verifierContract === 'object'
+    ? {
+      ...verifierContract,
+      lane: normalizeText(verifierContract.lane ?? normalizedLane),
+      verifierUnit: normalizeText(verifierContract.verifierUnit ?? defaultVerifierUnit) || defaultVerifierUnit,
+    }
+    : {
+      lane: normalizedLane,
+      verifierUnit: defaultVerifierUnit,
+      feedbackUnit: `${defaultVerifierUnit}_dense_feedback`,
+      contractKind: 'lane_dense_subgoal_verifier',
+      evidenceOnly: true,
+      promotionAuthority: false,
+    };
   const normalizedSubgoals = asArray(subgoals).filter((subgoal) => appliesToLane(subgoal, normalizedLane));
   const normalizedEvidence = asArray(evidence);
   const satisfiedSubgoalIds = [];
@@ -113,6 +128,7 @@ export function verifyDenseSubgoals({
     total,
     ...(normalizedLane ? { lane: normalizedLane } : {}),
     verifierUnit: defaultVerifierUnit,
+    contract,
     verifierUnits: [...verifierBuckets.values()].sort((left, right) => (
       left.verifierUnit.localeCompare(right.verifierUnit)
     )),

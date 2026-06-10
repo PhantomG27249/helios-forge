@@ -19,21 +19,31 @@ export function recordLineage({
   operator = 'seed',
   lane,
   localLineage,
+  compatibleFamily,
 } = {}) {
   const normalizedCandidateId = normalizeId(candidateId, 'candidate');
   const normalizedParents = normalizeParents(parents);
   const normalizedOperator = normalizeId(operator, 'seed').toLowerCase();
+  const operatorFamily = ['crossover', 'recombination'].includes(normalizedOperator) ? 'recombination' : 'mutation';
+  const normalizedLane = lane ? normalizeId(lane).toLowerCase() : null;
+  const normalizedFamily = normalizeId(
+    compatibleFamily ?? localLineage?.compatibleFamily ?? localLineage?.family,
+    normalizedLane ?? operatorFamily,
+  ).toLowerCase();
 
   return {
     candidateId: normalizedCandidateId,
     parents: normalizedParents,
     operator: normalizedOperator,
+    operatorFamily,
+    compatibleFamily: normalizedFamily,
+    promotionAuthority: false,
     lineageId: [
       normalizedCandidateId,
       normalizedOperator,
       ...normalizedParents,
     ].join(':'),
-    ...(lane ? { lane: normalizeId(lane).toLowerCase() } : {}),
+    ...(normalizedLane ? { lane: normalizedLane } : {}),
     ...(localLineage ? { localLineage } : {}),
   };
 }

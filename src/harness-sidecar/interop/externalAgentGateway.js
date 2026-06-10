@@ -36,6 +36,14 @@ function recordView(record) {
   return cloneSerializable(record);
 }
 
+function streamView(stream) {
+  if (!stream) return null;
+  return cloneSerializable({
+    ...stream,
+    chunks: [...(stream.chunks || [])].sort((left, right) => left.sequence - right.sequence),
+  });
+}
+
 function endpointDescriptor(agent = {}) {
   const endpoint = agent.endpoint && typeof agent.endpoint === 'object'
     ? Object.fromEntries(
@@ -197,6 +205,7 @@ export class ExternalAgentGateway {
     this.agents = new Map(normalizeAgentCards(agentCards).map((agent) => [agent.id, agent]));
     this.outbox = new Map(recordsFromState(restoredState.outbox).map((record) => [record.messageId, cloneSerializable(record)]));
     this.inbox = new Map(recordsFromState(restoredState.inbox).map((record) => [record.messageId, cloneSerializable(record)]));
+    this.streams = new Map(recordsFromState(restoredState.streams).map((record) => [record.streamId, cloneSerializable(record)]));
     this.sequence = 0;
   }
 
@@ -204,6 +213,7 @@ export class ExternalAgentGateway {
     return {
       outbox: [...this.outbox.values()].map((record) => recordView(record)),
       inbox: [...this.inbox.values()].map((record) => recordView(record)),
+      streams: [...this.streams.values()].map((stream) => streamView(stream)),
       peerEndpoints: [...this.agents.values()].map((agent) => endpointDescriptor(agent)),
     };
   }
@@ -433,6 +443,14 @@ export class ExternalAgentGateway {
     return [...this.inbox.values()].map((record) => recordView(record));
   }
 
+  getStreamState(streamId) {
+    return streamView(this.streams.get(String(streamId || '')));
+  }
+
+  listStreams() {
+    return [...this.streams.values()].map((stream) => streamView(stream));
+  }
+
   getInboxRecord(messageId) {
     const record = this.inbox.get(String(messageId || ''));
     return record ? recordView(record) : null;
@@ -446,6 +464,69 @@ export class ExternalAgentGateway {
   findDurableRecord(messageId) {
     const id = String(messageId || '');
     return this.inbox.get(id) || this.outbox.get(id) || null;
+  }
+
+  receiveStreamEnvelope(envelope = {}) {
+    const timestamp = this.now();
+    const durable = envelope.durable || {};
+    const message = envelope.message || {};
+    const stream = message.stream || {};
+    const streamId = String(durable.streamId || stream.streamId || durable.correlationId || 'stream');
+    const messageId = String(durable.messageId || message.messageId || this.nextMessageId('stream'));
+    const sequence = Number(stream.sequence ?? durable.sequence ?? 0);
+    const existing = this.streams.get(streamId) || {
+      streamId,
+      status: 'open',
+      correlationId: String(durable.correlationId || message.correlationId || streamId),
+      from: String(envelope.from || ''),
+      to: String(envelope.to || ''),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      chunks: [],
+      progress: null,
+      cancellation: null,
+      error: null,
+    };
+    const withoutDuplicate = existing.chunks.filter((chunk) => chunk.messageId !== messageId);
+    const chunk = {
+      messageId,
+      sequence: Number.isFinite(sequence) ? sequence : 0,
+      kind: String(message.kind || ''),
+      event: String(message.kind || '').replace(/^stream_/, '') || 'chunk',
+      payload: cloneSerializable(message.payload || {}),
+      receivedAt: timestamp,
+    };
+    existing.chunks = [...withoutDuplicate, chunk].sort((left, right) => left.sequence - right.sequence);
+    existing.updatedAt = timestamp;
+    existing.correlationId = String(durable.correlationId || existing.correlationId || streamId);
+    existing.from = String(envelope.from || existing.from || '');
+    existing.to = String(envelope.to || existing.to || '');
+
+    if (message.progress) existing.progress = cloneSerializable(message.progress);
+    if (message.cancellation) existing.cancellation = cloneSerializable(message.cancellation);
+    if (/cancel$/.test(String(message.kind || ''))) existing.status = 'cancelled';
+    else if (/complete$/.test(String(message.kind || '')) || stream.done === true) existing.status = 'complete';
+    else if (/error$/.test(String(message.kind || ''))) {
+      existing.status = 'error';
+      existing.error = cloneSerializable(message.payload || {});
+    } else {
+      existing.status = existing.status === 'open' ? 'in_progress' : existing.status;
+    }
+
+    this.streams.set(streamId, existing);
+    this.persistDurableState();
+    emit(this.emitEvent, {
+      type: 'external_agent.stream_received',
+      streamId,
+      messageId,
+      correlationId: existing.correlationId,
+      status: existing.status,
+      sequence: chunk.sequence,
+    });
+    return {
+      status: existing.status,
+      stream: streamView(existing),
+    };
   }
 
   buildControlEnvelope({ record, kind, body = {} }) {
