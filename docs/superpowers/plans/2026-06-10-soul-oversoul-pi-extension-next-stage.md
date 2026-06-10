@@ -252,10 +252,30 @@ promotion policy.
 - [ ] Write failing tests for extension manifest registration and installer copy behavior.
 - [ ] Add a Pi extension that can read workspace-local Helios bridge config and expose safe before-request metadata.
 - [ ] Include current workspace id, active skill/capability summary, selected soul/oversoul refs, and sidecar endpoint hints.
+- [ ] Read Helios Forge workspace skill manifests directly when Pi's own global skill registry has not loaded them.
+- [ ] Include packaged Helios skills from `packages/helios-research-harness/helios-package.json`, workspace capability records from `.harness/capabilities.json`, and approved generated skills from `.harness/packages/generated-skills`.
 - [ ] Do not send secrets, raw traces, raw patches, or full memory contents through Pi extension metadata.
 - [ ] Add `npm` script for installing the Helios extension.
 - [ ] Run `node --test tests/pi-helios-extension.test.js`.
 - [ ] Commit with `feat: add helios forge pi bridge extension`.
+
+### Task 8B: Helios Skill Discovery And Pi Skill Sync
+
+**Files:**
+- Create: `src/harness-sidecar/pi/heliosSkillBridge.js`
+- Modify: `src/harness-sidecar/capabilities/piPackageInstaller.js`
+- Modify: `packages/helios-research-harness/extensions/helios-forge.ts`
+- Test: `tests/pi-helios-skill-bridge.test.js`
+
+- [ ] Write failing tests for Helios skills that exist in the workspace package but are absent from Pi's global skill registry.
+- [ ] Build a safe skill inventory from `packages/helios-research-harness/helios-package.json`, `.harness/capabilities.json`, `.harness/runtime/capabilities.mount.json`, and `.harness/packages/generated-skills`.
+- [ ] Normalize each skill into id, name, source, version/hash, relative path, enabled state, and short description.
+- [ ] Reject path escapes, absolute external paths, disabled capabilities, and unapproved generated skill candidates.
+- [ ] Expose a compact `helios_skill_inventory` packet through the Pi extension and sidecar bridge state.
+- [ ] Add a sync action or diagnostic that tells the operator when Pi has not loaded a Helios Forge skill that Helios sees.
+- [ ] Preserve a Pi-thin design: the extension should discover and advertise skill metadata, while the sidecar owns installs, approvals, and generated-skill promotion.
+- [ ] Run `node --test tests/pi-helios-skill-bridge.test.js`.
+- [ ] Commit with `feat: sync helios skills into pi bridge`.
 
 ### Task 8A: Reasoning Telemetry And Raw CoT Quarantine
 
@@ -365,6 +385,8 @@ promotion policy.
 - Soul and oversoul refs flow through SwarmCell, BES lane evidence, RHO hard cases, Meta-Harness variants, and A2A envelopes.
 - Soul and oversoul mutation candidates are shadow-only until promotion policy and approval accept them.
 - The Helios Forge Pi extension is packaged separately from the kwargs extension and has a working installer.
+- The Pi extension can surface Helios Forge workspace skills even when Pi has not reliably loaded them from its own global registry.
+- Packaged, workspace-enabled, and approved generated skills are visible as compact bridge metadata without granting Pi authority to install or promote them.
 - The Pi extension emits structured reasoning telemetry and, when explicitly enabled for local/private models, stores raw CoT only in a redacted quarantine path that feeds derived summaries rather than direct promotion.
 - Pi-native subagents receive better skill, soul, oversoul, output-contract, and sidecar coordination context.
 - UI/status surfaces show soul/oversoul and Pi bridge health without adding direct self-approval controls.
