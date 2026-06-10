@@ -27,6 +27,7 @@ test('model-driven worker calls injected gateway with structured role prompt and
             patch: 'diff --git a/src/harness-sidecar/swarm/modelDrivenWorker.js b/src/harness-sidecar/swarm/modelDrivenWorker.js',
             verifierEvidence: ['node --test tests/harness-swarm-model-worker.test.js'],
             verifierCommands: ['node --test tests/harness-swarm-model-worker.test.js'],
+            evolutionOutput: { hardCaseTags: ['missing_context'] },
             score: 91,
             artifacts: [{ path: 'artifact.txt', type: 'text' }],
             risks: ['Needs orchestrator wiring later.'],
@@ -53,7 +54,9 @@ test('model-driven worker calls injected gateway with structured role prompt and
   assert.match(result.patch, /diff --git/);
   assert.deepEqual(result.verifierEvidence, ['node --test tests/harness-swarm-model-worker.test.js']);
   assert.deepEqual(result.verifierCommands, ['node --test tests/harness-swarm-model-worker.test.js']);
+  assert.deepEqual(result.evolutionOutput.hardCaseTags, ['missing_context']);
   assert.equal(result.score, 91);
+  assert.equal(result.contract.valid, true);
   assert.deepEqual(result.artifacts, [{ path: 'artifact.txt', type: 'text' }]);
   assert.deepEqual(result.risks, ['Needs orchestrator wiring later.']);
   assert.deepEqual(result.compactHandoff, {
@@ -105,6 +108,26 @@ test('model-driven worker accepts provider JSON string output and verifier-only 
   assert.deepEqual(result.verifierEvidence, ['inspected diff headers and focused test command']);
   assert.equal(result.score, 73);
   assert.deepEqual(result.artifacts, []);
+});
+
+test('model-driven worker fails forbidden local durable approval contracts', async () => {
+  const result = await runModelDrivenAttempt({
+    task: { taskId: 'task_model_worker_local_approval', goal: 'Reject local approval.' },
+    attempt: { attemptId: 'attempt_model_local_approval', strategy: 'guardrails' },
+    provider: async () => ({
+      summary: 'Proposed a local durable approval.',
+      verifierEvidence: ['node --test tests/harness-swarm-model-worker.test.js'],
+      evolutionOutput: {
+        durableApplyApproved: true,
+        suggestedCodeChange: { path: 'src/harness-sidecar/server.js' },
+      },
+    }),
+  });
+
+  assert.equal(result.status, 'contract_failed');
+  assert.equal(result.contract.valid, false);
+  assert.equal(result.contract.reasons.includes('local_durable_approval_forbidden'), true);
+  assert.equal(result.evolutionOutput.durableApplyApproved, false);
 });
 
 test('model-driven worker rejects malformed model output with clear contract error', async () => {

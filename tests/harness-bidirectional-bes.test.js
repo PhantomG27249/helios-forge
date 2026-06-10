@@ -3,6 +3,7 @@ import { test } from 'node:test';
 
 import { buildBackwardGoalTree } from '../src/harness-sidecar/bes/backwardGoalTree.js';
 import { runBidirectionalBes } from '../src/harness-sidecar/bes/bidirectionalSearchLoop.js';
+import { verifyDenseSubgoals } from '../src/harness-sidecar/bes/denseSubgoalVerifier.js';
 import { scoreGoalSatisfaction } from '../src/harness-sidecar/bes/goalSatisfactionScorer.js';
 
 test('builds a backward goal tree from RHO failures and visual verifier cases', () => {
@@ -136,4 +137,18 @@ test('bidirectional BES alternates forward candidates with backward goal refinem
       'bes.bidirectional_completed',
     ],
   );
+});
+
+test('dense subgoal verifier gives bidirectional feedback for partial evidence', () => {
+  const result = verifyDenseSubgoals({
+    subgoals: [
+      { id: 'read_context', requires: 'read' },
+      { id: 'run_tests', requires: 'npm test' },
+    ],
+    evidence: ['read repo context'],
+  });
+
+  assert.equal(result.score, 0.5);
+  assert.deepEqual(result.satisfiedSubgoalIds, ['read_context']);
+  assert.deepEqual(result.missingSubgoalIds, ['run_tests']);
 });

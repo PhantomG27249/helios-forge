@@ -8,6 +8,8 @@ const DEFAULT_POLICY = {
   provenanceRequired: true,
 };
 
+import { runBesLaneRuntime } from '../bes/laneRuntime.js';
+
 function normalizeList(value) {
   if (!value) return [];
   return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
@@ -127,5 +129,51 @@ export function evaluateMemoryPolicyCandidate({ candidate = {}, memoryCase = {} 
     safetyStatus: 'shadow_only',
     reasons,
   };
+}
+
+function laneCases(coreset = {}) {
+  if (Array.isArray(coreset)) return coreset;
+  return coreset.items || coreset.cases || coreset.hardCases || [];
+}
+
+function evaluateAcrossCases({ candidate, hardCases, evaluate }) {
+  const cases = hardCases.length ? hardCases : [{}];
+  const results = cases.map((traceCase) => evaluate(traceCase));
+  const score = results.reduce((sum, result) => sum + Number(result.score || 0), 0) / results.length;
+  return {
+    score,
+    reasons: [...new Set(results.flatMap((result) => result.reasons || []))],
+    caseCount: cases.length,
+    caseResults: results,
+    safetyStatus: results.some((result) => result.safetyStatus === 'blocked') ? 'blocked' : 'shadow_only',
+    promotable: false,
+  };
+}
+
+export async function runMemoryPolicyBesLane({
+  coreset,
+  baselinePolicy = {},
+  maxCandidates = 4,
+  taskId = 'memory_policy_bes',
+  now,
+  candidateOverrides = [],
+} = {}) {
+  const hardCases = laneCases(coreset);
+  const proposalCoreset = { items: hardCases, cases: hardCases, hardCases };
+  const candidates = proposeMemoryPolicies({ coreset: proposalCoreset, baselinePolicy, maxCandidates })
+    .map((candidate, index) => ({ ...candidate, ...(candidateOverrides[index] || {}) }));
+
+  return runBesLaneRuntime({
+    lane: 'memory',
+    taskId,
+    candidates,
+    hardCases,
+    now,
+    evaluator: ({ candidate }) => evaluateAcrossCases({
+      candidate,
+      hardCases,
+      evaluate: (memoryCase) => evaluateMemoryPolicyCandidate({ candidate, memoryCase }),
+    }),
+  });
 }
 

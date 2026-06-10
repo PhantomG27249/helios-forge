@@ -272,6 +272,71 @@
               <span id="harness-swarm-status">No swarm attempts yet</span>
               <span id="harness-swarm-active-count">0 active</span>
             </div>
+            <section id="harness-local-meta" class="harness-hierarchy-panel" aria-label="Local Meta feedback">
+              <div class="harness-section-title-row compact">
+                <span>Local Meta</span>
+                <span id="harness-local-meta-status">idle</span>
+              </div>
+              <div class="harness-hierarchy-grid">
+                <div class="harness-status-cell">
+                  <span>Candidates</span>
+                  <strong id="harness-local-meta-candidates">0</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Cell</span>
+                  <strong id="harness-local-meta-cell">n/a</strong>
+                </div>
+              </div>
+            </section>
+            <section id="harness-memory-hierarchy" class="harness-hierarchy-panel" aria-label="Memory Hierarchy feedback">
+              <div class="harness-section-title-row compact">
+                <span>Memory Hierarchy</span>
+                <span id="harness-memory-hierarchy-status">idle</span>
+              </div>
+              <div class="harness-hierarchy-grid">
+                <div class="harness-status-cell">
+                  <span>Proposals</span>
+                  <strong id="harness-memory-proposals">0</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Source</span>
+                  <strong id="harness-memory-source">n/a</strong>
+                </div>
+              </div>
+            </section>
+            <section id="harness-experiments" class="harness-hierarchy-panel" aria-label="Harness Experiments feedback">
+              <div class="harness-section-title-row compact">
+                <span>Harness Experiments</span>
+                <span id="harness-experiments-status">idle</span>
+              </div>
+              <div class="harness-hierarchy-grid">
+                <div class="harness-status-cell">
+                  <span>Runs</span>
+                  <strong id="harness-experiment-runs">0</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Decision</span>
+                  <strong id="harness-experiment-decision">n/a</strong>
+                </div>
+              </div>
+            </section>
+            <section id="harness-capability-goals" class="harness-hierarchy-panel" aria-label="Capability Goal status">
+              <div class="harness-section-title-row compact">
+                <span>Capability Goals</span>
+                <span id="harness-capability-goals-status">idle</span>
+              </div>
+              <div class="harness-hierarchy-grid">
+                <div class="harness-status-cell">
+                  <span>Implemented</span>
+                  <strong id="harness-capability-goals-implemented">0</strong>
+                </div>
+                <div class="harness-status-cell">
+                  <span>Open</span>
+                  <strong id="harness-capability-goals-open">0</strong>
+                </div>
+              </div>
+              <div id="harness-capability-goal-rows" class="harness-list compact"></div>
+            </section>
             <div class="harness-swarm-layout">
               <div id="harness-swarm-attempts" class="harness-swarm-attempts"></div>
               <div id="harness-swarm-attempt-detail" class="harness-swarm-attempt-detail">

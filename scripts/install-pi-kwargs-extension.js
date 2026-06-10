@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 import { ensureModelImageInput } from '../src/pi/modelConfig.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const source = path.join(repoRoot, 'src', 'pi', 'extensions', 'kwargs.ts');
+const source = path.join(repoRoot, 'packages', 'helios-research-harness', 'extensions', 'kwargs.ts');
 const home = process.env.USERPROFILE || process.env.HOME;
 const targetDir = path.join(home, '.pi', 'agent', 'extensions');
 const target = path.join(targetDir, 'kwargs.ts');

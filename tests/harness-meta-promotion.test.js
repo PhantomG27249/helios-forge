@@ -19,6 +19,12 @@ function candidateRun(overrides = {}) {
       cost: 0.4,
       latency: 0.3,
     },
+    evidence: {
+      replay: { passed: true, runId: 'rho-run-default' },
+      verifier: { passed: true, confidence: 0.9, runId: 'verifier-run-default' },
+      provenance: { traceId: 'trace-default', sourceSnapshotId: 'snapshot-default' },
+    },
+    rollback: { reversible: true, drillId: 'rollback-default' },
     ...overrides,
   };
 }
@@ -78,8 +84,52 @@ test('promotion policy accepts approved smoke-passing non-dominated improvement'
     'smoke_passed',
     'safety_threshold_met',
     'pareto_improvement',
+    'replay_passed',
+    'verifier_passed',
+    'provenance_recorded',
+    'rollback_available',
   ]);
   assert.equal(decision.candidateId, 'cand_meta_001');
+});
+
+test('promotion policy requires replay verifier provenance rollback and approval evidence', () => {
+  const baselineFrontier = [
+    { candidateId: 'baseline', quality: 0.8, safety: 0.9, cost: 0.5, latency: 0.4 },
+  ];
+  const completeCandidate = candidateRun({
+    evidence: {
+      replay: { passed: true, runId: 'rho-run-1' },
+      verifier: { passed: true, confidence: 0.91, runId: 'verifier-run-1' },
+      provenance: { traceId: 'trace-1', sourceSnapshotId: 'snapshot-1' },
+    },
+    rollback: { reversible: true, drillId: 'rollback-1' },
+  });
+
+  const accepted = evaluatePromotion({
+    candidateRun: completeCandidate,
+    baselineFrontier,
+    approvals: [{ candidateId: 'cand_meta_001', choice: 'approve', approver: 'human' }],
+  });
+  assert.equal(accepted.status, 'promoted');
+  assert.ok(accepted.reasons.includes('replay_passed'));
+  assert.ok(accepted.reasons.includes('verifier_passed'));
+  assert.ok(accepted.reasons.includes('provenance_recorded'));
+  assert.ok(accepted.reasons.includes('rollback_available'));
+
+  for (const [candidateRunPatch, reason] of [
+    [{ evidence: { verifier: completeCandidate.evidence.verifier, provenance: completeCandidate.evidence.provenance }, rollback: completeCandidate.rollback }, 'missing_replay_evidence'],
+    [{ evidence: { replay: completeCandidate.evidence.replay, provenance: completeCandidate.evidence.provenance }, rollback: completeCandidate.rollback }, 'missing_verifier_evidence'],
+    [{ evidence: { replay: completeCandidate.evidence.replay, verifier: completeCandidate.evidence.verifier }, rollback: completeCandidate.rollback }, 'missing_provenance'],
+    [{ evidence: completeCandidate.evidence, rollback: { reversible: false } }, 'missing_rollback'],
+  ]) {
+    const decision = evaluatePromotion({
+      candidateRun: candidateRun(candidateRunPatch),
+      baselineFrontier,
+      approvals: [{ candidateId: 'cand_meta_001', choice: 'approve' }],
+    });
+    assert.equal(decision.status, 'rejected');
+    assert.equal(decision.reasons.includes(reason), true);
+  }
 });
 
 test('promotion policy gates verifier candidates on approval holdout baseline flakiness and cost', () => {
@@ -103,6 +153,12 @@ test('promotion policy gates verifier candidates on approval holdout baseline fl
       averageCost: 0.44,
     },
     safety: { passed: true, failures: [] },
+    evidence: {
+      replay: { passed: true, runId: 'rho-verifier-1' },
+      verifier: { passed: true, confidence: 0.93, runId: 'verifier-holdout-1' },
+      provenance: { traceId: 'trace-verifier-1', sourceSnapshotId: 'snapshot-verifier-1' },
+    },
+    rollback: { reversible: true, drillId: 'rollback-verifier-1' },
   };
 
   const accepted = evaluatePromotion({
@@ -121,6 +177,10 @@ test('promotion policy gates verifier candidates on approval holdout baseline fl
     'verifier_baseline_clean',
     'verifier_flakiness_ok',
     'verifier_cost_ok',
+    'replay_passed',
+    'verifier_passed',
+    'provenance_recorded',
+    'rollback_available',
   ]);
 
   const missingApproval = evaluatePromotion({
@@ -230,6 +290,9 @@ test('promotion policy gates skill candidates on approval evidence safety and ro
     'skill_trigger_precision_ok',
     'skill_cost_ok',
     'rollback_available',
+    'replay_passed',
+    'verifier_passed',
+    'provenance_recorded',
   ]);
 
   const missingEvidence = evaluatePromotion({

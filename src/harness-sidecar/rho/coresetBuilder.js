@@ -1,5 +1,7 @@
 const DEFAULT_LIMIT = 8;
 const LOW_COMPLETION_THRESHOLD = 0.5;
+const EMBEDDING_DIVERSITY_WEIGHT = 3;
+const DEFAULT_FALLBACK_EMBEDDING_DIMENSIONS = 16;
 
 function stableString(value) {
   if (value === undefined || value === null) {
@@ -373,9 +375,18 @@ function resolveVerifierDiversityKey(verifierCase, caseId, reason) {
   return stableString(reason ?? verifierCase?.verifier ?? verifierCase?.kind ?? caseId);
 }
 
-function rankedVerifierCase(verifierCase, index) {
+function rankedVerifierCase(verifierCase, index, {
+  embeddingIndex,
+  fallbackEmbeddingDimensions = 0,
+} = {}) {
   const caseId = getVerifierCaseId(verifierCase, index);
   const scored = classifyVerifierCase(verifierCase);
+  const diversityKey = resolveVerifierDiversityKey(verifierCase, caseId, scored.reason);
+  const embeddingEvidence = resolveEmbeddingEvidence(verifierCase, {
+    id: caseId,
+    embeddingIndex,
+    fallbackEmbeddingDimensions,
+  });
   return {
     id: caseId,
     taskId: caseId,
@@ -384,7 +395,24 @@ function rankedVerifierCase(verifierCase, index) {
     reasons: scored.reason ? [scored.reason] : [],
     verifierCase,
     source: 'verifier_case',
-    diversityKey: resolveVerifierDiversityKey(verifierCase, caseId, scored.reason),
+    diversityKey,
+    embedding: embeddingEvidence.embedding,
+    embeddingSource: embeddingEvidence.source,
+    metadata: {
+      difficulty: {
+        score: scored.score,
+        band: difficultyBand(scored.score),
+        reasons: scored.reason ? [scored.reason] : [],
+      },
+      diversity: {
+        key: diversityKey,
+        keys: [diversityKey],
+        source: 'verifier_case',
+        embeddingAvailable: Boolean(embeddingEvidence.embedding),
+        embeddingDimension: embeddingEvidence.embedding?.length ?? 0,
+        embeddingSource: embeddingEvidence.source,
+      },
+    },
   };
 }
 
@@ -407,6 +435,67 @@ function resolveDiversityKey(trace, taskId, diversityKey) {
   return stableString(firstRecovery?.category ?? getEvents(trace)[0]?.category ?? taskId);
 }
 
+function resolveDiversityKeys(trace, taskId, diversityKey) {
+  const failureModes = trace?.failureModes ?? trace?.failure_modes;
+  if (Array.isArray(failureModes) && failureModes.length > 0) {
+    return failureModes.map(stableString).filter(Boolean);
+  }
+  const key = resolveDiversityKey(trace, taskId, diversityKey);
+  return key ? [key] : [];
+}
+
+function difficultyBand(score) {
+  if (score >= 5) return 'hard';
+  if (score >= 2) return 'medium';
+  return 'easy';
+}
+
+function normalizeHeldoutVariant(variant, index) {
+  if (variant && typeof variant === 'object' && !Array.isArray(variant)) {
+    return {
+      variantId: stableString(variant.variantId ?? variant.id ?? variant.name ?? `variant_${index + 1}`),
+      ...variant,
+    };
+  }
+  return {
+    variantId: stableString(variant ?? `variant_${index + 1}`),
+  };
+}
+
+function heldoutVariants(trace) {
+  const variants = Array.isArray(trace?.heldoutVariants)
+    ? trace.heldoutVariants
+    : (Array.isArray(trace?.heldout_variants) ? trace.heldout_variants : []);
+  return variants.map(normalizeHeldoutVariant);
+}
+
+function traceLineage(trace = {}) {
+  return {
+    source: trace.source ?? trace.sourceRef ?? trace.source_ref ?? {},
+    config: trace.config ?? trace.configRef ?? trace.config_ref ?? {},
+    trace: trace.trace ?? trace.traceRef ?? trace.trace_ref ?? {},
+  };
+}
+
+function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' }) {
+  const embedding = resolveEmbedding(trace);
+  return {
+    difficulty: {
+      score: scored.score,
+      band: difficultyBand(scored.score),
+      reasons: scored.reasons,
+    },
+    diversity: {
+      key: diversityKey,
+      keys: resolveDiversityKeys(trace, taskId, diversityKey),
+      source,
+      embeddingAvailable: Boolean(embedding),
+      embeddingDimension: embedding?.length ?? 0,
+      embeddingSource: embedding ? 'inline' : 'none',
+    },
+  };
+}
+
 function compareRankedItems(a, b) {
   if (b.score !== a.score) {
     return b.score - a.score;
@@ -417,33 +506,198 @@ function compareRankedItems(a, b) {
   return a.taskId.localeCompare(b.taskId);
 }
 
-export function buildRhoCoreset({
-  traces = [],
-  verifierCases = [],
-  limit = DEFAULT_LIMIT,
-  diversityKey,
-} = {}) {
-  const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
-  const rankedTraces = traces.map((trace, index) => {
-    const taskId = getTaskId(trace, index);
-    const scored = scoreTrace(trace);
-    return {
-      taskId,
-      score: scored.score,
-      reasons: scored.reasons,
-      trace,
-      diversityKey: resolveDiversityKey(trace, taskId, diversityKey),
-    };
-  });
-  const rankedVerifierCases = verifierCases
-    .map(rankedVerifierCase)
-    .filter((item) => item.score > 0 || item.reasons.length > 0);
-  const ranked = [...rankedTraces, ...rankedVerifierCases].sort(compareRankedItems);
+function normalizeEmbedding(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+  const vector = value.map((entry) => Number(entry));
+  if (!vector.every(Number.isFinite)) {
+    return null;
+  }
+  const magnitude = Math.sqrt(vector.reduce((sum, entry) => sum + entry * entry, 0));
+  return magnitude > 0 ? vector : null;
+}
 
-  if (safeLimit === 0) {
-    return { items: [], totalCandidates: ranked.length, selectedCount: 0 };
+function resolveEmbedding(source = {}) {
+  return normalizeEmbedding(
+    source.embedding ??
+      source.embeddingVector ??
+      source.embedding_vector ??
+      source.vector ??
+      source.metadata?.embedding ??
+      source.result?.embedding,
+  );
+}
+
+function embeddingFromIndex(embeddingIndex, keys) {
+  if (!embeddingIndex) {
+    return null;
+  }
+  for (const key of keys.map(stableString).filter(Boolean)) {
+    if (embeddingIndex instanceof Map && embeddingIndex.has(key)) {
+      return normalizeEmbedding(embeddingIndex.get(key));
+    }
+    if (typeof embeddingIndex === 'function') {
+      const embedding = normalizeEmbedding(embeddingIndex(key));
+      if (embedding) {
+        return embedding;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(Object(embeddingIndex), key)) {
+      return normalizeEmbedding(embeddingIndex[key]);
+    }
+  }
+  return null;
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function fallbackEmbeddingText(source = {}, id = '') {
+  const fields = [
+    id,
+    source.prompt,
+    source.summary,
+    source.description,
+    source.kind,
+    source.verifier,
+    source.toolName,
+    source.tool_name,
+    source.status,
+    ...(Array.isArray(source.failureModes) ? source.failureModes : []),
+    ...(Array.isArray(source.tags) ? source.tags : []),
+    ...(Array.isArray(source.reasons) ? source.reasons : []),
+  ];
+  return fields.map(stableString).filter(Boolean).join(' ');
+}
+
+function deterministicFallbackEmbedding(source, id, dimensions) {
+  const safeDimensions = Math.max(0, Math.floor(Number(dimensions) || 0));
+  const text = fallbackEmbeddingText(source, id);
+  if (safeDimensions === 0 || text.length === 0) {
+    return null;
+  }
+  const vector = Array.from({ length: safeDimensions }, () => 0);
+  const tokens = text.toLowerCase().split(/[^a-z0-9_:-]+/).filter(Boolean);
+  for (const token of tokens.length > 0 ? tokens : [text.toLowerCase()]) {
+    const hash = hashString(token);
+    const bucket = hash % safeDimensions;
+    const sign = (hash & 1) === 0 ? 1 : -1;
+    vector[bucket] += sign;
+  }
+  return normalizeEmbedding(vector);
+}
+
+function resolveEmbeddingEvidence(source = {}, {
+  id,
+  embeddingIndex,
+  fallbackEmbeddingDimensions = DEFAULT_FALLBACK_EMBEDDING_DIMENSIONS,
+} = {}) {
+  const inline = resolveEmbedding(source);
+  if (inline) {
+    return { embedding: inline, source: 'inline' };
+  }
+  const provided = embeddingFromIndex(embeddingIndex, [
+    id,
+    source.taskId,
+    source.task_id,
+    source.caseId,
+    source.case_id,
+    source.id,
+  ]);
+  if (provided) {
+    return { embedding: provided, source: 'provided' };
+  }
+  const fallback = deterministicFallbackEmbedding(source, id, fallbackEmbeddingDimensions);
+  if (fallback) {
+    return { embedding: fallback, source: 'fallback' };
+  }
+  return { embedding: null, source: 'none' };
+}
+
+function withEmbeddingMetadata(metadata, embeddingEvidence) {
+  return {
+    ...metadata,
+    diversity: {
+      ...metadata.diversity,
+      embeddingAvailable: Boolean(embeddingEvidence.embedding),
+      embeddingDimension: embeddingEvidence.embedding?.length ?? 0,
+      embeddingSource: embeddingEvidence.source,
+    },
+  };
+}
+
+function dotProduct(left, right) {
+  const length = Math.min(left.length, right.length);
+  let dot = 0;
+  for (let index = 0; index < length; index += 1) {
+    dot += left[index] * right[index];
+  }
+  return dot;
+}
+
+function magnitude(vector) {
+  return Math.sqrt(vector.reduce((sum, entry) => sum + entry * entry, 0));
+}
+
+function cosineSimilarity(left, right) {
+  const denominator = magnitude(left) * magnitude(right);
+  if (denominator === 0) {
+    return 0;
+  }
+  return Math.max(-1, Math.min(1, dotProduct(left, right) / denominator));
+}
+
+function embeddingNovelty(item, selected) {
+  if (!item.embedding || selected.length === 0) {
+    return item.embedding ? 1 : 0;
+  }
+  const distances = selected
+    .filter((selectedItem) => selectedItem.embedding)
+    .map((selectedItem) => 1 - cosineSimilarity(item.embedding, selectedItem.embedding));
+  return distances.length > 0 ? Math.min(...distances) : 1;
+}
+
+function compareEmbeddingCandidates(a, b) {
+  if (b.selectionScore !== a.selectionScore) {
+    return b.selectionScore - a.selectionScore;
+  }
+  if (b.novelty !== a.novelty) {
+    return b.novelty - a.novelty;
+  }
+  return compareRankedItems(a.item, b.item);
+}
+
+function selectByEmbeddingDiversity(ranked, safeLimit) {
+  const selected = [];
+  const remaining = [...ranked];
+
+  while (selected.length < safeLimit && remaining.length > 0) {
+    const scored = remaining
+      .map((item) => {
+        const novelty = embeddingNovelty(item, selected);
+        return {
+          item,
+          novelty,
+          selectionScore: item.score + novelty * EMBEDDING_DIVERSITY_WEIGHT,
+        };
+      })
+      .sort(compareEmbeddingCandidates);
+    const next = scored[0].item;
+    selected.push(next);
+    remaining.splice(remaining.indexOf(next), 1);
   }
 
+  return selected;
+}
+
+function selectByKeyDiversity(ranked, safeLimit) {
   const selected = [];
   const selectedKeys = new Set();
 
@@ -466,11 +720,84 @@ export function buildRhoCoreset({
     }
   }
 
+  return selected;
+}
+
+export function buildRhoCoreset({
+  traces = [],
+  verifierCases = [],
+  limit = DEFAULT_LIMIT,
+  diversityKey,
+  embeddingIndex,
+  embeddingById,
+  precomputedEmbeddings,
+  fallbackEmbeddingDimensions,
+} = {}) {
+  const safeLimit = Math.max(0, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : DEFAULT_LIMIT);
+  const resolvedEmbeddingIndex = embeddingIndex ?? embeddingById ?? precomputedEmbeddings;
+  const resolvedFallbackEmbeddingDimensions = fallbackEmbeddingDimensions ??
+    (resolvedEmbeddingIndex ? DEFAULT_FALLBACK_EMBEDDING_DIMENSIONS : 0);
+  const rankedTraces = traces.map((trace, index) => {
+    const taskId = getTaskId(trace, index);
+    const scored = scoreTrace(trace);
+    const resolvedDiversityKey = resolveDiversityKey(trace, taskId, diversityKey);
+    const embeddingEvidence = resolveEmbeddingEvidence(trace, {
+      id: taskId,
+      embeddingIndex: resolvedEmbeddingIndex,
+      fallbackEmbeddingDimensions: resolvedFallbackEmbeddingDimensions,
+    });
+    return {
+      taskId,
+      score: scored.score,
+      reasons: scored.reasons,
+      trace,
+      diversityKey: resolvedDiversityKey,
+      embedding: embeddingEvidence.embedding,
+      embeddingSource: embeddingEvidence.source,
+      heldoutVariants: heldoutVariants(trace),
+      lineage: traceLineage(trace),
+      metadata: withEmbeddingMetadata(
+        replayMetadata({
+          trace,
+          taskId,
+          scored,
+          diversityKey: resolvedDiversityKey,
+        }),
+        embeddingEvidence,
+      ),
+    };
+  });
+  const rankedVerifierCases = verifierCases
+    .map((verifierCase, index) => rankedVerifierCase(verifierCase, index, {
+      embeddingIndex: resolvedEmbeddingIndex,
+      fallbackEmbeddingDimensions: resolvedFallbackEmbeddingDimensions,
+    }))
+    .filter((item) => item.score > 0 || item.reasons.length > 0);
+  const ranked = [...rankedTraces, ...rankedVerifierCases].sort(compareRankedItems);
+
+  if (safeLimit === 0) {
+    return { items: [], totalCandidates: ranked.length, selectedCount: 0 };
+  }
+
+  const embeddedCount = ranked.filter((item) => item.embedding).length;
+  const fallbackEmbeddedCount = ranked.filter((item) => item.embeddingSource === 'fallback').length;
+  const providedEmbeddedCount = ranked.filter((item) => item.embeddingSource === 'provided').length;
+  const useEmbeddingDiversity = embeddedCount >= 2 && safeLimit >= 2;
+  const selected = useEmbeddingDiversity
+    ? selectByEmbeddingDiversity(ranked, safeLimit)
+    : selectByKeyDiversity(ranked, safeLimit);
+
   selected.sort(compareRankedItems);
 
   return {
     items: selected,
     totalCandidates: ranked.length,
     selectedCount: selected.length,
+    selection: {
+      strategy: useEmbeddingDiversity ? 'embedding_dpp_like' : 'difficulty_diversity_key',
+      embeddedCandidates: embeddedCount,
+      providedEmbeddedCandidates: providedEmbeddedCount,
+      fallbackEmbeddedCandidates: fallbackEmbeddedCount,
+    },
   };
 }

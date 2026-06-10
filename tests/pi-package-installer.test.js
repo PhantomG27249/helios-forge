@@ -123,10 +123,11 @@ test('installs the bundled Helios research harness package', async () => {
 
     assert.equal(result.packageRecord.packageId, 'helios-research-harness');
     assert.equal(result.packageRecord.name, 'Helios Research Harness');
-    assert.equal(result.capabilities.length, 10);
+    assert.equal(result.capabilities.length, 11);
     assert.deepEqual(
       result.capabilities.map((capability) => capability.type).sort(),
       [
+        'pi_extension',
         'pi_extension',
         'skill',
         'skill',
@@ -142,14 +143,20 @@ test('installs the bundled Helios research harness package', async () => {
 
     const researchCommand = result.capabilities.find((capability) => capability.id === 'helios-research-harness:slash_command:research');
     const kwargsExtension = result.capabilities.find((capability) => capability.id === 'helios-research-harness:pi_extension:kwargs');
+    const bridgeExtension = result.capabilities.find((capability) => capability.id === 'helios-research-harness:pi_extension:helios-forge');
     assert.ok(researchCommand);
     assert.ok(kwargsExtension);
+    assert.ok(bridgeExtension);
     assert.equal(researchCommand.enabled, true);
     assert.equal(kwargsExtension.enabled, true);
+    assert.equal(bridgeExtension.enabled, true);
     assert.deepEqual(JSON.parse(await readFile(researchCommand.path, 'utf8')).command, 'research');
     assert.match(await readFile(kwargsExtension.path, 'utf8'), /preserve_thinking/);
+    assert.match(await readFile(bridgeExtension.path, 'utf8'), /HELIOS_CAPABILITIES_MANIFEST/);
     assert.equal(kwargsExtension.folder, path.dirname(kwargsExtension.path));
+    assert.equal(bridgeExtension.folder, path.dirname(bridgeExtension.path));
     assert.equal(kwargsExtension.path.startsWith(path.join(workspaceRoot, '.harness', 'packages')), true);
+    assert.equal(bridgeExtension.path.startsWith(path.join(workspaceRoot, '.harness', 'packages')), true);
   });
 });
 

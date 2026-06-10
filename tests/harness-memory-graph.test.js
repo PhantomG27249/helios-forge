@@ -166,3 +166,50 @@ test('memory evals score deterministic quality signals for records and corpora',
   assert.equal(corpus.averageScore, Math.round((strong.score + weak.score) / 2));
   assert.equal(corpus.promotableCount, 1);
 });
+
+test('memory evals report paper-grade graph retrieval and evidence metrics', () => {
+  const corpus = scoreMemoryCorpus({
+    records: [
+      {
+        type: 'fact',
+        summary: 'The retriever uses graph search.',
+        evidence: ['passage_graph'],
+        reviewStatus: 'reviewed',
+        validatorBacked: true,
+        status: 'active',
+        expectedObject: 'graph search',
+        object: 'graph search',
+      },
+      {
+        type: 'fact',
+        summary: 'The legacy retriever used lexical search.',
+        evidence: [],
+        reviewStatus: 'candidate',
+        validatorBacked: false,
+        status: 'active',
+        expectedObject: 'graph search',
+        object: 'lexical search',
+      },
+    ],
+    conflicts: [
+      { action: 'discard', correctAction: 'discard', evidenceCoverage: 1 },
+      { action: 'needs_review', correctAction: 'discard', evidenceCoverage: 0.5 },
+    ],
+    retrievalResults: [
+      { queryId: 'q1', expectedIds: ['fact_graph'], retrievedIds: ['fact_graph', 'passage_graph'], tokensEstimated: 80 },
+      { queryId: 'q2', expectedIds: ['fact_missing'], retrievedIds: ['fact_other'], tokensEstimated: 120 },
+    ],
+    graph: {
+      nodes: [{ id: 'fact_graph' }, { id: 'passage_graph' }, { id: 'schema_graph' }],
+      edges: [{ from: 'fact_graph', to: 'passage_graph' }, { from: 'fact_graph', to: 'schema_graph' }],
+    },
+    budget: { tokenBudget: 400 },
+  });
+
+  assert.equal(corpus.metrics.conflictQuality, 50);
+  assert.equal(corpus.metrics.activeFactPrecision, 50);
+  assert.equal(corpus.metrics.evidenceCoverage, 50);
+  assert.equal(corpus.metrics.connectivity, 67);
+  assert.equal(corpus.metrics.retrievalHitRate, 50);
+  assert.equal(corpus.metrics.budgetEfficiency, 50);
+});

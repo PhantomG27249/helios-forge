@@ -59,6 +59,11 @@
       "id": "kwargs",
       "name": "Model Args and Thinking Preservation",
       "path": "extensions/kwargs.ts"
+    },
+    {
+      "id": "helios-forge",
+      "name": "Helios Forge Bridge Metadata",
+      "path": "extensions/helios-forge.ts"
     }
   ]
 }

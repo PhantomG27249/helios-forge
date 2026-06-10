@@ -51,6 +51,27 @@ let harnessState = {
     selectedEventKey: null,
     timelines: new Map(),
   },
+  hierarchy: {
+    localMeta: {
+      status: 'idle',
+      candidateCount: 0,
+      cellId: null,
+      attemptId: null,
+    },
+    memory: {
+      status: 'idle',
+      proposalCount: 0,
+      cellId: null,
+      attemptId: null,
+    },
+    experiments: {
+      status: 'idle',
+      runCount: 0,
+      decision: null,
+      experimentId: null,
+    },
+  },
+  capabilityGoals: null,
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -232,6 +253,7 @@ window.setServerUrl = function(host) {
 function startConnection() {
   serverUrl = serverUrlInput.value.trim();
   workspacePath = workspacePathInput?.value?.trim() || '';
+  syncWorkspaceInputs(workspacePath);
   if (!serverUrl) return;
   if (location.protocol === 'https:') serverUrl = serverUrl.replace('ws://', 'wss://');
   debug(`Connecting to: ${serverUrl}`);
@@ -316,6 +338,19 @@ const harnessSwarmThinking = $('#harness-swarm-thinking');
 const harnessSwarmActions = $('#harness-swarm-actions');
 const harnessSwarmHandoff = $('#harness-swarm-handoff');
 const harnessSwarmEventInspector = $('#harness-swarm-event-inspector');
+const harnessLocalMetaStatus = $('#harness-local-meta-status');
+const harnessLocalMetaCandidates = $('#harness-local-meta-candidates');
+const harnessLocalMetaCell = $('#harness-local-meta-cell');
+const harnessMemoryHierarchyStatus = $('#harness-memory-hierarchy-status');
+const harnessMemoryProposals = $('#harness-memory-proposals');
+const harnessMemorySource = $('#harness-memory-source');
+const harnessExperimentsStatus = $('#harness-experiments-status');
+const harnessExperimentRuns = $('#harness-experiment-runs');
+const harnessExperimentDecision = $('#harness-experiment-decision');
+const harnessCapabilityGoalsStatus = $('#harness-capability-goals-status');
+const harnessCapabilityGoalsImplemented = $('#harness-capability-goals-implemented');
+const harnessCapabilityGoalsOpen = $('#harness-capability-goals-open');
+const harnessCapabilityGoalRows = $('#harness-capability-goal-rows');
 const workspaceInput = document.getElementById('workspace-input');
 
 // ═══════════════════════════════════════════════════════════
@@ -324,6 +359,18 @@ const workspaceInput = document.getElementById('workspace-input');
 function syncWorkspaceInputs(path) {
   if (workspacePathInput) workspacePathInput.value = path || '';
   if (workspaceInput) workspaceInput.value = path || '';
+}
+
+function getSelectedWorkspacePath() {
+  const latest = workspaceInput?.value?.trim()
+    || workspacePathInput?.value?.trim()
+    || workspacePath
+    || '';
+  if (latest && latest !== workspacePath) {
+    workspacePath = latest;
+    syncWorkspaceInputs(workspacePath);
+  }
+  return workspacePath;
 }
 
 function applyWorkspaceSelection(path, { notify = true } = {}) {
@@ -534,11 +581,7 @@ function handleMessage(msg) {
       updateHeader();
       // Update workspace input to match session's directory
       if (msg.state?.cwd) {
-        syncWorkspaceInputs(msg.state.cwd);
-        if (msg.state.cwd !== workspacePath) {
-          workspacePath = msg.state.cwd;
-          debug('Workspace updated to: ' + workspacePath);
-        }
+        applyWorkspaceSelection(msg.state.cwd, { notify: false });
       }
     }
     // Don't add a new session - update current instead
@@ -552,6 +595,11 @@ function handleMessage(msg) {
   }
 
   if (msg.type === 'workspace_changed' && msg.success) {
+    if (msg.path) {
+      workspacePath = msg.path;
+      syncWorkspaceInputs(workspacePath);
+    }
+    send({ type: 'harness_status' });
     toast('Workspace set', 'success');
     return;
   }
@@ -682,6 +730,7 @@ function handleMessage(msg) {
 
 function updateHarnessStatus(status) {
   harnessState.status = status.state || 'unknown';
+  if (status.capabilityGoals) harnessState.capabilityGoals = status.capabilityGoals;
   scheduleHarnessRender({ immediate: true });
 }
 
@@ -724,6 +773,7 @@ function handleHarnessEvent(event) {
   updateHarnessAdaptiveSearch(event);
   updateHarnessSkillCandidateEvents(event);
   updateHarnessAbMctsReplayEvents(event);
+  updateHarnessHierarchyFeedback(event);
 
   if (event.type === 'approval.required') {
     harnessState.pendingApprovals.set(event.actionId, event);
@@ -826,6 +876,43 @@ function updateHarnessVerifierEvolution(event) {
   if (event.type === 'approval.required' || event.type === 'approval.resolved') {
     state.pendingVerifierPromotions = Array.from(harnessState.pendingApprovals.values())
       .filter(isVerifierPromotionApproval).length;
+  }
+}
+
+function updateHarnessHierarchyFeedback(event) {
+  if (event.type === 'local_meta.completed') {
+    harnessState.hierarchy.localMeta = {
+      status: 'completed',
+      candidateCount: event.candidateCount ?? (event.candidates || []).length,
+      cellId: event.cellId || null,
+      attemptId: event.attemptId || null,
+    };
+    event.summary = event.summary || `${harnessState.hierarchy.localMeta.candidateCount} local meta candidates`;
+  }
+
+  if (event.type === 'local_memory.proposed') {
+    harnessState.hierarchy.memory = {
+      status: 'pending global review',
+      proposalCount: event.proposalCount ?? (event.memoryProposals || []).length,
+      cellId: event.cellId || null,
+      attemptId: event.attemptId || null,
+    };
+    event.summary = event.summary || `${harnessState.hierarchy.memory.proposalCount} memory proposals`;
+  }
+
+  if (event.type === 'harness_experiment.completed' || event.type === 'experiment.decision_written') {
+    const current = harnessState.hierarchy.experiments;
+    harnessState.hierarchy.experiments = {
+      status: event.status || 'completed',
+      runCount: current.runCount + 1,
+      decision: event.decision?.status || event.decision?.conclusion || event.result || event.status || 'completed',
+      experimentId: event.experimentId || current.experimentId,
+    };
+    event.summary = event.summary || `experiment ${harnessState.hierarchy.experiments.decision}`;
+  }
+
+  if (event.type === 'harness_status.updated' && event.capabilityGoals) {
+    harnessState.capabilityGoals = event.capabilityGoals;
   }
 }
 
@@ -1200,6 +1287,56 @@ function renderHarnessSwarm() {
   renderHarnessSwarmInspector(selected, timeline, selectedEvent);
 }
 
+function renderHarnessHierarchyFeedback() {
+  const localMeta = harnessState.hierarchy.localMeta;
+  if (harnessLocalMetaStatus) harnessLocalMetaStatus.textContent = localMeta.status || 'idle';
+  if (harnessLocalMetaCandidates) harnessLocalMetaCandidates.textContent = String(localMeta.candidateCount || 0);
+  if (harnessLocalMetaCell) harnessLocalMetaCell.textContent = localMeta.cellId || 'n/a';
+
+  const memory = harnessState.hierarchy.memory;
+  if (harnessMemoryHierarchyStatus) harnessMemoryHierarchyStatus.textContent = memory.status || 'idle';
+  if (harnessMemoryProposals) harnessMemoryProposals.textContent = String(memory.proposalCount || 0);
+  if (harnessMemorySource) harnessMemorySource.textContent = memory.cellId || 'n/a';
+
+  const experiments = harnessState.hierarchy.experiments;
+  if (harnessExperimentsStatus) harnessExperimentsStatus.textContent = experiments.status || 'idle';
+  if (harnessExperimentRuns) harnessExperimentRuns.textContent = String(experiments.runCount || 0);
+  if (harnessExperimentDecision) harnessExperimentDecision.textContent = experiments.decision || 'n/a';
+}
+
+function renderCapabilityGoalRows() {
+  const goals = harnessState.capabilityGoals;
+  if (!goals) {
+    if (harnessCapabilityGoalsStatus) harnessCapabilityGoalsStatus.textContent = 'idle';
+    if (harnessCapabilityGoalsImplemented) harnessCapabilityGoalsImplemented.textContent = '0';
+    if (harnessCapabilityGoalsOpen) harnessCapabilityGoalsOpen.textContent = '0';
+    if (harnessCapabilityGoalRows) harnessCapabilityGoalRows.innerHTML = '<div class="harness-empty compact">No capability goal status yet</div>';
+    return;
+  }
+
+  const implemented = goals.implementedCount ?? goals.counts?.implemented ?? 0;
+  const open = goals.openCount ?? Math.max(0, (goals.totalCount || 0) - implemented);
+  if (harnessCapabilityGoalsStatus) {
+    harnessCapabilityGoalsStatus.textContent = open > 0 ? `${open} open` : 'complete';
+  }
+  if (harnessCapabilityGoalsImplemented) harnessCapabilityGoalsImplemented.textContent = String(implemented);
+  if (harnessCapabilityGoalsOpen) harnessCapabilityGoalsOpen.textContent = String(open);
+  if (!harnessCapabilityGoalRows) return;
+
+  const rows = (goals.goals || []).slice(0, 8).map((goal) => {
+    const missing = (goal.missingEvidence || []).length;
+    const blockers = (goal.blockers || []).length;
+    const suffix = blockers ? `${blockers} blockers` : missing ? `${missing} missing` : 'evidence complete';
+    return `
+      <div class="harness-list-row">
+        <span>${esc(goal.label || goal.goalId || 'goal')}</span>
+        <strong>${esc(goal.status || 'unknown')} · ${esc(suffix)}</strong>
+      </div>
+    `;
+  }).join('');
+  harnessCapabilityGoalRows.innerHTML = rows || '<div class="harness-empty compact">No capability goal rows</div>';
+}
+
 function renderHarnessPanel() {
   if (!harnessPanel) return;
   harnessSubtitle.textContent = harnessState.status === 'running' ? 'Sidecar running' : `Sidecar ${harnessState.status}`;
@@ -1213,6 +1350,8 @@ function renderHarnessPanel() {
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
   renderHarnessSwarm();
+  renderCapabilityGoalRows();
+  renderHarnessHierarchyFeedback();
   renderHarnessTraces();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
@@ -1264,7 +1403,7 @@ function requestHarnessAdaptiveSearchStatus() {
         : 'Adaptive-search status has not been returned by the sidecar yet.';
     }
   }, 2500);
-  send({ type: 'harness_adaptive_search_status_get', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_adaptive_search_status_get', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function handleHarnessAdaptiveSearchStatus(payload) {
@@ -1323,7 +1462,7 @@ function requestHarnessSkillCandidates() {
   harnessSkillCandidatesRequestTimer = setTimeout(() => {
     if (!harnessSkillCandidatesLoaded) renderHarnessSkillCandidates();
   }, 2500);
-  send({ type: 'harness_skill_candidates_get', workspaceRoot: workspacePath || undefined, limit: 20 });
+  send({ type: 'harness_skill_candidates_get', workspaceRoot: getSelectedWorkspacePath() || undefined, limit: 20 });
 }
 
 function handleHarnessSkillCandidates(payload) {
@@ -1363,7 +1502,7 @@ function updateHarnessSkillCandidateEvents(event) {
 
 function reviewHarnessSkillCandidate(candidateId, decision) {
   if (!candidateId || !decision) return;
-  send({ type: 'harness_skill_candidate_review', candidateId, decision, workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_skill_candidate_review', candidateId, decision, workspaceRoot: getSelectedWorkspacePath() || undefined });
   harnessSkillCandidates = harnessSkillCandidates.map(candidate => {
     const id = candidate.candidateId || candidate.id || candidate.name;
     return id === candidateId ? { ...candidate, status: `${decision}_requested` } : candidate;
@@ -1492,7 +1631,7 @@ function requestHarnessCapabilities() {
         : 'No capabilities returned yet';
     }
   }, 2500);
-  send({ type: 'harness_capabilities_get', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_capabilities_get', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function capabilityBucketFromPayload(payload, keys) {
@@ -2018,7 +2157,7 @@ function saveCapabilityRecord(record) {
   populateCapabilityForm(record);
   send({
     type: 'harness_capability_save',
-    workspaceRoot: workspacePath || undefined,
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
     record,
   });
   if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = `Installing ${record.name}...`;
@@ -2129,7 +2268,7 @@ function deleteHarnessCapability(capabilityId) {
   if (!ok) return;
   send({
     type: 'harness_capability_delete',
-    workspaceRoot: workspacePath || undefined,
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
     capabilityId,
   });
   if (harnessCapabilityStatus) harnessCapabilityStatus.textContent = 'Deleting capability...';
@@ -2391,7 +2530,7 @@ function toggleHarnessPanel() {
 }
 
 function startHarness() {
-  send({ type: 'harness_start', workspaceRoot: workspacePath || undefined });
+  send({ type: 'harness_start', workspaceRoot: getSelectedWorkspacePath() || undefined });
 }
 
 function stopHarness() {
@@ -2440,6 +2579,7 @@ function launchHarnessFromPrompt(text, options = {}) {
     mode: 'full',
     budget: { ...DEFAULT_HARNESS_BUDGET },
     source: route.mode === 'direct' ? 'prompt_direct' : 'prompt_background',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
 
   debug(`Harness ${route.mode} launch: ${route.reason}`);
@@ -2460,6 +2600,7 @@ function runHarnessTask() {
     mode: 'full',
     budget: { ...DEFAULT_HARNESS_BUDGET },
     source: 'manual_panel',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
   harnessTaskInput.value = '';
 }
@@ -2478,6 +2619,7 @@ function runDeepResearchTask() {
       maxWallMinutes: Number.isFinite(maxWallMinutes) ? maxWallMinutes : 45,
     },
     source: 'deep_research_ui',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
   harnessDeepTaskInput.value = '';
 }

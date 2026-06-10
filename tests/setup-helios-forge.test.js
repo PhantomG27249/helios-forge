@@ -35,12 +35,12 @@ test('setup creates local harness config, installs bundled package, and mounts c
     assert.equal(result.workspaceRoot, workspaceRoot);
     assert.equal(result.config.created, true);
     assert.equal(result.packageRecord.packageId, 'helios-research-harness');
-    assert.equal(result.capabilityCount, 10);
-    assert.equal(result.runtimeCounts.enabled, 10);
+    assert.equal(result.capabilityCount, 11);
+    assert.equal(result.runtimeCounts.enabled, 11);
     assert.equal(result.runtimeCounts.skill, 3);
     assert.equal(result.runtimeCounts.template, 3);
     assert.equal(result.runtimeCounts.slash_command, 3);
-    assert.equal(result.runtimeCounts.pi_extension, 1);
+    assert.equal(result.runtimeCounts.pi_extension, 2);
 
     const configPath = path.join(workspaceRoot, '.harness', 'config.yaml');
     const registryPath = path.join(workspaceRoot, '.harness', 'capabilities.json');
@@ -57,16 +57,18 @@ test('setup creates local harness config, installs bundled package, and mounts c
     assert.match(configText, /mode: advisory/);
 
     const registry = JSON.parse(await readFile(registryPath, 'utf8'));
-    assert.equal(registry.capabilities.length, 10);
+    assert.equal(registry.capabilities.length, 11);
     assert.equal(
       registry.capabilities.every((capability) => capability.path.startsWith(path.join(workspaceRoot, '.harness', 'packages'))),
       true,
     );
+    assert.ok(registry.capabilities.some((capability) => capability.id === 'helios-research-harness:pi_extension:helios-forge'));
 
     const manifest = JSON.parse(await readFile(runtimeManifestPath, 'utf8'));
     assert.equal(manifest.profileId, 'default');
-    assert.equal(manifest.capabilities.length, 10);
+    assert.equal(manifest.capabilities.length, 11);
     assert.equal(manifest.byType.slash_command.length, 3);
+    assert.equal(manifest.byType.pi_extension.length, 2);
     assert.equal(await exists(path.join(workspaceRoot, '.pi')), false);
   });
 });

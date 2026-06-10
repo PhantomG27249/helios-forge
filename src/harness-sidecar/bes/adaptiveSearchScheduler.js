@@ -31,6 +31,15 @@ const DEFAULT_ARMS = [
   },
 ];
 
+const DEFAULT_ACTION_TYPES = [
+  { actionType: 'text', label: 'Generate or revise text reasoning', cost: 1, prior: 0.45 },
+  { actionType: 'tool', label: 'Run a tool-backed action', cost: 2, prior: 0.42 },
+  { actionType: 'swarm', label: 'Spawn or query a swarm lane', cost: 3, prior: 0.4 },
+  { actionType: 'visual', label: 'Collect or inspect visual evidence', cost: 2, prior: 0.44 },
+  { actionType: 'replay', label: 'Run replay against hard cases', cost: 2, prior: 0.46 },
+  { actionType: 'verifier', label: 'Run verifier evidence', cost: 2, prior: 0.5 },
+];
+
 const DEFAULT_POLICY = {
   mode: 'advisory',
   exploration: 0.18,
@@ -41,6 +50,7 @@ const DEFAULT_POLICY = {
 export function createAdaptiveSearchScheduler({ arms, rng, policy } = {}) {
   const configuredPolicy = { ...DEFAULT_POLICY, ...(policy || {}) };
   const armEntries = normalizeArms(arms);
+  const actionTypeEntries = normalizeActionTypes();
   const scheduler = {
     version: 1,
     policy: configuredPolicy,
@@ -55,6 +65,20 @@ export function createAdaptiveSearchScheduler({ arms, rng, policy } = {}) {
           visits: 0,
           totalReward: 0,
           evidenceCount: 0,
+          lastReward: null,
+        },
+      ]),
+    ),
+    actionTypes: Object.fromEntries(
+      actionTypeEntries.map((actionType) => [
+        actionType.actionType,
+        {
+          actionType: actionType.actionType,
+          label: actionType.label,
+          cost: actionType.cost,
+          prior: actionType.prior,
+          visits: 0,
+          totalReward: 0,
           lastReward: null,
         },
       ]),
@@ -79,23 +103,39 @@ export function selectAdaptiveSearchAction({ scheduler, context } = {}) {
   const scores = Object.values(scheduler.arms).map((armState, index) =>
     scoreArm({ armState, context: normalizedContext, scheduler, index }),
   );
-  const selectedScore = scores
+  let selectedScore = scores
     .filter((score) => score.eligible)
     .sort((left, right) => {
       if (right.totalScore !== left.totalScore) return right.totalScore - left.totalScore;
       return left.index - right.index;
     })[0] || scores.find((score) => score.arm === 'stop_or_promote') || scores[0];
+  const actionTypeScores = Object.values(scheduler.actionTypes || {}).map((actionTypeState, index) =>
+    scoreActionType({ actionTypeState, context: normalizedContext, scheduler, index }),
+  );
+  const eligibleActionTypeScores = actionTypeScores
+    .filter((score) => score.eligible)
+    .sort((left, right) => {
+      if (right.totalScore !== left.totalScore) return right.totalScore - left.totalScore;
+      return left.index - right.index;
+    });
+  const actionTypeExhausted = actionTypeScores.length > 0 && eligibleActionTypeScores.length === 0;
+  const selectedActionTypeScore = actionTypeExhausted ? null : eligibleActionTypeScores[0];
+  if (actionTypeExhausted) {
+    selectedScore = scores.find((score) => score.arm === 'stop_or_promote') || selectedScore;
+  }
 
   const actionId = `adaptive_${scheduler.nextActionNumber++}`;
   const action = {
     actionId,
     arm: selectedScore.arm,
+    actionType: selectedActionTypeScore?.actionType || null,
     advisory: scheduler.policy.mode !== 'enabled',
     contextId: normalizedContext.taskId,
     trace: {
       type: 'ab_mcts.action_selected',
       actionId,
       selectedArm: selectedScore.arm,
+      selectedActionType: selectedActionTypeScore?.actionType || null,
       advisory: scheduler.policy.mode !== 'enabled',
       context: {
         taskId: normalizedContext.taskId,
@@ -103,12 +143,15 @@ export function selectAdaptiveSearchAction({ scheduler, context } = {}) {
         budgetPressure: normalizedContext.budgetPressure,
       },
       scores: scores.map(({ index, ...score }) => score),
+      actionTypeScores: actionTypeScores.map(({ index, ...score }) => score),
+      actionTypeExhausted,
     },
   };
 
   scheduler.actions[actionId] = {
     actionId,
     arm: action.arm,
+    actionType: action.actionType,
     context: action.trace.context,
     selectedAt: scheduler.history.length + 1,
   };
@@ -135,6 +178,12 @@ export function recordAdaptiveSearchOutcome({ scheduler, actionId, reward, evide
   armState.totalReward = round(armState.totalReward + normalizedReward);
   armState.evidenceCount += evidence ? 1 : 0;
   armState.lastReward = normalizedReward;
+  const actionTypeState = scheduler.actionTypes?.[action.actionType];
+  if (actionTypeState) {
+    actionTypeState.visits += 1;
+    actionTypeState.totalReward = round(actionTypeState.totalReward + normalizedReward);
+    actionTypeState.lastReward = normalizedReward;
+  }
 
   const outcome = {
     type: 'ab_mcts.outcome_recorded',
@@ -207,17 +256,29 @@ function normalizeArms(arms) {
   });
 }
 
+function normalizeActionTypes() {
+  return DEFAULT_ACTION_TYPES.map((actionType) => ({
+    ...actionType,
+    prior: clamp01(actionType.prior),
+  }));
+}
+
 function normalizeContext(context = {}) {
   const evidence = Array.isArray(context.evidence) ? context.evidence : [];
+  const remainingByActionType = context.budget?.remainingByActionType
+    || context.remainingByActionType
+    || {};
   return {
     taskId: context.taskId || context.contextId || 'adaptive_search_context',
     evidence,
     evidenceCount: Number.isFinite(context.evidenceCount) ? context.evidenceCount : evidence.length,
     budgetPressure: clamp01(context.budget?.pressure ?? context.budgetPressure ?? 0),
     remainingActions: context.budget?.remainingActions ?? context.remainingActions ?? Infinity,
+    remainingByActionType,
     bestCandidateScore: clamp01(context.bestCandidate?.score ?? context.bestScore ?? 0),
     confidence: clamp01(context.confidence ?? context.bestCandidate?.confidence ?? 0),
     hasContradictions: Boolean(context.signals?.hasContradictions || context.contradictions?.length),
+    signals: context.signals || {},
   };
 }
 
@@ -273,6 +334,71 @@ function scoreArm({ armState, context, scheduler, index }) {
     totalScore,
     eligible,
     reason: reasons.length ? reasons.join(',') : 'baseline_policy_score',
+  };
+}
+
+function scoreActionType({ actionTypeState, context, scheduler, index }) {
+  const meanReward = actionTypeState.visits > 0
+    ? actionTypeState.totalReward / actionTypeState.visits
+    : actionTypeState.prior;
+  const randomProbe = Number(scheduler.rng?.() ?? 0.5);
+  const exploration = scheduler.policy.exploration * clamp01(randomProbe) / Math.sqrt(actionTypeState.visits + 1);
+  const remaining = context.remainingByActionType?.[actionTypeState.actionType];
+  const reasons = [];
+  let contextBonus = 0;
+  let eligible = remaining === undefined || remaining === null || Number(remaining) > 0;
+
+  if (!eligible) reasons.push('action_budget_exhausted');
+  if (context.budgetPressure >= scheduler.policy.highBudgetPressure && actionTypeState.cost >= 3) {
+    eligible = false;
+    reasons.push('budget_pressure_removes_expensive_action_type');
+  }
+
+  if (actionTypeState.actionType === 'verifier') {
+    if (context.signals.needsVerifier || context.bestCandidateScore >= 0.75) {
+      contextBonus += 0.34;
+      reasons.push('candidate_needs_verifier');
+    }
+    if (context.confidence < 0.65) {
+      contextBonus += 0.12;
+      reasons.push('low_confidence_verification');
+    }
+  }
+  if (actionTypeState.actionType === 'replay' && (context.signals.needsReplay || context.signals.failedReplayCount > 0)) {
+    contextBonus += 0.28;
+    reasons.push('hard_cases_need_replay');
+  }
+  if (actionTypeState.actionType === 'visual' && context.signals.visualSurface) {
+    contextBonus += 0.22;
+    reasons.push('visual_surface_needs_evidence');
+  }
+  if (actionTypeState.actionType === 'tool' && context.signals.needsTool) {
+    contextBonus += 0.18;
+    reasons.push('tool_action_requested');
+  }
+  if (actionTypeState.actionType === 'swarm' && (context.signals.needsSwarm || context.evidenceCount === 0)) {
+    contextBonus += 0.14;
+    reasons.push('swarm_sampling_requested');
+  }
+  if (actionTypeState.actionType === 'text' && !context.signals.needsVerifier && !context.signals.needsReplay) {
+    contextBonus += 0.06;
+    reasons.push('text_reasoning_baseline');
+  }
+
+  const costPenalty = context.budgetPressure * actionTypeState.cost * 0.08;
+  const totalScore = round(eligible ? meanReward + exploration + contextBonus - costPenalty : -Infinity);
+
+  return {
+    index,
+    actionType: actionTypeState.actionType,
+    visits: actionTypeState.visits,
+    meanReward: round(meanReward),
+    exploration: round(exploration),
+    contextBonus: round(contextBonus),
+    costPenalty: round(costPenalty),
+    totalScore,
+    eligible,
+    reason: reasons.length ? reasons.join(',') : 'baseline_action_type_score',
   };
 }
 

@@ -3,6 +3,10 @@ import { readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 type LookupEntry = { providerName: string; modelId: string; args: string };
+type ModelArgDiagnostic = { flag: string; value: string; reason: string };
+
+const UNSUPPORTED_REASONING_PARSER_REASON =
+  "reasoning parser is a vLLM server startup flag and cannot be forwarded per request";
 
 function tokenizeArgs(args: string): string[] {
   const tokens: string[] = [];
@@ -56,9 +60,10 @@ function parseNumber(tokens: string[], flag: string, parser: (value: string) => 
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseZeusArgs(args: string): Record<string, any> | null {
+function parseZeusArgsWithDiagnostics(args: string): { params: Record<string, any> | null; diagnostics: ModelArgDiagnostic[] } {
   const tokens = tokenizeArgs(args);
   const params: Record<string, any> = {};
+  const diagnostics: ModelArgDiagnostic[] = [];
 
   const temperature = parseNumber(tokens, "--temp", Number.parseFloat);
   if (temperature !== undefined) params.temperature = temperature;
@@ -94,7 +99,19 @@ function parseZeusArgs(args: string): Record<string, any> | null {
     }
   }
 
-  return Object.keys(params).length > 0 ? params : null;
+  const reasoningParser = getArgValue(tokens, "--reasoning-parser");
+  if (reasoningParser !== null) {
+    diagnostics.push({
+      flag: "--reasoning-parser",
+      value: reasoningParser,
+      reason: UNSUPPORTED_REASONING_PARSER_REASON,
+    });
+  }
+
+  return {
+    params: Object.keys(params).length > 0 ? params : null,
+    diagnostics,
+  };
 }
 
 function buildModelArgsLookup(rawJson: string): Record<string, LookupEntry> {
@@ -149,7 +166,14 @@ export default function (pi: ExtensionAPI) {
 
     if (!entry) return;
 
-    const parsed = parseZeusArgs(entry.args);
+    const parsedResult = parseZeusArgsWithDiagnostics(entry.args);
+    for (const diagnostic of parsedResult.diagnostics) {
+      console.warn(
+        `[Helios kwargs] ${diagnostic.flag} ${diagnostic.value} for ${entry.providerName}/${entry.modelId} is not forwarded: ${diagnostic.reason}`,
+      );
+    }
+
+    const parsed = parsedResult.params;
     if (!parsed) return;
     return { ...event.payload, ...parsed };
   });

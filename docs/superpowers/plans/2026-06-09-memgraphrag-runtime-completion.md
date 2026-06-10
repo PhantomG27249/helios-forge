@@ -18,6 +18,28 @@
 - `C:\Users\jackj\Github\helios-forge\.harness\config.yaml` enables `swarm`, `modelDrivenSwarm`, `piNativeSwarm`, `deepResearch`, `experiments`, and `visualArtifacts`, but still leaves `features.adaptiveSearch` unset, which merges to `false`.
 - The sidecar has `/v1/adaptive-search/status`, `/v1/adaptive-search/replay`, and `/v1/skill-candidates` implemented. The main UI WebSocket server has client-side handlers for these messages, but needs server-side forwarding methods in `src/server.js` and `src/harness/harnessClient.js`.
 
+## A2A and Agent Interop Status
+
+Helios Forge has an A2A-shaped local interop layer, but it is not yet a complete peer-to-peer A2A swarm network.
+
+Implemented today:
+
+- `src/harness-sidecar/interop/a2aSwarmEnvelope.js` builds scoped A2A-style envelopes for swarm attempts. The envelope carries task id, attempt id, role, strategy, planning metadata, allowed context, budget, output contract, and a compact reply contract. It redacts secrets before dispatch.
+- `src/harness-sidecar/swarm/piNativeWorker.js` uses that envelope when assigning Pi-native swarm attempts through Pi RPC. It asks the worker for compact JSON, recovers delayed final messages, adapts natural-language handoffs into the required contract, emits subagent trace events, and returns normalized verifier evidence, compact handoff quality, patch stats, and worker metadata.
+- `src/harness-sidecar/interop/agentCards.js`, `agentRouter.js`, `externalAgentGateway.js`, and `delegatedCapabilityTokens.js` provide the broader interop contract: normalized agent cards, protocol/capability/trust/cost/latency routing, credential redaction, scoped gateway envelopes, mutation blocking without approval, and delegated capability-token checks.
+- Focused tests cover these contracts in `tests/harness-agent-interop.test.js` and `tests/harness-swarm-pi-native-worker.test.js`.
+
+Not implemented yet:
+
+- Persistent A2A server endpoints for each running agent.
+- Peer discovery or a network-visible agent registry.
+- Bidirectional streaming between independent swarm agents.
+- Durable inbox/outbox storage, message correlation ids, retry/resume, cancellation, and progress-event protocol.
+- Shared task-state sync between independently running agent processes.
+- Cross-agent negotiation where one subagent can directly ask another subagent for help without routing through the Helios sidecar.
+
+For the MemGraphRAG runtime, this means A2A should be treated as a local assignment envelope for now. The memory extraction society can still expose agent roles such as `passage_collector`, `schema_proposer`, `fact_extractor`, `contradiction_critic`, and `merge_planner`, but those roles should initially run inside the sidecar orchestration boundary. If later work promotes those roles into independent agents, the missing transport pieces above should be implemented first so multi-agent graph construction has durable messages, scoped context, provenance, and cancellation semantics rather than best-effort prompt dispatch.
+
 ## File Structure
 
 - Modify `src/harness-sidecar/config/configLoader.js`: add explicit runtime flags for memory graph runtime, hierarchical retrieval, graph evals, and feature status reporting.

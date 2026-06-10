@@ -88,6 +88,74 @@ test('budget pressure removes expensive adaptive search arms from selection', ()
   assert.equal(['go_deeper', 'stop_or_promote'].includes(action.arm), true);
 });
 
+test('adaptive search allocates bounded budget across text tool swarm visual replay and verifier actions', () => {
+  const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.12 });
+
+  const action = selectAdaptiveSearchAction({
+    scheduler,
+    context: {
+      taskId: 'task-action-budget',
+      evidence: [{ kind: 'candidate', score: 0.88 }],
+      bestCandidate: { score: 0.88, confidence: 0.62 },
+      budget: {
+        pressure: 0.35,
+        remainingByActionType: {
+          text: 4,
+          tool: 0,
+          swarm: 2,
+          visual: 1,
+          replay: 1,
+          verifier: 1,
+        },
+      },
+      signals: {
+        visualSurface: true,
+        needsReplay: true,
+        needsVerifier: true,
+      },
+    },
+  });
+
+  const scoresByType = Object.fromEntries(
+    action.trace.actionTypeScores.map((score) => [score.actionType, score]),
+  );
+
+  assert.equal(action.actionType, 'verifier');
+  assert.deepEqual(Object.keys(scoresByType).sort(), ['replay', 'swarm', 'text', 'tool', 'verifier', 'visual']);
+  assert.equal(scoresByType.tool.eligible, false);
+  assert.equal(scoresByType.tool.reason.includes('action_budget_exhausted'), true);
+  assert.equal(scoresByType.verifier.reason.includes('candidate_needs_verifier'), true);
+  assert.equal(scheduler.actionTypes.verifier.visits, 0);
+});
+
+test('adaptive search stops instead of selecting an exhausted action type', () => {
+  const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.12 });
+
+  const action = selectAdaptiveSearchAction({
+    scheduler,
+    context: {
+      taskId: 'task-action-exhausted',
+      evidence: [{ kind: 'candidate', score: 0.88 }],
+      budget: {
+        pressure: 0.35,
+        remainingByActionType: {
+          text: 0,
+          tool: 0,
+          swarm: 0,
+          visual: 0,
+          replay: 0,
+          verifier: 0,
+        },
+      },
+    },
+  });
+
+  assert.equal(action.arm, 'stop_or_promote');
+  assert.equal(action.actionType, null);
+  assert.equal(action.trace.actionTypeExhausted, true);
+  assert.equal(action.trace.actionTypeScores.every((score) => score.eligible === false), true);
+});
+
 test('injected deterministic RNG produces stable adaptive search choices and serializable state', () => {
   const rngValues = [0.13, 0.77, 0.31];
   const makeScheduler = () => {
@@ -123,4 +191,3 @@ test('injected deterministic RNG produces stable adaptive search choices and ser
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(left)));
   assert.equal(Object.keys(left.arms).includes('stop_or_promote'), true);
 });
-

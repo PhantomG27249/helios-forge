@@ -11,6 +11,10 @@ import { createServer } from 'http';
 import { HarnessClient } from './harness/harnessClient.js';
 import { applyHarnessFeedbackToPrompt, createHarnessFeedbackBuffer } from './harness/harnessFeedbackContext.js';
 import { HarnessManager } from './harness/harnessManager.js';
+import {
+  selectHarnessWorkspaceRoot,
+  shouldRecreateHarnessForWorkspace,
+} from './harness/workspaceSelection.js';
 import { searchSmitheryCatalog } from './harness-sidecar/capabilities/smitheryRegistry.js';
 import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
@@ -283,11 +287,26 @@ function syncPiCapabilitiesManifest(pi, manifestPath) {
   }
 }
 
-async function ensureHarnessRunning(harness, pi, feedback) {
-  const status = harness.manager.getStatus();
-  if (status.state === 'stopped' && harness.manager.workspaceRoot !== pi.cwd) {
+async function ensureHarnessRunning(harness, pi, feedback, { workspaceRoot, port } = {}) {
+  const desiredWorkspaceRoot = selectHarnessWorkspaceRoot({
+    requestedWorkspaceRoot: workspaceRoot,
+    currentHarnessRoot: harness.manager.workspaceRoot,
+    piCwd: pi.cwd,
+  });
+  let status = harness.manager.getStatus();
+  if (shouldRecreateHarnessForWorkspace({
+    currentWorkspaceRoot: harness.manager.workspaceRoot,
+    desiredWorkspaceRoot,
+  })) {
     closeHarnessClient(harness);
-    harness.manager = new HarnessManager({ workspaceRoot: pi.cwd });
+    if (status.state !== 'stopped') {
+      await harness.manager.stop();
+    }
+    harness.manager = new HarnessManager({
+      workspaceRoot: desiredWorkspaceRoot,
+      port: port || status.port,
+    });
+    status = harness.manager.getStatus();
   }
   if (status.state !== 'running') {
     await harness.manager.start();
@@ -392,17 +411,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_start': {
-        if (msg.workspaceRoot || harness.manager.workspaceRoot !== pi.cwd) {
-          closeHarnessClient(harness);
-          if (harness.manager.getStatus().state !== 'stopped') {
-            await harness.manager.stop();
-          }
-          harness.manager = new HarnessManager({
-            workspaceRoot: msg.workspaceRoot || pi.cwd,
-            port: msg.port || 49321,
-          });
-        }
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot, port: msg.port });
         ws.send(JSON.stringify({ type: 'harness_status', data: harness.manager.getStatus() }));
         break;
       }
@@ -424,7 +433,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_capabilities_get': {
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
         const registry = await harness.client.listCapabilities({
           workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
         });
@@ -432,7 +441,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_capability_save': {
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
         const result = await harness.client.saveCapability({
           workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
           record: msg.record || msg.capability || {},
@@ -450,7 +459,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_capability_delete': {
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
         const result = await harness.client.deleteCapability({
           workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
           capabilityId: msg.capabilityId || msg.id,
@@ -459,7 +468,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_capabilities_mount': {
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
         const result = await harness.client.mountCapabilities({
           workspaceRoot: msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd,
           profileId: msg.profileId || msg.capabilityProfileId || 'default',
@@ -531,7 +540,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         break;
       }
       case 'harness_task_start': {
-        await ensureHarnessRunning(harness, pi, feedback);
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
         const task = await harness.client.startTask({
           workspaceId: msg.workspaceId || 'local',
           task: msg.task || msg.message || '',

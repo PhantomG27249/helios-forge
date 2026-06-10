@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { judgeCandidatePreference } from '../src/harness-sidecar/rho/preferenceJudge.js';
+import { judgeSelfPreference } from '../src/harness-sidecar/rho/selfPreferenceJudge.js';
 
 test('prefers higher quality and safety with lower cost and latency', () => {
   const result = judgeCandidatePreference({
@@ -82,4 +83,14 @@ test('returns score deltas and breaks exact ties by candidate id', () => {
   assert.equal(result.pairwise[0].delta, 0);
   assert.equal(result.pairwise[0].winner, 'cand_a');
   assert.match(result.pairwise[0].reason, /candidate id/);
+});
+
+test('prefers candidates with stronger replay self-validation and consistency', () => {
+  const result = judgeSelfPreference({
+    baseline: { validation: { score: 0.5 }, consistency: { score: 0.5 } },
+    candidate: { validation: { score: 1 }, consistency: { score: 1 } },
+  });
+
+  assert.equal(result.preferred, 'candidate');
+  assert.equal(result.baselineScore < result.candidateScore, true);
 });

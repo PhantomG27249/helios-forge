@@ -167,6 +167,13 @@ test('conflict adjudication classifies and applies evidence-backed decisions saf
   });
   assert.equal(decision.action, 'discard');
   assert.deepEqual(decision.provenanceIds, ['passage_old', 'passage_new']);
+  assert.equal(decision.decisionId.startsWith('memory_conflict_decision_'), true);
+  assert.deepEqual(decision.policy, {
+    autoDiscardBelowConfidence: 0.7,
+    requirePassageSupport: false,
+  });
+  assert.equal(decision.evidenceSummary.requiredCount, 2);
+  assert.equal(decision.evidenceSummary.coveredCount, 2);
 
   applyConflictDecision({ layers, decision });
 
@@ -212,6 +219,50 @@ test('conflict adjudication classifies and applies evidence-backed decisions saf
     evidence: ['passage_high'],
   });
   assert.equal(safeCoexistence.action, 'keep_both');
+});
+
+test('conflict adjudication uses retrieved passage text to ground mutually exclusive decisions', () => {
+  const conflict = {
+    type: 'mutually_exclusive',
+    existingFact: {
+      id: 'fact_old',
+      subject: 'retriever',
+      relation: 'uses',
+      object: 'lexical search',
+      passageIds: ['passage_old'],
+      confidence: 0.8,
+    },
+    newFact: {
+      id: 'fact_new',
+      subject: 'retriever',
+      relation: 'uses',
+      object: 'graph search',
+      passageIds: ['passage_new'],
+      confidence: 0.8,
+    },
+    provenanceIds: ['passage_old', 'passage_new'],
+  };
+
+  const grounded = adjudicateMemoryConflict({
+    conflict,
+    evidence: [
+      { passageId: 'passage_new', text: 'The current retriever uses graph search for startup context.' },
+      { passageId: 'passage_old', text: 'Earlier versions used lexical search.' },
+    ],
+    policy: { requirePassageSupport: true },
+  });
+  const ungrounded = adjudicateMemoryConflict({
+    conflict,
+    evidence: [{ passageId: 'passage_old', text: 'Earlier versions used lexical search.' }],
+    policy: { requirePassageSupport: true },
+  });
+
+  assert.equal(grounded.action, 'discard');
+  assert.equal(grounded.targetFactId, 'fact_old');
+  assert.equal(grounded.evidenceCoverage, 1);
+  assert.equal(grounded.reasons.includes('retrieved_passage_supports_new_fact'), true);
+  assert.equal(ungrounded.action, 'needs_review');
+  assert.equal(ungrounded.reasons.includes('missing_required_passage_support'), true);
 });
 
 test('memory-guided graph projects active global memory and bridges compatible entities', () => {

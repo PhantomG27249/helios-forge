@@ -1,4 +1,5 @@
 import { recordAdaptiveSearchOutcome } from '../bes/adaptiveSearchScheduler.js';
+import { runLocalMetaHarness } from '../meta/localMetaHarness.js';
 import { scheduleAttempts } from './attemptScheduler.js';
 import { loadDefaultAgentProfiles, selectAgentProfileForAttempt } from './agentProfiles.js';
 import { chooseChampion } from './championSelector.js';
@@ -9,6 +10,7 @@ import { recombineApprovedOutputs } from './recombiner.js';
 import { reviewAttempt } from './reviewer.js';
 import { runSwarmAttemptsBounded } from './swarmExecutor.js';
 import { runSubagentAttempt } from './subagentRunner.js';
+import { getDefaultSwarmCells, resolveSwarmCell } from './swarmCellRegistry.js';
 import { runWorktreeAttempt } from './worktreeAttemptRunner.js';
 
 function buildRiskPolicy(context = {}, riskPolicy = {}) {
@@ -21,6 +23,39 @@ function buildRiskPolicy(context = {}, riskPolicy = {}) {
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function featureEnabled(featureFlags = {}, name) {
+  return featureFlags?.[name] === true;
+}
+
+function resolveAttemptCell({ attempt = {}, role } = {}) {
+  const profileRole = attempt.profile?.role || role;
+  const direct = resolveSwarmCell(attempt.cellId || profileRole);
+  if (direct) return direct;
+  return getDefaultSwarmCells().find((cell) => cell.role === profileRole) || { cellId: 'code', role: profileRole || 'implementer' };
+}
+
+function candidateMemoryProposals(localMeta = {}) {
+  return (localMeta.candidates || [])
+    .flatMap((candidate) => asArray(candidate.memoryProposals));
+}
+
+function proposalKey(proposal) {
+  if (proposal?.factId) return `fact:${proposal.factId}`;
+  if (proposal?.passageId) return `passage:${proposal.passageId}`;
+  return JSON.stringify(proposal);
+}
+
+function attemptMemoryProposals(attempt = {}, localMeta = {}) {
+  const explicit = asArray(attempt.evolutionOutput?.memoryProposals);
+  const seen = new Set();
+  return [...explicit, ...candidateMemoryProposals(localMeta)].filter((proposal) => {
+    const key = proposalKey(proposal);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function inferPatchStats(output = {}) {
@@ -55,6 +90,7 @@ function outputFromModelWorker(result = {}) {
     score: result.score,
     artifacts: result.artifacts,
     risks: result.risks,
+    evolutionOutput: result.evolutionOutput,
   };
 }
 
@@ -152,6 +188,8 @@ async function runScheduledAttempt({
   modelProfileName,
   piNativeEnabled = false,
   piWorkerFactory,
+  piBridgeContext,
+  capabilitiesManifest,
   emitAttemptTrace,
 }) {
   const taskId = task.taskId;
@@ -172,6 +210,8 @@ async function runScheduledAttempt({
       outputContract,
       workspaceRoot,
       piWorkerFactory,
+      piBridgeContext,
+      capabilitiesManifest,
       emitTrace: emitAttemptTrace,
     });
   }
@@ -213,7 +253,9 @@ async function runScheduledAttempt({
         patchStats: inferPatchStats(output),
         worker,
         model: modelResult.model,
-        contract: {
+        taskOutput: modelResult.taskOutput,
+        evolutionOutput: modelResult.evolutionOutput,
+        contract: modelResult.contract || {
           requiredFields: outputContract.requiredFields || [],
           missingFields: [],
           valid: true,
@@ -317,6 +359,8 @@ export async function orchestrateSwarm({
   provider,
   modelProfileName,
   piWorkerFactory,
+  piBridgeContext,
+  capabilitiesManifest,
   planner,
   evolutionPlanner,
   evolutionBudget,
@@ -325,6 +369,8 @@ export async function orchestrateSwarm({
   runMode,
   riskPolicy = {},
   onAttemptEvent,
+  emitEvent,
+  featureFlags = {},
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
   const hasModelWorker = Boolean(modelWorkerProvider({
@@ -336,6 +382,12 @@ export async function orchestrateSwarm({
   const hasWorktreeWorker = Boolean(commandAdapter && (workspaceRoot || worktreeManager));
   const piNativeEnabled = swarmExecution?.piNative === true || runMode === 'pi-native';
   const mode = runMode || (piNativeEnabled ? 'pi-native' : (hasModelWorker ? 'model-driven' : (commandAdapter ? 'real' : 'dry-run')));
+  const publishAttemptEvent = async (event) => {
+    await onAttemptEvent?.(event);
+    if (emitEvent && emitEvent !== onAttemptEvent) {
+      await emitEvent(event);
+    }
+  };
   const profiles = agentProfiles || loadDefaultAgentProfiles();
   const scheduledBaseAttempts = scheduleAttempts({
     taskId,
@@ -347,7 +399,7 @@ export async function orchestrateSwarm({
   });
   const adaptiveSearchAction = firstAdaptiveSearchAction(scheduledBaseAttempts);
   if (adaptiveSearchAction?.trace) {
-    await onAttemptEvent?.(adaptiveSearchAction.trace);
+    await publishAttemptEvent(adaptiveSearchAction.trace);
   }
   const profiledAttempts = scheduledBaseAttempts.map((attempt) => ({
     ...attempt,
@@ -370,7 +422,7 @@ export async function orchestrateSwarm({
   const attempts = await runSwarmAttemptsBounded({
     attempts: scheduledAttempts,
     concurrency,
-    onAttemptEvent: onAttemptEvent ? async (event) => {
+    onAttemptEvent: (onAttemptEvent || emitEvent) ? async (event) => {
       const scheduledAttempt = event.attempt;
       if (event.type === 'started') {
         const requestId = hasModelWorker
@@ -382,7 +434,7 @@ export async function orchestrateSwarm({
             ? 'model_driven'
             : (hasWorktreeWorker ? 'worktree_command' : (commandAdapter ? 'command_subagent' : 'deterministic_subagent')));
 
-        await onAttemptEvent?.({
+        await publishAttemptEvent({
           type: 'swarm.subagent_started',
           taskId,
           attemptId: scheduledAttempt.attemptId,
@@ -405,7 +457,7 @@ export async function orchestrateSwarm({
       }
 
       const attemptRecord = event.attempt;
-      await onAttemptEvent?.({
+      await publishAttemptEvent({
         type: 'swarm.subagent_completed',
         taskId,
         attemptId: attemptRecord.attemptId,
@@ -455,8 +507,48 @@ export async function orchestrateSwarm({
       modelProfileName: modelProfileName || scheduledAttempt.profile?.modelProfile,
       piNativeEnabled,
       piWorkerFactory,
-      emitAttemptTrace: onAttemptEvent,
+      piBridgeContext,
+      capabilitiesManifest,
+      emitAttemptTrace: publishAttemptEvent,
     });
+
+    let localMeta = null;
+    let cell = null;
+    if (featureEnabled(featureFlags, 'localMetaHarness')) {
+      cell = resolveAttemptCell({ attempt: scheduledAttempt, role: attemptRecord.role });
+      localMeta = await runLocalMetaHarness({
+        workspaceRoot,
+        cell,
+        attempt: attemptRecord,
+        archive: featureFlags.localMetaArchive !== false,
+      });
+      attemptRecord.localMeta = localMeta;
+      await publishAttemptEvent({
+        type: 'local_meta.completed',
+        taskId,
+        attemptId: attemptRecord.attemptId,
+        cellId: localMeta.cellId,
+        candidateCount: localMeta.candidates.length,
+        archiveCount: localMeta.archiveRecords.length,
+        candidates: localMeta.candidates,
+        summary: `${localMeta.cellId} local meta produced ${localMeta.candidates.length} candidate${localMeta.candidates.length === 1 ? '' : 's'}`,
+      });
+    }
+
+    if (featureEnabled(featureFlags, 'localMemoryGraph')) {
+      cell = cell || resolveAttemptCell({ attempt: scheduledAttempt, role: attemptRecord.role });
+      const memoryProposals = attemptMemoryProposals(attemptRecord, localMeta || {});
+      await publishAttemptEvent({
+        type: 'local_memory.proposed',
+        taskId,
+        attemptId: attemptRecord.attemptId,
+        cellId: localMeta?.cellId || cell.cellId,
+        proposalCount: memoryProposals.length,
+        memoryProposals,
+        hardCaseTags: localMeta?.hardCaseTags || attemptRecord.evolutionOutput?.hardCaseTags || [],
+        summary: `${memoryProposals.length} local memory proposal${memoryProposals.length === 1 ? '' : 's'} pending global review`,
+      });
+    }
 
     return attemptRecord;
     },
@@ -480,8 +572,8 @@ export async function orchestrateSwarm({
         championAttemptId: champion?.attemptId || null,
       },
     });
-    await onAttemptEvent?.(adaptiveSearchOutcome);
-    await onAttemptEvent?.({
+    await publishAttemptEvent(adaptiveSearchOutcome);
+    await publishAttemptEvent({
       type: 'ab_mcts.scheduler_summary',
       taskId,
       actionId: adaptiveSearchAction.actionId,

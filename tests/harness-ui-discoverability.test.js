@@ -229,6 +229,22 @@ test('harness panel exposes live subagent activity', async () => {
   assert.match(appJs, /renderHarnessSubagents/);
 });
 
+test('harness panel exposes hierarchical local meta and memory feedback', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-local-meta"/);
+  assert.match(html, /Local Meta/);
+  assert.match(html, /id="harness-memory-hierarchy"/);
+  assert.match(html, /Memory Hierarchy/);
+  assert.match(html, /id="harness-experiments"/);
+  assert.match(html, /Harness Experiments/);
+  assert.match(appJs, /local_meta\.completed/);
+  assert.match(appJs, /local_memory\.proposed/);
+  assert.match(appJs, /harness_experiment\.completed/);
+  assert.match(appJs, /renderHarnessHierarchyFeedback/);
+});
+
 test('harness events coalesce panel renders so approval controls stay responsive', async () => {
   const appJs = await readFile('public/app.js', 'utf8');
   const handlerStart = appJs.indexOf('function handleHarnessEvent(event)');
@@ -276,6 +292,19 @@ test('harness panel exposes verifier evolution operator visibility', async () =>
   assert.match(appJs, /renderHarnessVerifierEvolution/);
   assert.match(appJs, /pendingVerifierPromotions/);
   assert.match(appJs, /visualVerifierArtifacts/);
+});
+
+test('harness panel exposes capability goal status rows', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-capability-goals"/);
+  assert.match(html, /id="harness-capability-goals-status"/);
+  assert.match(html, /id="harness-capability-goals-implemented"/);
+  assert.match(html, /id="harness-capability-goal-rows"/);
+  assert.match(appJs, /capabilityGoals/);
+  assert.match(appJs, /renderCapabilityGoalRows/);
+  assert.match(appJs, /harnessCapabilityGoalsOpen/);
 });
 
 test('frontend asset version changes when harness UI changes', async () => {

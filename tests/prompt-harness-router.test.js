@@ -65,3 +65,12 @@ test('harness task messages use the real full runtime defaults', () => {
     source: 'prompt_direct',
   });
 });
+
+test('harness task messages carry selected workspace root when provided', () => {
+  const route = classifyHarnessPrompt('/harness inspect this workspace');
+  const message = buildHarnessTaskMessage(route, {
+    workspaceRoot: 'C:/Users/jackj/Github/example-project',
+  });
+
+  assert.equal(message.workspaceRoot, 'C:/Users/jackj/Github/example-project');
+});

@@ -49,6 +49,7 @@ test('subagent runner passes scoped budget and enforces output contract', async 
       return {
         patch: 'abcdefghijklmnop',
         verifierEvidence: ['node --test tests/harness-swarm-runtime.test.js'],
+        evolutionOutput: { hardCaseTags: ['missing_context'] },
         score: 88,
       };
     },
@@ -59,6 +60,7 @@ test('subagent runner passes scoped budget and enforces output contract', async 
   assert.match(calls[0].prompt.text, /test_first/);
   assert.equal(result.status, 'completed');
   assert.equal(result.output.patch, 'abcdefghijklmnop');
+  assert.deepEqual(result.evolutionOutput.hardCaseTags, ['missing_context']);
   assert.equal(result.contract.valid, true);
   assert.equal(result.budget.truncatedOutput.patch, 'abcdefghijkl');
   assert.equal(result.budget.exceeded, true);
@@ -75,6 +77,27 @@ test('subagent runner marks attempts with missing output contract fields', async
 
   assert.equal(result.status, 'contract_failed');
   assert.deepEqual(result.contract.missingFields, ['verifierEvidence']);
+});
+
+test('subagent runner fails attempts with forbidden local durable approval', async () => {
+  const result = await runSubagentAttempt({
+    task: { taskId: 'task_runner_local_approval', goal: 'Reject local approval.' },
+    attempt: { attemptId: 'attempt_local_approval', strategy: 'guardrails' },
+    role: 'implementer',
+    outputContract: { requiredFields: ['summary', 'verifierEvidence'] },
+    commandAdapter: async () => ({
+      summary: 'Tried to approve a durable change locally.',
+      verifierEvidence: ['node --test tests/harness-swarm-runtime.test.js'],
+      evolutionOutput: {
+        durableApplyApproved: true,
+        suggestedCodeChange: { path: 'src/harness-sidecar/server.js' },
+      },
+    }),
+  });
+
+  assert.equal(result.status, 'contract_failed');
+  assert.equal(result.contract.valid, false);
+  assert.equal(result.contract.reasons.includes('local_durable_approval_forbidden'), true);
 });
 
 test('subagent runner normalizes compact handoff and scores handoff quality deterministically', async () => {
@@ -418,6 +441,29 @@ test('swarm orchestrator calls a supplied model executor for independent attempt
     'task_model_orchestrate:attempt_2:model_worker',
   ]);
   assert.equal(result.champion.attemptId, 'attempt_2');
+});
+
+test('swarm orchestrator preserves invalid model-driven evolution contracts', async () => {
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_model_contract_failure', goal: 'Reject local model approval.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    modelExecutor: async () => ({
+      structured: {
+        summary: 'Model proposed a local durable approval.',
+        verifierEvidence: ['focused verifier evidence'],
+        evolutionOutput: {
+          durableApplyApproved: true,
+          suggestedCodeChange: { path: 'src/harness-sidecar/server.js' },
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.attempts[0].status, 'contract_failed');
+  assert.equal(result.attempts[0].contract.valid, false);
+  assert.equal(result.attempts[0].contract.reasons.includes('local_durable_approval_forbidden'), true);
+  assert.equal(result.attempts[0].evolutionOutput.durableApplyApproved, false);
 });
 
 test('swarm orchestrator ignores non-callable provider metadata for model execution', async () => {

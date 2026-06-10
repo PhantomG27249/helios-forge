@@ -6,6 +6,8 @@ const CONTEXT_HARD_CASE_REASONS = new Set([
   'insufficient_context',
 ]);
 
+import { runBesLaneRuntime } from '../bes/laneRuntime.js';
+
 function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -111,4 +113,50 @@ export function evaluateContextPolicyCandidate({ candidate, traceCase } = {}) {
     },
     promotable: false,
   };
+}
+
+function laneCases(coreset = {}) {
+  if (Array.isArray(coreset)) return coreset;
+  return coreset.items || coreset.cases || coreset.hardCases || [];
+}
+
+function evaluateAcrossCases({ candidate, hardCases, evaluate }) {
+  const cases = hardCases.length ? hardCases : [{}];
+  const results = cases.map((traceCase) => evaluate(traceCase));
+  const score = results.reduce((sum, result) => sum + Number(result.score || 0), 0) / results.length;
+  return {
+    score,
+    reasons: [...new Set(results.flatMap((result) => result.reasons || []))],
+    caseCount: cases.length,
+    caseResults: results,
+    safety: results.find((result) => result.safety)?.safety || { status: 'shadow_only' },
+    promotable: false,
+  };
+}
+
+export async function runContextPolicyBesLane({
+  coreset,
+  baselinePolicy = {},
+  maxCandidates = 4,
+  taskId = 'context_policy_bes',
+  now,
+  candidateOverrides = [],
+} = {}) {
+  const hardCases = laneCases(coreset);
+  const proposalCoreset = { cases: hardCases, hardCases };
+  const candidates = proposeContextPolicies({ coreset: proposalCoreset, baselinePolicy, maxCandidates })
+    .map((candidate, index) => ({ ...candidate, ...(candidateOverrides[index] || {}) }));
+
+  return runBesLaneRuntime({
+    lane: 'context',
+    taskId,
+    candidates,
+    hardCases,
+    now,
+    evaluator: ({ candidate }) => evaluateAcrossCases({
+      candidate,
+      hardCases,
+      evaluate: (traceCase) => evaluateContextPolicyCandidate({ candidate, traceCase }),
+    }),
+  });
 }

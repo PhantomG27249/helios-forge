@@ -5,6 +5,7 @@ import {
   buildModelArgsLookup,
   createModelArgsResolver,
   createProviderRequestPatch,
+  parseZeusArgsWithDiagnostics,
   parseZeusArgs,
 } from '../src/pi/modelArgs.js';
 
@@ -22,6 +23,37 @@ test('parseZeusArgs handles chat template kwargs before later sampling args', ()
   assert.equal(parsed.chat_template_kwargs.preserve_thinking, false);
   assert.equal(parsed.temperature, 0.2);
   assert.equal(parsed.top_p, 0.9);
+});
+
+test('parseZeusArgs reports reasoning parser as unsupported request metadata', () => {
+  const result = parseZeusArgsWithDiagnostics('--reasoning-parser qwen3 --temp 0.2');
+
+  assert.equal(result.params.temperature, 0.2);
+  assert.deepEqual(result.diagnostics, [
+    {
+      flag: '--reasoning-parser',
+      value: 'qwen3',
+      reason: 'reasoning parser is a vLLM server startup flag and cannot be forwarded per request',
+    },
+  ]);
+});
+
+test('parseZeusArgs preserves explicit ebft-5 thinking-disabled profile', () => {
+  const parsed = parseZeusArgs('--reasoning-parser qwen3 --chat-template-kwargs \'{"enable_thinking":false}\' --temp 0.15 --top-p 0.95');
+
+  assert.equal(parsed.chat_template_kwargs.enable_thinking, false);
+  assert.equal(parsed.chat_template_kwargs.preserve_thinking, false);
+  assert.equal(parsed.temperature, 0.15);
+  assert.equal(parsed.top_p, 0.95);
+});
+
+test('parseZeusArgs preserves thinking-enabled profile', () => {
+  const parsed = parseZeusArgs('--reasoning-parser qwen3 --chat-template-kwargs \'{"enable_thinking":true}\' --temp 0.6 --top-k 40');
+
+  assert.equal(parsed.chat_template_kwargs.enable_thinking, true);
+  assert.equal(parsed.chat_template_kwargs.preserve_thinking, true);
+  assert.equal(parsed.temperature, 0.6);
+  assert.equal(parsed.top_k, 40);
 });
 
 test('model args lookup tolerates UTF-8 BOM and provider scoped keys', () => {
@@ -59,4 +91,29 @@ test('provider request patch matches provider and model aliases', () => {
 
   assert.equal(patched.chat_template_kwargs.enable_thinking, false);
   assert.equal(patched.chat_template_kwargs.preserve_thinking, false);
+});
+
+test('provider request patch reports unsupported reasoning parser without forwarding it', () => {
+  const lookup = buildModelArgsLookup('{"providers":{"Zeus":{"models":[{"id":"example/ebft-model","args":"--reasoning-parser qwen3 --temp 0.3"}]}}}');
+  const diagnostics = [];
+  const patched = createProviderRequestPatch({
+    payload: { model: 'example/ebft-model', messages: [] },
+    modelId: 'example/ebft-model',
+    providerName: 'Zeus',
+    providerKey: 'dummy',
+    lookup,
+    reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  assert.equal(patched.temperature, 0.3);
+  assert.equal(patched.reasoning_parser, undefined);
+  assert.deepEqual(diagnostics, [
+    {
+      providerName: 'Zeus',
+      modelId: 'example/ebft-model',
+      flag: '--reasoning-parser',
+      value: 'qwen3',
+      reason: 'reasoning parser is a vLLM server startup flag and cannot be forwarded per request',
+    },
+  ]);
 });
