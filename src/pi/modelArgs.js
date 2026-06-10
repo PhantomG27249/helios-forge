@@ -1,6 +1,9 @@
 import { readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 
+const UNSUPPORTED_REASONING_PARSER_REASON =
+  'reasoning parser is a vLLM server startup flag and cannot be forwarded per request';
+
 function tokenizeArgs(args) {
   const tokens = [];
   let current = '';
@@ -56,9 +59,10 @@ function parseNumber(tokens, flag, parser) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-export function parseZeusArgs(args) {
+export function parseZeusArgsWithDiagnostics(args) {
   const tokens = tokenizeArgs(args);
   const params = {};
+  const diagnostics = [];
 
   const temperature = parseNumber(tokens, '--temp', Number.parseFloat);
   if (temperature !== undefined) params.temperature = temperature;
@@ -94,7 +98,23 @@ export function parseZeusArgs(args) {
     }
   }
 
-  return Object.keys(params).length > 0 ? params : null;
+  const reasoningParser = getArgValue(tokens, '--reasoning-parser');
+  if (reasoningParser !== null) {
+    diagnostics.push({
+      flag: '--reasoning-parser',
+      value: reasoningParser,
+      reason: UNSUPPORTED_REASONING_PARSER_REASON,
+    });
+  }
+
+  return {
+    params: Object.keys(params).length > 0 ? params : null,
+    diagnostics,
+  };
+}
+
+export function parseZeusArgs(args) {
+  return parseZeusArgsWithDiagnostics(args).params;
 }
 
 export function buildModelArgsLookup(rawJson) {
@@ -140,6 +160,7 @@ export function createProviderRequestPatch({
   providerName,
   providerKey,
   lookup,
+  reportDiagnostic,
 }) {
   if (!payload?.model || !lookup) return null;
 
@@ -151,7 +172,16 @@ export function createProviderRequestPatch({
 
   if (!entry) return null;
 
-  const parsed = parseZeusArgs(entry.args);
+  const parsedResult = parseZeusArgsWithDiagnostics(entry.args);
+  for (const diagnostic of parsedResult.diagnostics) {
+    reportDiagnostic?.({
+      providerName: entry.providerName,
+      modelId: entry.modelId,
+      ...diagnostic,
+    });
+  }
+
+  const parsed = parsedResult.params;
   if (!parsed) return null;
   return {
     ...payload,

@@ -83,6 +83,7 @@ import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { ModelGateway } from './model/modelGateway.js';
 import { getModelProfile } from './model/modelProfiles.js';
 import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
+import { buildPiBridgeState } from './pi/piBridgeState.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
@@ -2620,6 +2621,15 @@ export function createHarnessSidecar({
           version: VERSION,
           workspaceRoot: resolvedWorkspaceRoot,
         });
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/pi-bridge/state') {
+        const state = await buildPiBridgeState({
+          workspaceRoot: resolvedWorkspaceRoot,
+          manifestConsumedByPi: url.searchParams.get('manifestConsumedByPi') === 'true',
+        });
+        sendJson(res, 200, state);
         return;
       }
 

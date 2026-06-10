@@ -42,6 +42,16 @@ part of the continuously evolving substrate.
 
 The repo already has deterministic paper-shaped substrate: RHO/BES lanes, swarm profiles, SwarmCell contracts, A2A envelopes, capability-goal status, Meta-Harness variant workspaces, and a Pi kwargs extension. The next stage should not replace that substrate. It should add durable agent identity and a better Pi bridge on top.
 
+Confirmed Pi/Helios bridge gaps from the current local configuration:
+
+- Pi defaults to `Zeus / selimaktas/ebft-5` through `C:\Users\jackj\.pi\agent\settings.json`; that model declares text and image input and a 262k context window, but its configured chat-template kwargs disable thinking.
+- `C:\Users\jackj\.pi\agent\extensions\kwargs.ts` is installed and patches provider payloads from `C:\Users\jackj\.pi\agent\models.json`, but it currently forwards only sampling values, penalties, seed, and `chat_template_kwargs`. It does not forward `--reasoning-parser qwen3`.
+- `src/pi/piRpcManager.js` can scope `HELIOS_CAPABILITIES_MANIFEST` into spawned Pi processes, but the installed Pi extension does not read that manifest, load Helios `SKILL.md` bodies, or advertise Helios skill inventory to Pi.
+- Helios-side skill parsing and mutation machinery are not blocked by Pi: package install, capability registry writes, BES skill candidates, promotion gates, and rollback/apply are sidecar-owned.
+- Pi-native skill use and model-driven mutation quality are limited until the bridge extension consumes the manifest and injects compact skill, soul, oversoul, and mutation context into Pi.
+- Selected workspaces can still run the sidecar with built-in routes while lacking `.harness/capabilities.json`, `.harness/runtime/capabilities.mount.json`, and `.harness/packages`; the bridge must diagnose and repair this rather than treating sidecar health as proof that defaults are installed.
+- The `Capability Goals` panel is roadmap/status evidence only, not proof that skills, MCPs, templates, slash commands, or Pi extensions are installed in the active workspace.
+
 Important existing files:
 
 - `src/harness-sidecar/swarm/agentProfiles.js`
@@ -53,6 +63,8 @@ Important existing files:
 - `src/harness-sidecar/meta/harnessVariantWorkspace.js`
 - `src/harness-sidecar/interop/a2aSwarmEnvelope.js`
 - `src/harness-sidecar/meta/capabilityGoalStatus.js`
+- `src/pi/piRpcManager.js`
+- `src/pi/extensions/kwargs.ts`
 - `packages/helios-research-harness/extensions/kwargs.ts`
 - `packages/helios-research-harness/helios-package.json`
 - `scripts/install-pi-kwargs-extension.js`
@@ -238,6 +250,8 @@ promotion policy.
 - [ ] Write a failing test that proves the installer copies from `packages/helios-research-harness/extensions/kwargs.ts`.
 - [ ] Update the installer source path or add a shared extension copy helper.
 - [ ] Preserve the existing models.json normalization behavior.
+- [ ] Add coverage for `--reasoning-parser qwen3` so the kwargs extension either forwards the parser safely or records a deliberate unsupported-flag diagnostic.
+- [ ] Add coverage proving `selimaktas/ebft-5` with `enable_thinking:false` remains explicit, while thinking-enabled model profiles can be selected intentionally.
 - [ ] Run `node --test tests/install-pi-kwargs-extension.test.js`.
 - [ ] Commit with `fix: align pi extension installer path`.
 
@@ -251,9 +265,11 @@ promotion policy.
 
 - [ ] Write failing tests for extension manifest registration and installer copy behavior.
 - [ ] Add a Pi extension that can read workspace-local Helios bridge config and expose safe before-request metadata.
+- [ ] Read the `HELIOS_CAPABILITIES_MANIFEST` environment variable set by `src/pi/piRpcManager.js`; if it is missing, emit a compact bridge warning rather than silently pretending skills are synced.
 - [ ] Include current workspace id, active skill/capability summary, selected soul/oversoul refs, and sidecar endpoint hints.
 - [ ] Read Helios Forge workspace skill manifests directly when Pi's own global skill registry has not loaded them.
 - [ ] Include packaged Helios skills from `packages/helios-research-harness/helios-package.json`, workspace capability records from `.harness/capabilities.json`, and approved generated skills from `.harness/packages/generated-skills`.
+- [ ] Do not inject full skill bodies by default. Send compact skill inventory plus explicit skill refs; allow full body injection only through a size-limited, redacted, sidecar-owned context packet.
 - [ ] Do not send secrets, raw traces, raw patches, or full memory contents through Pi extension metadata.
 - [ ] Add `npm` script for installing the Helios extension.
 - [ ] Run `node --test tests/pi-helios-extension.test.js`.
@@ -269,6 +285,8 @@ promotion policy.
 
 - [ ] Write failing tests for Helios skills that exist in the workspace package but are absent from Pi's global skill registry.
 - [ ] Build a safe skill inventory from `packages/helios-research-harness/helios-package.json`, `.harness/capabilities.json`, `.harness/runtime/capabilities.mount.json`, and `.harness/packages/generated-skills`.
+- [ ] Add a missing-default-package diagnostic for selected workspaces where the sidecar is healthy but `.harness/capabilities.json`, `.harness/runtime/capabilities.mount.json`, or `.harness/packages/helios-research-harness` is absent.
+- [ ] Add a repair action that can invoke the existing setup/bootstrap path for the active workspace, then remount capabilities and refresh the Pi bridge packet.
 - [ ] Normalize each skill into id, name, source, version/hash, relative path, enabled state, and short description.
 - [ ] Reject path escapes, absolute external paths, disabled capabilities, and unapproved generated skill candidates.
 - [ ] Expose a compact `helios_skill_inventory` packet through the Pi extension and sidecar bridge state.
@@ -303,6 +321,7 @@ promotion policy.
 
 - [ ] Write failing tests for a sidecar status payload consumed by the Pi extension.
 - [ ] Expose safe bridge state: enabled skills, capability ids, active task id, subagent status, soul refs, oversoul version, and communication warnings.
+- [ ] Include `bridgeHealth` fields for `manifestPresent`, `manifestConsumedByPi`, `defaultPackageInstalled`, `piKwargsExtensionInstalled`, `reasoningParserForwarded`, and `activeModelThinkingEnabled`.
 - [ ] Add redaction and maximum payload-size controls.
 - [ ] Run `node --test tests/pi-bridge-state.test.js`.
 - [ ] Commit with `feat: expose safe pi bridge state`.
@@ -316,6 +335,8 @@ promotion policy.
 
 - [ ] Write failing tests for richer Pi-native handoff envelopes.
 - [ ] Include skill hints, soul refs, oversoul refs, expected output contract, task correlation id, and sidecar callback hints.
+- [ ] Include mutation-optimization context that distinguishes Helios-side deterministic BES/RHO candidates from Pi-native model suggestions, and keep local durable apply approval forbidden.
+- [ ] Include warnings when the active Pi model profile disables thinking or when expected model kwargs were not applied.
 - [ ] Preserve current fallback behavior when the extension is unavailable.
 - [ ] Run `node --test tests/pi-native-worker-bridge.test.js`.
 - [ ] Commit with `feat: improve pi native worker handoff envelopes`.
@@ -387,6 +408,9 @@ promotion policy.
 - The Helios Forge Pi extension is packaged separately from the kwargs extension and has a working installer.
 - The Pi extension can surface Helios Forge workspace skills even when Pi has not reliably loaded them from its own global registry.
 - Packaged, workspace-enabled, and approved generated skills are visible as compact bridge metadata without granting Pi authority to install or promote them.
+- The Pi bridge consumes `HELIOS_CAPABILITIES_MANIFEST`, reports when it cannot consume it, and differentiates "sidecar healthy" from "workspace default package installed."
+- The kwargs extension either forwards `--reasoning-parser qwen3` safely or exposes a tested diagnostic explaining why it is not forwarded.
+- Pi-native mutation prompts receive compact skill and mutation context, while sidecar-owned BES/RHO/promotion logic remains the authority boundary.
 - The Pi extension emits structured reasoning telemetry and, when explicitly enabled for local/private models, stores raw CoT only in a redacted quarantine path that feeds derived summaries rather than direct promotion.
 - Pi-native subagents receive better skill, soul, oversoul, output-contract, and sidecar coordination context.
 - UI/status surfaces show soul/oversoul and Pi bridge health without adding direct self-approval controls.

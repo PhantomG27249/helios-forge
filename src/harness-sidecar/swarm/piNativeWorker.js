@@ -1,4 +1,5 @@
 import { PiRpcManager } from '../../pi/piRpcManager.js';
+import { redactSecrets } from '../interop/agentCards.js';
 import { buildSwarmA2AEnvelope } from '../interop/a2aSwarmEnvelope.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { normalizeCompactHandoff, scoreCompactHandoff } from './subagentRunner.js';
@@ -11,6 +12,227 @@ import {
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function safeObject(value = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function compactRef(ref = {}, idKeys = [], versionKeys = []) {
+  const id = idKeys.map((key) => ref[key]).find(Boolean);
+  const version = versionKeys.map((key) => ref[key]).find(Boolean);
+  if (!id) return null;
+  return version ? `${id}@${version}` : String(id);
+}
+
+function boundedText(value, maxLength = 160) {
+  const text = String(value || '')
+    .replace(/[A-Za-z]:\\[^\s"'`<>]+/g, '[path]')
+    .replace(/(^|[\s"'`<>()])\/(?!\/)(?:[^\s"'`<>/]+\/){2,}[^\s"'`<>]+/g, '$1[path]')
+    .replace(/\b(?:api[_-]?key|token|secret|password)=\S+/gi, '$1=[redacted]')
+    .trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function skillHintLabel(hint) {
+  if (typeof hint === 'string') return hint.trim();
+  return String(hint?.id || hint?.skillId || hint?.name || '').trim();
+}
+
+function compactSkillHint(hint) {
+  const id = skillHintLabel(hint);
+  if (!id) return null;
+  return {
+    id: boundedText(id, 96),
+    reason: boundedText(hint?.reason || hint?.description || '', 160) || undefined,
+  };
+}
+
+function compactStructuredRef(ref = {}, idKeys = [], versionKeys = []) {
+  const id = idKeys.map((key) => ref[key]).find(Boolean);
+  if (!id) return null;
+  const version = versionKeys.map((key) => ref[key]).find(Boolean);
+  return {
+    id: boundedText(id, 96),
+    version: version ? boundedText(version, 64) : undefined,
+  };
+}
+
+function candidateLabel(candidate = {}) {
+  const id = candidate.candidateId || candidate.id || candidate.ref || 'candidate';
+  const source = candidate.source || candidate.kind || 'helios';
+  return `${id}:${source}`;
+}
+
+function compactCandidate(candidate = {}) {
+  const id = candidate.candidateId || candidate.id || candidate.ref;
+  if (!id) return null;
+  return {
+    id: boundedText(id, 96),
+    source: boundedText(candidate.source || candidate.kind || 'helios', 48),
+    operator: boundedText(candidate.operator || '', 64) || undefined,
+    score: Number.isFinite(Number(candidate.score)) ? Number(candidate.score) : undefined,
+  };
+}
+
+function modelWarningText(warning) {
+  if (typeof warning === 'string') return warning.trim();
+  return String(warning?.message || warning?.summary || warning?.code || '').trim();
+}
+
+function compactModelWarning(warning) {
+  if (typeof warning === 'string') return { message: boundedText(warning, 180) };
+  const message = boundedText(warning?.message || warning?.summary || warning?.code || '', 180);
+  if (!message) return null;
+  return {
+    code: boundedText(warning?.code || '', 80) || undefined,
+    message,
+  };
+}
+
+function countByType(capabilities = []) {
+  const counts = {};
+  for (const capability of capabilities) {
+    const type = boundedText(capability?.type || 'unknown', 48);
+    counts[type] = (counts[type] || 0) + 1;
+  }
+  return counts;
+}
+
+function compactCapabilityRef(capability = {}) {
+  const id = capability.id || capability.capabilityId;
+  if (!id) return null;
+  return {
+    id: boundedText(id, 120),
+    type: boundedText(capability.type || 'unknown', 48),
+    name: boundedText(capability.name || id, 120),
+    enabled: capability.enabled !== false,
+  };
+}
+
+function compactCapabilitiesManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') return null;
+  const capabilities = Array.isArray(manifest.capabilities) ? manifest.capabilities : [];
+  const refs = capabilities.map(compactCapabilityRef).filter(Boolean).slice(0, 16);
+  const counts = manifest.counts && typeof manifest.counts === 'object'
+    ? Object.fromEntries(
+      Object.entries(manifest.counts)
+        .filter(([, value]) => Number.isFinite(Number(value)))
+        .map(([key, value]) => [boundedText(key, 48), Number(value)]),
+    )
+    : countByType(capabilities);
+  return {
+    id: boundedText(manifest.id || manifest.manifestId || 'capabilities', 96),
+    version: boundedText(manifest.version || '', 64) || undefined,
+    counts,
+    refs,
+    truncated: capabilities.length > refs.length || undefined,
+  };
+}
+
+function compactCallbackHints(hints = {}) {
+  const allowedKeys = ['progressEndpoint', 'handoffEndpoint', 'statusEndpoint'];
+  return Object.fromEntries(
+    allowedKeys
+      .map((key) => [key, boundedText(hints[key], 256)])
+      .filter(([, value]) => value),
+  );
+}
+
+function normalizeBridgeContext({
+  piBridgeContext,
+  capabilitiesManifest,
+  outputContract,
+} = {}) {
+  const bridge = safeObject(piBridgeContext);
+  const taskCorrelationId = bridge.taskCorrelationId || bridge.correlationId;
+  return redactSecrets({
+    skillHints: asArray(bridge.skillHints).map(compactSkillHint).filter(Boolean).slice(0, 16),
+    soulRefs: asArray(bridge.soulRefs || bridge.souls)
+      .map((ref) => compactStructuredRef(ref, ['soulId', 'id'], ['soulVersion', 'version']))
+      .filter(Boolean)
+      .slice(0, 16),
+    oversoulRefs: asArray(bridge.oversoulRefs || bridge.oversouls)
+      .map((ref) => compactStructuredRef(ref, ['oversoulId', 'id'], ['oversoulVersion', 'version']))
+      .filter(Boolean)
+      .slice(0, 16),
+    outputContract: {
+      requiredFields: asArray(outputContract?.requiredFields)
+        .map((field) => boundedText(field, 64))
+        .filter(Boolean)
+        .slice(0, 24),
+    },
+    taskCorrelationId: boundedText(taskCorrelationId, 128) || undefined,
+    sidecarCallbackHints: compactCallbackHints(safeObject(bridge.sidecarCallbackHints || bridge.callbacks)),
+    capabilitiesManifest: compactCapabilitiesManifest(capabilitiesManifest || bridge.capabilitiesManifest),
+    mutationOptimization: {
+      heliosDeterministicCandidates: asArray(
+        bridge.mutationOptimization?.heliosDeterministicCandidates
+        || bridge.heliosDeterministicCandidates,
+      ).map(compactCandidate).filter(Boolean).slice(0, 16),
+      piNativeSuggestionPolicy: {
+        source: boundedText(
+          bridge.mutationOptimization?.piNativeSuggestionPolicy?.source
+          || bridge.piNativeSuggestionPolicy?.source
+          || 'pi_native_model_suggestions',
+          64,
+        ),
+        mode: boundedText(
+          bridge.mutationOptimization?.piNativeSuggestionPolicy?.mode
+          || bridge.piNativeSuggestionPolicy?.mode
+          || '',
+          64,
+        ) || undefined,
+        authority: 'advisory_only',
+      },
+    },
+    modelWarnings: asArray(bridge.modelWarnings || bridge.warnings)
+      .map(compactModelWarning)
+      .filter(Boolean)
+      .slice(0, 8),
+    authorityBoundary: {
+      durableApplyApproval: 'forbidden_for_pi_native',
+      piNativeOutput: 'advisory_only',
+    },
+  });
+}
+
+function hasBridgeContextData({ piBridgeContext, capabilitiesManifest } = {}) {
+  return Object.keys(safeObject(piBridgeContext)).length > 0 || capabilitiesManifest !== undefined;
+}
+
+function bridgePromptLines(bridgeContext = {}) {
+  const lines = [];
+  const skillHints = asArray(bridgeContext.skillHints).map(skillHintLabel).filter(Boolean);
+  if (skillHints.length) lines.push(`Skill hints: ${skillHints.join(', ')}`);
+
+  const soulRefs = asArray(bridgeContext.soulRefs)
+    .map((ref) => compactRef(ref, ['soulId', 'id'], ['soulVersion', 'version']))
+    .filter(Boolean);
+  if (soulRefs.length) lines.push(`Soul refs: ${soulRefs.join(', ')}`);
+
+  const oversoulRefs = asArray(bridgeContext.oversoulRefs)
+    .map((ref) => compactRef(ref, ['oversoulId', 'id'], ['oversoulVersion', 'version']))
+    .filter(Boolean);
+  if (oversoulRefs.length) lines.push(`Oversoul refs: ${oversoulRefs.join(', ')}`);
+
+  if (bridgeContext.taskCorrelationId) {
+    lines.push(`Task correlation id: ${bridgeContext.taskCorrelationId}`);
+  }
+
+  const candidates = asArray(bridgeContext.mutationOptimization?.heliosDeterministicCandidates)
+    .map(candidateLabel)
+    .filter(Boolean);
+  if (candidates.length) {
+    lines.push(`Helios deterministic mutation candidates (BES/RHO): ${candidates.join(', ')}`);
+  }
+
+  lines.push('Pi-native model suggestions are advisory only; separate them from Helios BES/RHO candidates.');
+  lines.push('Do not approve or apply durable local changes. Return proposals and evidence only.');
+
+  const warnings = asArray(bridgeContext.modelWarnings).map(modelWarningText).filter(Boolean);
+  if (warnings.length) lines.push(`Bridge warnings: ${warnings.join(' ')}`);
+  return lines;
 }
 
 function hasVerifierEvidence(value) {
@@ -225,6 +447,7 @@ export async function runPiNativeAttempt({
   outputContract = { requiredFields: ['summary', 'verifierEvidence'] },
   workspaceRoot,
   capabilitiesManifest,
+  piBridgeContext,
   piWorkerFactory = defaultPiWorkerFactory,
   emitTrace,
 } = {}) {
@@ -234,6 +457,14 @@ export async function runPiNativeAttempt({
   const emit = (event) => {
     if (typeof emitTrace === 'function') emitTrace(event);
   };
+  const shouldIncludeBridgeContext = hasBridgeContextData({ piBridgeContext, capabilitiesManifest });
+  const bridgeContext = shouldIncludeBridgeContext
+    ? normalizeBridgeContext({
+        piBridgeContext,
+        capabilitiesManifest,
+        outputContract,
+      })
+    : null;
   const a2a = buildSwarmA2AEnvelope({
     task: { ...task, taskId },
     attempt: { ...attempt, attemptId },
@@ -241,7 +472,11 @@ export async function runPiNativeAttempt({
     context,
     budget,
     outputContract,
+    durable: bridgeContext?.taskCorrelationId
+      ? { correlationId: bridgeContext.taskCorrelationId }
+      : undefined,
   });
+  if (bridgeContext) a2a.message.bridgeContext = bridgeContext;
 
   emit(traceEvent({
     taskId,
@@ -262,6 +497,7 @@ export async function runPiNativeAttempt({
       outputContract,
       workspaceRoot,
       capabilitiesManifest,
+      piBridgeContext: bridgeContext,
       a2a,
     });
     if (typeof worker.start === 'function') await worker.start();
@@ -283,6 +519,7 @@ export async function runPiNativeAttempt({
         `You are Helios Forge Pi-native swarm worker ${attemptId}.`,
         `Role: ${role}`,
         `Task: ${task.task || task.goal || ''}`,
+        ...bridgePromptLines(bridgeContext || {}),
         'Return one compact JSON object only. Do not narrate before or after the JSON.',
         `Required top-level fields: ${(outputContract.requiredFields || []).join(', ') || 'summary'}.`,
         'Always include compactHandoff with summary, filesInspected, filesChanged, commandsRun, testsRun, nextAction, sourcePointers, uncertainty, and risks.',

@@ -14,7 +14,8 @@
     "install:helios": "node scripts/setup-helios-forge.js",
     "release:smoke": "node scripts/release-smoke.js",
     "publish:check": "node scripts/publish-preflight.js",
-    "install:pi-kwargs": "node scripts/install-pi-kwargs-extension.js"
+    "install:pi-kwargs": "node scripts/install-pi-kwargs-extension.js",
+    "install:pi-helios": "node scripts/install-pi-helios-extension.js"
   },
   "dependencies": {
     "ws": "^8.18.0"

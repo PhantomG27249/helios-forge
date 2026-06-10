@@ -188,6 +188,8 @@ async function runScheduledAttempt({
   modelProfileName,
   piNativeEnabled = false,
   piWorkerFactory,
+  piBridgeContext,
+  capabilitiesManifest,
   emitAttemptTrace,
 }) {
   const taskId = task.taskId;
@@ -208,6 +210,8 @@ async function runScheduledAttempt({
       outputContract,
       workspaceRoot,
       piWorkerFactory,
+      piBridgeContext,
+      capabilitiesManifest,
       emitTrace: emitAttemptTrace,
     });
   }
@@ -355,6 +359,8 @@ export async function orchestrateSwarm({
   provider,
   modelProfileName,
   piWorkerFactory,
+  piBridgeContext,
+  capabilitiesManifest,
   planner,
   evolutionPlanner,
   evolutionBudget,
@@ -501,6 +507,8 @@ export async function orchestrateSwarm({
       modelProfileName: modelProfileName || scheduledAttempt.profile?.modelProfile,
       piNativeEnabled,
       piWorkerFactory,
+      piBridgeContext,
+      capabilitiesManifest,
       emitAttemptTrace: publishAttemptEvent,
     });
 
