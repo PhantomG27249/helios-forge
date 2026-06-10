@@ -172,6 +172,63 @@ Candidates:
 
 ## Chunk 3: Helios Forge Pi Extension
 
+### Local/Private Reasoning Capture Policy
+
+For local or privately hosted models that expose raw reasoning or thinking
+traces, the Pi extension may support opt-in capture. Raw reasoning is useful
+training ore for soul, memory, RHO, BES, and harness evolution, but it should
+not be treated as trusted truth or direct promotion evidence.
+
+Default behavior should remain structured reasoning telemetry only:
+
+```json
+{
+  "type": "cognition_trace",
+  "taskId": "...",
+  "agentId": "...",
+  "soulId": "...",
+  "phase": "plan|act|observe|critique|handoff",
+  "summary": "...",
+  "decision": "...",
+  "alternatives": ["..."],
+  "evidenceRefs": ["trace:event:...", "artifact:..."],
+  "uncertainty": 0.42,
+  "nextAction": "...",
+  "mutationHints": ["tool_selection", "memory_retrieval", "verification_gap"]
+}
+```
+
+When raw CoT capture is enabled for a local/private model, the path should be:
+
+```text
+raw local reasoning
+-> private quarantine store
+-> redaction
+-> compression/summarization
+-> evidence-linked cognition_trace packets
+-> RHO/BES/soul/oversoul mining
+-> benchmark and replay validation
+-> governed mutation proposal
+```
+
+Suggested config:
+
+```yaml
+reasoningTelemetry:
+  structuredTelemetry: true
+  rawCotCapture: false
+  rawCotVisibility: local_private_only
+  rawCotStore: quarantine
+  mineRawCot: derived_summaries_only
+  requireRedaction: true
+  requireBenchmarkValidation: true
+```
+
+Raw reasoning must never be sent through normal Pi extension metadata, shown in
+the UI by default, or used to self-promote. It may influence mutations only
+after derived summaries survive redaction, replay, verifier checks, and
+promotion policy.
+
 ### Task 7: Fix Existing Pi Extension Packaging
 
 **Files:**
@@ -199,6 +256,23 @@ Candidates:
 - [ ] Add `npm` script for installing the Helios extension.
 - [ ] Run `node --test tests/pi-helios-extension.test.js`.
 - [ ] Commit with `feat: add helios forge pi bridge extension`.
+
+### Task 8A: Reasoning Telemetry And Raw CoT Quarantine
+
+**Files:**
+- Create: `src/harness-sidecar/pi/reasoningTelemetry.js`
+- Modify: `packages/helios-research-harness/extensions/helios-forge.ts`
+- Modify: `src/harness-sidecar/core/traceWriter.js`
+- Test: `tests/pi-reasoning-telemetry.test.js`
+
+- [ ] Write failing tests for structured `cognition_trace` packets.
+- [ ] Write failing tests proving raw local CoT capture is disabled by default.
+- [ ] Add opt-in raw CoT quarantine storage for local/private model traces only.
+- [ ] Redact secrets, absolute paths, raw patches, raw memory contents, auth headers, and private URLs before derived summaries leave quarantine.
+- [ ] Emit compact derived telemetry for RHO/BES/soul/oversoul mining.
+- [ ] Ensure raw CoT cannot be used as direct promotion evidence or rendered in the UI by default.
+- [ ] Run `node --test tests/pi-reasoning-telemetry.test.js`.
+- [ ] Commit with `feat: add pi reasoning telemetry quarantine`.
 
 ### Task 9: Sidecar Bridge Endpoint
 
@@ -291,6 +365,7 @@ Candidates:
 - Soul and oversoul refs flow through SwarmCell, BES lane evidence, RHO hard cases, Meta-Harness variants, and A2A envelopes.
 - Soul and oversoul mutation candidates are shadow-only until promotion policy and approval accept them.
 - The Helios Forge Pi extension is packaged separately from the kwargs extension and has a working installer.
+- The Pi extension emits structured reasoning telemetry and, when explicitly enabled for local/private models, stores raw CoT only in a redacted quarantine path that feeds derived summaries rather than direct promotion.
 - Pi-native subagents receive better skill, soul, oversoul, output-contract, and sidecar coordination context.
 - UI/status surfaces show soul/oversoul and Pi bridge health without adding direct self-approval controls.
 - Full tests and release smoke pass.
