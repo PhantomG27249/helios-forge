@@ -110,7 +110,8 @@ flowchart TD
 | Swarm outcome feedback | Converts champion success, rejected attempts, unsafe patches, missing verifier evidence, and visual failures into RHO/BES/meta feedback. | `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`, `src/harness-sidecar/server.js` |
 | RHO replay and self-preference | Runs grouped baseline/candidate-family replays over held-out variants and scores self-validation, self-consistency, pairwise preference, blocking evidence, aggregate candidate-family deltas, and future hard cases as promotion evidence. | `src/harness-sidecar/rho/replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` |
 | BES lane contracts and lineage | Declares candidate/verifier units per lane, applies trajectory operators, scores lane-specific dense subgoal verifier metadata, records trajectory provenance, and bridges champion evidence into the global frontier. | `src/harness-sidecar/bes/laneContracts.js`, `trajectoryOperators.js`, `denseSubgoalVerifier.js`, `globalLineageTracker.js` |
-| Global harness experiments | Writes Meta-Harness-style run directories and isolated candidate variant workspaces with lineage, source/config/trace/metric artifacts, replay evidence, sweep metadata, and longitudinal frontier records across quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk. | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessVariantWorkspace.js`, `harnessFrontier.js`, `longitudinalFrontier.js` |
+| Global harness experiments | Writes Meta-Harness-style run directories and executable isolated candidate variant workspaces with lineage, source/config/trace/metric artifacts, proposer context, replay evidence, sweep metadata, and longitudinal frontier records across quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk. | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessVariantWorkspace.js`, `harnessFrontier.js`, `longitudinalFrontier.js` |
+| Capability-goal status | Summarizes paper-alignment capability goals as advisory status rows in sidecar status and UI without granting promotion authority. | `src/harness-sidecar/meta/capabilityGoalStatus.js`, `src/harness-sidecar/server.js`, `src/harness/harnessManager.js`, `public/app.js` |
 | Self-authored skill evolution | Mines repeated hard cases, snapshots source skills, generates shadow `SKILL.md` candidates, evaluates them, and approval-installs winners as workspace-local generated skills. | `src/harness-sidecar/skills/*` |
 | Collaboration and safe merge | Tracks locks, leases, roles, task claims, duplicate tasks, annotations, conflicts, merge manager. | `src/harness-sidecar/collaboration/*` |
 | Approvals and safe apply | Stores pending actions, resumes approved actions exactly once, applies champion/change/verifier/skill config only after approval plus replay/verifier/provenance/rollback evidence, and reports auto-approval eligibility metadata without bypassing gates. | `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/meta/autoApprovalPolicy.js`, `src/harness-sidecar/meta/promotionPolicy.js`, `tools/gitApplyAdapter.js`, `tools/verifierConfigApply.js` |
@@ -120,7 +121,7 @@ flowchart TD
 | Traces, resume, replay | Writes event JSONL, summarizes/compacts traces, reconstructs resumable state, exposes trace replay. | `src/harness-sidecar/core/trace*.js`, `taskResume.js` |
 | UI operator surface | Displays harness controls, capabilities, traces, memory/RAG/graph, visual artifacts, subagents, verifier evolution status, adaptive-search state, skill candidate review, and replay results. | `public/index.html`, `public/app.js` |
 | External agent interop | Normalizes agent cards, routes agents, redacts credentials, issues scoped delegated capability tokens, gates mutation, stores durable local inbox/outbox records, hydrates state through injected stores, supports stable issuer-secret providers, retries dispatch, records progress/cancel, discovers peers, builds endpoint registry records, negotiation envelopes, and streaming envelopes. | `src/harness-sidecar/interop/*` |
-| BES/A2A lineage bridge | Preserves reference-only BES lane, RHO case, memory graph, candidate, durable parent/root/message lineage, trust, endpoint, negotiation, and required-verification metadata across local A2A envelopes and marks external A2A claims unverified at the gateway boundary. | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `a2aEndpointRegistry.js`, `agentRouter.js`, `externalAgentGateway.js`, `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js` |
+| BES/A2A lineage bridge | Preserves reference-only BES lane, RHO case, memory graph, candidate, durable parent/root/message lineage, trust, endpoint, negotiation, stream, and required-verification metadata across local A2A envelopes and durable stores, and marks external A2A claims unverified at the gateway boundary. | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `a2aEndpointRegistry.js`, `a2aDurableStore.js`, `agentRouter.js`, `externalAgentGateway.js`, `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js` |
 | Visual evidence bundles | Converts visual verifier output into sanitized, hash-backed visual evidence nodes, RHO visual cases, memory graph references, benchmark cases, and BES evidence summaries. | `src/harness-sidecar/vlm/visualEvidence.js`, `visualBenchmarkCases.js`, `src/harness-sidecar/bes/laneEvidence.js`, `src/harness-sidecar/bes/laneRuntime.js` |
 | Governance and improvement loop | Plans scheduled replay jobs, tracks improvement budget, records rollback drills, summarizes frontier/governance status, applies formal autonomy levels, narrows low-risk reversible auto-approval, captures escalation reasons, and emits override/audit metadata. | `src/harness-sidecar/meta/governanceLoop.js`, `src/harness-sidecar/server.js` |
 
@@ -457,7 +458,7 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | `.harness/visual/<task-id>/` | Visual screenshots, diffs, OCR/PDF outputs |
 | `.harness/meta/local-candidates/<cell-id>/` | Local meta-harness candidate records scoped by SwarmCell |
 | `.harness/meta/harness-runs/<run-id>/` | Global Meta-Harness experiment records: candidate, patches, evals, promotion, rollback, and memory proposals |
-| `.harness/meta/harness-variants/<cycle-id>/<candidate-id>/` | Isolated Meta-Harness candidate variant workspaces with manifests, source/config/trace/metric artifact references, and symlink-safe write boundaries |
+| `.harness/meta/harness-variants/<cycle-id>/<candidate-id>/` | Executable isolated Meta-Harness candidate variant workspaces with manifests, source/config/trace/metric artifacts, proposer context, and symlink-safe write boundaries |
 | `.harness/meta/verifier-candidates/` | Archived verifier-evolution candidates |
 | `.harness/meta/skill-candidates/` | Shadow self-authored or adapted skill candidates |
 | `.harness/meta/skill-snapshots/` | Immutable source-skill snapshots for local evaluation/adaptation |
@@ -479,6 +480,7 @@ Important controls:
 - Visual benchmark/RHO surfaces drop absolute paths, traversal paths, and secret-shaped artifact paths before evidence leaves the visual subsystem.
 - VLM pass/fail cannot self-certify: score and confidence thresholds decide visual verifier status.
 - Meta-Harness variant writes reject path escapes and symlink/junction ancestors before source/config/metric artifacts are materialized.
+- A2A JSON durable stores can be constrained to allowed roots and reject symlink/junction parent escapes before inbox/outbox state is loaded or saved.
 - Verifier evolution proposes candidates and archives evidence; it does not directly promote or apply without human approval.
 - AB-MCTS can recommend `stop_or_promote`, but it cannot promote or apply; promotion remains a policy plus approval decision.
 - Self-authored skills cannot write to global Codex, Claude, Pi, or home skill folders. Approved candidates install only into workspace-local `.harness/packages`.
@@ -498,7 +500,8 @@ Start here for common questions:
 - "How does local meta feedback work?" Read `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, and `localPromotionBlocker.js`.
 - "Where are global harness experiments stored?" Read `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessVariantWorkspace.js`, `harnessFrontier.js`, and `longitudinalFrontier.js`.
 - "How do visual benchmark cases work?" Read `src/harness-sidecar/vlm/visualBenchmarkCases.js`.
-- "How are external A2A endpoints and negotiation envelopes represented?" Read `src/harness-sidecar/interop/a2aEndpointRegistry.js`, `a2aNegotiation.js`, and `a2aStreaming.js`.
+- "How are paper-alignment capability goals surfaced?" Read `src/harness-sidecar/meta/capabilityGoalStatus.js` and `public/app.js`.
+- "How are external A2A endpoints, negotiation envelopes, streams, and durable queues represented?" Read `src/harness-sidecar/interop/a2aEndpointRegistry.js`, `externalAgentGateway.js`, `a2aDurableStore.js`, and `a2aSwarmEnvelope.js`.
 - "What stops optimizers from self-authorizing?" Read `src/harness-sidecar/core/trustKernelBoundary.js`.
 - "How do swarm outcomes feed evolution?" Read `src/harness-sidecar/swarm/swarmOutcomeRecorder.js`.
 - "How does the swarm use adaptive search?" Read `src/harness-sidecar/swarm/attemptScheduler.js` and `src/harness-sidecar/swarm/swarmOrchestrator.js`.
@@ -516,9 +519,9 @@ Start here for common questions:
 
 These are known follow-up areas rather than blockers for local testing:
 
-- Production external A2A server/client transports for long-lived agent endpoints beyond the current local registry, envelopes, and durable queues.
-- Restart-persistent production queue backends and stable delegated-token issuer secrets for multi-process external-agent delegation.
-- Full executable harness source-tree variants, richer proposer access to raw prior traces and candidate source, and larger repeated benchmark cycles over production-sized suites.
+- Production external A2A server/client transports for long-lived agent endpoints beyond the current local registry, gateway envelopes, streaming metadata, and durable store adapters.
+- Restart-persistent production queue backends and stable delegated-token issuer secrets for multi-process external-agent delegation beyond the tested local JSON store.
+- Autonomous full source-tree harness variants, richer proposer policies over raw prior traces and candidate source, and larger repeated benchmark cycles over production-sized suites.
 - Operator dashboards that persist and visualize longitudinal frontier trends, rollback drills, budget-aware improvement accounting, and trust-risk deltas.
 - Production model-assisted extraction society roles, embedding providers, visual judges, and self-preference judges under explicit policy gates.
 - Broader MCP quarantine coverage for future model-visible fields beyond current returned-content scanning.
