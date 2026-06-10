@@ -36,7 +36,7 @@ Helios Forge is not a direct clone of any one paper. It combines ideas from all 
 
 Current implementation update:
 
-As of June 9, 2026, the hierarchical swarm meta-harness pass adds the missing sidecar-local skeleton for several loops that this document previously marked as only planned:
+As of June 10, 2026, the hierarchical swarm meta-harness pass adds the missing sidecar-local skeleton and benchmark/frontier spine for several loops that this document previously marked as only planned:
 
 - `memoryGraphRuntime.js`, `memoryExtractionSociety.js`, local memory graphs, SwarmCell graph merge, global memory promotion, and `hierarchicalMemoryRetriever.js`;
 - `localMetaHarness.js`, local candidate archive, local evolution loop, and local promotion blocker;
@@ -44,7 +44,7 @@ As of June 9, 2026, the hierarchical swarm meta-harness pass adds the missing si
 - BES lane contracts, trajectory operators, dense subgoal verifier, and global lineage tracker;
 - harness run store, experiment runner, frontier update, and trust-kernel boundary evaluator;
 - longitudinal benchmark frontier history and isolated harness variant workspaces;
-- sidecar/runtime/UI event wiring for `local_meta.completed`, `local_memory.proposed`, and experiment visibility.
+- sidecar/runtime/UI event wiring for `local_meta.completed`, `local_memory.proposed`, BES lane status, and experiment visibility;
 - A2A-shaped interop modules, agent routing, external gateway scaffolding, endpoint registry, negotiation envelopes, and delegated capability tokens.
 
 These modules intentionally remain deterministic and policy-gated. They close the repo-level "missing module" gaps, but they do not by themselves make Helios a full autonomous reproduction of the research systems.

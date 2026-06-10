@@ -35,14 +35,14 @@ These pieces already exist in the current codebase and should be reused rather t
 | --- | --- | --- |
 | Swarm and SwarmCell loop | `src/harness-sidecar/swarm/swarmCellContracts.js`, `swarmCellRuntime.js`, `swarmOrchestrator.js`, `evolutionSwarmPlanner.js`, `evolutionBudgetAllocator.js` | Implemented deterministic proposal loop |
 | Local meta-harness | `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, `localCandidateArchive.js`, `localPromotionBlocker.js` | Implemented local evidence/proposal loop |
-| Global harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records, lineage artifacts, replay evidence, and frontier comparison |
-| Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton with guarded extraction/adjudication hooks and eval metrics |
-| RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented structured candidate-family replay evidence |
-| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime |
+| Global harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessVariantWorkspace.js`, `harnessFrontier.js`, `longitudinalFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records, isolated variant workspaces, lineage artifacts, replay evidence, and longitudinal frontier comparison |
+| Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton with guarded extraction/adjudication hooks, role pipeline, migrations, decay/consolidation, and eval metrics |
+| RHO replay | `src/harness-sidecar/rho/coresetBuilder.js`, `replayBatchRunner.js`, `selfValidation.js`, `selfConsistency.js`, `selfPreferenceJudge.js` | Implemented embedding-aware/DPP-style case selection metadata and structured candidate-family replay evidence |
+| BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime, lane-specific verifier metadata, trajectory provenance, and champion frontier bridge |
 | Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers |
 | Skill evolution | `src/harness-sidecar/skills/*` | Implemented workspace-local skill candidate lifecycle |
-| Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js` | Implemented visual artifact/verifier substrate |
-| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `delegatedCapabilityTokens.js` | Local durable inbox/outbox, retries, progress/cancel, streaming envelopes, stable secret/store adapters, scoped delegated trust |
+| Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js`, `visualBenchmarkCases.js` | Implemented visual artifact/verifier substrate, sanitized visual benchmark cases, visual RHO seeds, and budget-aware VLM routing metadata |
+| A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `a2aEndpointRegistry.js`, `delegatedCapabilityTokens.js` | Local durable inbox/outbox, retries, progress/cancel, endpoint registry, negotiation envelopes, streaming envelopes, stable secret/store adapters, scoped delegated trust |
 | Trust kernel | `src/harness-sidecar/core/trustKernelBoundary.js`, `security/*`, approval modules | Implemented non-self-authorizing boundary |
 
 ## Gap Layer 1: BES Mesh Composition Now Landed
@@ -219,7 +219,8 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 - [x] A2A envelopes preserve lineage and trust metadata across nested swarms.
 - [x] Harness policies/configs are candidates in a harness-of-harnesses loop.
 - [x] Adaptive search can allocate budget across text, tool, swarm, visual, replay, and verifier actions.
-- [ ] Global frontier records persist longitudinal quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
+- [x] Global frontier records represent longitudinal quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
+- [ ] Operator dashboards persist and visualize longitudinal frontier trends over repeated production-sized cycles.
 - [x] Promotions require replay, verifier, provenance, rollback, and approval evidence.
 - [x] Rejected candidates and failed replays become future hard cases.
 - [ ] The system demonstrates improvement over a held-out benchmark suite across multiple cycles.
@@ -230,9 +231,9 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 2. Promote VLM/multimodal evidence to first-class lane, memory, RHO, and trust inputs. **First pass landed.**
 3. Harden Memory Graph RAG runtime and evals. **Guarded/eval pass landed; production scale remains.**
 4. Scale RHO replay across held-out multimodal and text/code/tool tasks. **Candidate-family deterministic pass landed; production suites remain.**
-5. Add concrete harness-of-harnesses candidate schemas. **Run lineage artifacts landed; full runnable variants remain.**
-6. Add durable A2A lineage/reference metadata before full peer transport. **Local durability, stable secret/store adapters, and visual hashes landed; network transport remains.**
-7. Build long-running benchmark/frontier loops. **Governance/job primitives and strict promotion evidence landed; longitudinal dashboards remain.**
+5. Add concrete harness-of-harnesses candidate schemas. **Run lineage artifacts and isolated variant workspaces landed; full executable source-tree variants remain.**
+6. Add durable A2A lineage/reference metadata before full peer transport. **Local durability, endpoint registry, negotiation envelopes, stable secret/store adapters, and visual hashes landed; network transport remains.**
+7. Build long-running benchmark/frontier loops. **Governance/job primitives, longitudinal frontier representation, and strict promotion evidence landed; production dashboards and repeated held-out cycles remain.**
 8. Tune autonomy levels and governance. **First pass landed; production policy tables remain.**
 
 ## North Star

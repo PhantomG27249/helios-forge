@@ -46,16 +46,19 @@ Helios Forge is a trace-driven, memory-grounded, self-improving agent harness th
 
 ## Implementation Snapshot
 
-As of the first hierarchical meta-harness implementation pass, Helios has working deterministic modules and tests for the core local/global loop:
+As of the June 10, 2026 paper-grade benchmark/frontier pass, Helios has working deterministic modules and tests for the core local/global loop:
 
 - SwarmCell output contracts normalize `taskOutput`, `evolutionOutput`, verifier evidence, and local durable-apply restrictions.
 - Local meta-harnesses convert attempt hard cases into scoped local candidates and archive them without approving durable apply.
 - Local memory graphs, SwarmCell graph merge, global memory promotion, extraction society scaffolding, memory graph runtime persistence, and hierarchical memory retrieval are present.
 - RHO replay batches now produce self-validation, self-consistency, and self-preference evidence.
-- BES lane contracts, trajectory operators, dense subgoal verification, and global lineage records exist for harness-level candidate units.
-- Global Meta-Harness experiment run storage, candidate/baseline comparison, frontier update, and trust-kernel boundary checks are implemented.
+- RHO coreset selection includes embedding-aware/DPP-style diversity metadata and grouped candidate-family replay summaries.
+- BES lane contracts, trajectory operators, lane-specific dense verifier metadata, trajectory provenance, and global lineage records exist for harness-level candidate units.
+- Global Meta-Harness experiment run storage, isolated candidate variant workspaces, candidate/baseline comparison, longitudinal frontier tracking, and trust-kernel boundary checks are implemented.
+- Visual evidence is promoted into sanitized benchmark cases, visual RHO seeds, memory graph references, BES policy checks, and budget-aware VLM routing recommendations.
+- A2A interop has durable local inbox/outbox records, retries, progress/cancel/correlation metadata, peer discovery scaffolding, streaming envelopes, scoped delegated trust, endpoint registry records, and negotiation envelopes.
 - `swarmOrchestrator.js` emits `local_meta.completed` and independently gated `local_memory.proposed` events; the sidecar full runtime wires those events into trace/UI visibility.
-- The operator UI exposes Local Meta, Memory Hierarchy, and Harness Experiments panels in the Swarm surface.
+- The operator UI exposes Local Meta, Memory Hierarchy, BES lane status, and Harness Experiments panels in the Swarm surface.
 
 This is still a conservative harness implementation rather than a fully autonomous research reproduction. The new loops are deterministic, traceable, and approval-gated; they do not self-merge source code, mutate global tool installs, or weaken trust boundaries.
 
@@ -475,6 +478,7 @@ What Helios has:
 - schema/fact/passage memory layers;
 - pending-to-active fact promotion;
 - conflict classification and deterministic adjudication;
+- guarded extraction society role pipeline;
 - memory-guided graph construction;
 - memory-aware graph retrieval;
 - graph snapshot support;
@@ -486,12 +490,11 @@ What Helios has:
 
 What remains:
 
-- richer extraction society roles for passages, schemas, facts, contradiction critique, and merge planning;
+- production model-assisted extraction society roles for passages, schemas, facts, contradiction critique, merge planning, retrieval, and evaluation;
 - broader production persistence, migration, and eval coverage for global layers;
-- provenance retrieval and model-assisted conflict adjudication;
-- guarded model-assisted conflict resolution;
+- deeper provenance retrieval and model-assisted conflict adjudication under explicit policy gates;
 - deeper task-context integration and retrieval policy tuning;
-- memory graph evals;
+- larger memory graph eval suites and decay/consolidation drills;
 - RHO/BES/adaptive tuning of graph policies.
 
 Design synthesis:
@@ -524,8 +527,10 @@ What Helios has:
 - frontier store;
 - harness run store;
 - harness experiment runner;
+- isolated harness variant workspaces;
 - candidate runner;
 - promotion loop;
+- longitudinal benchmark frontier tracking;
 - policy evolution modules;
 - change proposals;
 - safe apply and approval resume;
@@ -533,10 +538,10 @@ What Helios has:
 
 What remains:
 
-- complete candidate harness variants with source patches/configs/traces/metrics;
+- full executable candidate harness variants with source trees, patches, configs, traces, and metrics;
 - repeated propose-evaluate-log loops over many candidates;
-- stable benchmark and held-out task suite;
-- richer Pareto frontier over quality, safety, cost, latency, reliability, and maintainability;
+- stable production-sized benchmark and held-out task suites;
+- richer operator-facing Pareto frontier over quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk;
 - proposer access to uncompressed prior traces and candidate source.
 
 Design synthesis:
@@ -569,6 +574,7 @@ RHO decides what the swarm should learn from.
 What Helios has:
 
 - coreset builder;
+- embedding-aware/DPP-style diversity metadata for case selection;
 - replay batch runner;
 - self-validation scoring;
 - self-consistency scoring;
@@ -578,14 +584,15 @@ What Helios has:
 - skill need mining;
 - meta optimizer inputs;
 - trace replay and adaptive-search replay.
+- aggregate candidate-family replay evidence.
 
 What remains:
 
-- difficulty-diverse selection with embeddings or richer similarity;
-- larger grouped rerolls over selected tasks;
+- production embeddings or richer learned similarity instead of fixture-level/precomputed vectors;
+- larger grouped rerolls over selected production held-out tasks;
 - model-assisted trajectory ranking beyond deterministic self-validation and self-consistency;
-- candidate-family-vs-baseline replay, not only single candidate comparisons;
-- more promotion signals derived from trajectory rollouts instead of only deterministic gates.
+- broader candidate-family-vs-baseline replay across more families;
+- stronger self-validation, self-consistency, and self-preference weight in promotion signals without bypassing policy gates.
 
 Design synthesis:
 
@@ -614,8 +621,10 @@ What Helios has:
 - mutation and recombination;
 - lane contracts for code, verifier, memory, research, skill, and swarm;
 - trajectory operators;
-- dense subgoal verifier;
+- lane-specific dense subgoal verifier metadata;
+- trajectory provenance;
 - global lineage tracker;
+- champion archive/frontier evidence bridge;
 - population/island/archive evolution;
 - evolution-aware swarm planning;
 - evolution-aware swarm budget allocation;
@@ -624,8 +633,8 @@ What Helios has:
 What remains:
 
 - paper-grade trajectory-level expansion, deletion, translocation, crossover, and recombination semantics across all lanes;
-- general verifier for dense subgoal scoring;
-- fully fused forward/backward search in every lane;
+- stronger learned or model-assisted dense subgoal verifiers;
+- fully fused forward/backward runtime search in every lane;
 - stronger lineage across evolved prompts, policies, code patches, skills, verifier genomes, and memory graph policies.
 
 Design synthesis:
@@ -645,30 +654,31 @@ To close the paper gap, BES must run at both levels. Local BES mutates agent tra
 
 ## A2A Role
 
-A2A is the future transport for independent SwarmCells and subagents. Today Helios has an A2A-shaped local envelope and an external-agent gateway, but not a complete peer-to-peer swarm network.
+A2A is the future transport for independent SwarmCells and subagents. Today Helios has durable local A2A contracts and endpoint metadata, but not a complete peer-to-peer swarm network.
 
 Current behavior:
 
 - sidecar assigns attempts;
 - Pi-native workers receive A2A-style envelopes;
 - external agent gateway can redact, route, and gate mutation;
+- durable local inbox/outbox records preserve correlation, parent/root lineage, progress, cancel, and retry metadata;
+- scoped delegated tokens and stable issuer-secret providers are supported locally;
+- peer discovery, endpoint registry records, negotiation envelopes, and streaming envelopes exist as local contracts;
 - mutation requires approval and delegated tokens.
 
 Missing for a true mega-network:
 
 - persistent A2A endpoints per agent;
-- peer discovery;
-- bidirectional streaming;
-- durable inbox/outbox;
-- message correlation ids;
-- retries and cancellation;
-- progress events;
+- restart-persistent production queue backends;
+- external server/client transports that exercise peer discovery, bidirectional streaming, retries, cancellation, and progress over real network flows;
+- production delegated-token issuer secret management;
 - shared task-state sync;
-- subagent-to-subagent delegation.
+- subagent-to-subagent delegation and negotiation;
+- multi-hop lineage through real external agent flows.
 
 Near-term rule:
 
-Use sidecar-local SwarmCells until the A2A transport is durable. Treat A2A envelopes as contracts, not as proof that peer networking is complete.
+Use sidecar-local SwarmCells until the external A2A transport is durable. Treat A2A endpoint, negotiation, and streaming envelopes as contracts, not as proof that peer networking is complete.
 
 ## New Runtime Loop
 
@@ -710,7 +720,7 @@ sequenceDiagram
 
 ## Original Workstreams And Remaining Gaps
 
-The following workstreams were the original module-level implementation targets. The first pass has implemented the sidecar-local versions of items 1 through 7 plus trust-kernel boundary tests and operator visibility. Remaining gaps are mostly depth, scale, model-assisted judgment, A2A transport, and production hardening rather than missing skeleton modules.
+The following workstreams were the original module-level implementation targets. The current paper-grade spine pass has implemented deterministic sidecar-local versions of items 1 through 7, most local A2A durability contracts from item 8, and trust-kernel/operator visibility coverage from item 9. Remaining gaps are mostly depth, scale, model-assisted judgment, external A2A transport, dashboards, and production hardening rather than missing skeleton modules.
 
 ### 1. SwarmCell Runtime
 
@@ -797,7 +807,9 @@ Needed modules:
 
 - `src/harness-sidecar/meta/harnessRunStore.js`
 - `src/harness-sidecar/meta/harnessExperimentRunner.js`
+- `src/harness-sidecar/meta/harnessVariantWorkspace.js`
 - `src/harness-sidecar/meta/harnessFrontier.js`
+- `src/harness-sidecar/meta/longitudinalFrontier.js`
 
 Each run should store local agent summaries, memory proposals, baseline replay, candidate replay, self-preference evidence, source/config patches, verifier evidence, risk metadata, and rollback data.
 
@@ -830,7 +842,7 @@ Only after SwarmCell runtime is useful locally:
 - `src/harness-sidecar/interop/a2aServer.js`
 - `src/harness-sidecar/interop/a2aClient.js`
 - `src/harness-sidecar/interop/a2aInbox.js`
-- `src/harness-sidecar/interop/a2aRegistry.js`
+- `src/harness-sidecar/interop/a2aEndpointRegistry.js`
 - `src/harness-sidecar/interop/a2aTaskSync.js`
 
 ### 9. Trust Kernel Boundary Tests
@@ -845,26 +857,24 @@ Add tests proving the swarm cannot self-authorize:
 - cannot auto-merge source patches by default;
 - cannot bypass rollback metadata.
 
-## Implementation Order
+## Next Implementation Order
 
-Recommended sequence:
+Recommended next sequence:
 
-1. Add evolution output contracts to existing swarm workers.
-2. Add SwarmCell registry and runtime as a sidecar-local abstraction.
-3. Add per-agent local meta-harness runtime.
-4. Finish local/global MemGraphRAG runtime completion.
-5. Add harness experiment run store.
-6. Add RHO replay batch runner with grouped rerolls and self-preference.
-7. Add BES lane contracts and trajectory operators for each candidate type.
-8. Add guarded source-code self-modification in isolated worktrees.
-9. Add A2A durable transport.
-10. Consider narrow self-merging only after long-running evidence.
+1. Lock stable production-sized held-out benchmark suites and run repeated longitudinal cycles.
+2. Upgrade Meta-Harness variants from isolated manifests/workspaces to full executable source-tree candidates with raw trace and source access for the proposer.
+3. Replace fixture-level RHO similarity with production embeddings or learned similarity and run larger grouped rerolls over candidate families.
+4. Promote MemGraphRAG extraction society roles from deterministic hooks to guarded model-assisted workers with migration, decay/consolidation, and larger eval suites.
+5. Deepen BES lanes with true forward/backward fusion, learned dense verifiers, compatible-family mutation/recombination, and champion archives connected to the global frontier.
+6. Scale multimodal into OCR/PDF/diagram/chart/UI regression suites, a dedicated visual SwarmCell, visual RHO cases, visual policy evolution, and budget-aware VLM routing.
+7. Build external A2A server/client transports, production queue stores, subagent-to-subagent negotiation, and multi-hop lineage over real network flows.
+8. Expand governance dashboards for scheduled replay jobs, rollback drills, budget-aware improvement accounting, trust-risk trends, autonomy levels, and audit overrides.
 
-This order keeps the system useful at every step and avoids building a distributed agent protocol before the local swarm behavior is measurable.
+This order keeps the system measurable at every step and avoids increasing autonomy before the benchmark frontier and trust evidence can catch regressions.
 
 ## Acceptance Criteria
 
-The architecture is working when:
+The local architecture is working when:
 
 - every task writes trace, memory, verifier, swarm, and promotion evidence;
 - every SwarmCell returns both task output and evolution output;
@@ -881,6 +891,17 @@ The architecture is working when:
 - source-code mutations happen only in isolated worktrees;
 - durable apply requires verifier evidence, rollback, and approval policy;
 - the trust kernel remains outside the self-modifying loop.
+
+The remaining paper-grade target is working when:
+
+- benchmark suites are stable enough to compare weeks of repeated runs;
+- candidate harness variants are executable in isolated directories and retain source/config/trace/metric artifacts;
+- RHO rerolls cover large held-out suites and candidate families with meaningful self-preference evidence;
+- MemGraphRAG model-assisted roles improve graph retrieval while preserving provenance and conflict policy;
+- BES lanes show measurable lift from forward/backward fusion and compatible-family recombination;
+- visual benchmark suites and visual RHO cases affect promotion/blocking decisions;
+- external A2A flows survive restarts, retries, streaming, delegated trust, and multi-hop lineage;
+- governance dashboards expose quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, trust risk, rollback, and autonomy-state trends.
 
 ## Bottom Line
 
