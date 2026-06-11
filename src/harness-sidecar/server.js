@@ -83,6 +83,7 @@ import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { ModelGateway } from './model/modelGateway.js';
 import { getModelProfile } from './model/modelProfiles.js';
 import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
+import { createVllmHealthController } from './model/vllmHealthController.js';
 import { buildPiBridgeState } from './pi/piBridgeState.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { getAgentProfile } from './swarm/agentProfiles.js';
@@ -302,6 +303,7 @@ export function createHarnessSidecar({
   workspaceRoot = process.cwd(),
   port = 49321,
   modelProviderFactory = createOpenAICompatibleProvider,
+  vllmHealthFetch = fetch,
   swarmWorktreeManager,
   swarmCommandAdapter,
   swarmVerifierAdapter,
@@ -322,6 +324,7 @@ export function createHarnessSidecar({
   const approvalResumeStore = createApprovalResumeStore({ emitEvent });
   const tasks = new Map();
   const taskStates = new Map();
+  const vllmHealthControllers = new Map();
   let mountedMcpRuntime = mcpRuntime || null;
   let server = null;
   let actualPort = port;
@@ -428,6 +431,76 @@ export function createHarnessSidecar({
     };
   }
 
+  function numericSetting(...values) {
+    for (const value of values) {
+      const number = Number(value);
+      if (Number.isFinite(number)) return number;
+    }
+    return undefined;
+  }
+
+  function adaptiveVllmHealthEnabled(harnessConfig) {
+    if (process.env.HELIOS_VLLM_HEALTH_ENABLED === '0') return false;
+    return harnessConfig?.vllmHealth?.enabled !== false;
+  }
+
+  function getVllmHealthController({ baseUrl, harnessConfig }) {
+    const minConcurrency = numericSetting(
+      process.env.HELIOS_VLLM_HEALTH_MIN_CONCURRENCY,
+      harnessConfig?.vllmHealth?.minConcurrency,
+      1,
+    );
+    const maxConcurrency = numericSetting(
+      process.env.HELIOS_SWARM_MAX_CONCURRENCY,
+      process.env.HELIOS_VLLM_HEALTH_MAX_CONCURRENCY,
+      harnessConfig?.vllmHealth?.maxConcurrency,
+      harnessConfig?.swarmExecution?.maxConcurrency,
+      harnessConfig?.swarmExecution?.concurrency,
+      4,
+    );
+    const probeConcurrency = numericSetting(
+      process.env.HELIOS_VLLM_HEALTH_PROBE_CONCURRENCY,
+      harnessConfig?.vllmHealth?.probeConcurrency,
+      2,
+    );
+    const timeoutMs = numericSetting(
+      process.env.HELIOS_VLLM_HEALTH_TIMEOUT_MS,
+      harnessConfig?.vllmHealth?.timeoutMs,
+      1000,
+    );
+    const targetLatencyMs = numericSetting(
+      process.env.HELIOS_VLLM_HEALTH_TARGET_LATENCY_MS,
+      harnessConfig?.vllmHealth?.targetLatencyMs,
+      1000,
+    );
+    const initialConcurrency = numericSetting(
+      harnessConfig?.vllmHealth?.initialConcurrency,
+      harnessConfig?.swarmExecution?.concurrency,
+      minConcurrency,
+    );
+    const controllerKey = [
+      baseUrl,
+      minConcurrency,
+      maxConcurrency,
+      probeConcurrency,
+      timeoutMs,
+      targetLatencyMs,
+    ].join('|');
+    if (!vllmHealthControllers.has(controllerKey)) {
+      vllmHealthControllers.set(controllerKey, createVllmHealthController({
+        baseUrl,
+        fetchImpl: vllmHealthFetch,
+        minConcurrency,
+        maxConcurrency,
+        initialConcurrency,
+        probeConcurrency,
+        timeoutMs,
+        targetLatencyMs,
+      }));
+    }
+    return vllmHealthControllers.get(controllerKey);
+  }
+
   async function runFullRuntimeSubsystems({
     task,
     subgoals,
@@ -480,6 +553,28 @@ export function createHarnessSidecar({
         return null;
       }
 
+      let vllmHealth = null;
+      let adaptiveConcurrency = Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1));
+      if (adaptiveVllmHealthEnabled(harnessConfig)) {
+        const controller = getVllmHealthController({ baseUrl, harnessConfig });
+        vllmHealth = await controller.probeAndUpdate();
+        adaptiveConcurrency = vllmHealth.concurrency;
+        await emitEvent({
+          type: 'swarm.vllm_health_updated',
+          taskId: task.taskId,
+          profileName,
+          baseUrl,
+          healthUrl: vllmHealth.healthUrl,
+          healthy: vllmHealth.healthy,
+          concurrency: vllmHealth.concurrency,
+          reason: vllmHealth.reason,
+          sampleCount: vllmHealth.sampleCount,
+          failureCount: vllmHealth.failureCount,
+          p95LatencyMs: vllmHealth.p95LatencyMs,
+          statuses: vllmHealth.statuses,
+        });
+      }
+
       const provider = modelProviderFactory({
         baseUrl,
         apiKey: process.env.HELIOS_SWARM_MODEL_API_KEY || harnessConfig?.models?.swarmApiKey || 'dummy',
@@ -494,6 +589,8 @@ export function createHarnessSidecar({
         profileName,
         vlmProfileName,
         supportsVision,
+        adaptiveConcurrency,
+        vllmHealth,
         gateway: new ModelGateway({
           provider,
           emitEvent,
@@ -637,6 +734,15 @@ export function createHarnessSidecar({
       modelDrivenSwarm: Boolean(runtimeSwarmModel),
       piNativeSwarm: harnessConfig?.features?.piNativeSwarm === true
         || process.env.HELIOS_PI_NATIVE_SWARM === '1',
+      swarmConcurrency: runtimeSwarmModel?.adaptiveConcurrency
+        || Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
+      vllmHealth: runtimeSwarmModel?.vllmHealth
+        ? {
+          healthy: runtimeSwarmModel.vllmHealth.healthy,
+          reason: runtimeSwarmModel.vllmHealth.reason,
+          p95LatencyMs: runtimeSwarmModel.vllmHealth.p95LatencyMs,
+        }
+        : null,
     });
     const besLaneResults = [];
     async function runRuntimeBesLane(input) {
@@ -1720,7 +1826,8 @@ export function createHarnessSidecar({
       modelProfileName: runtimeSwarmModel?.profileName,
       swarmExecution: {
         piNative: piNativeSwarmEnabled,
-        concurrency: Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
+        concurrency: runtimeSwarmModel?.adaptiveConcurrency
+          || Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
       },
       featureFlags: {
         localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,

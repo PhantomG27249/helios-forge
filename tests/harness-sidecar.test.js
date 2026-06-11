@@ -400,6 +400,84 @@ test('full runtime invokes VLM observation when configured model supports vision
   );
 });
 
+test('full runtime adapts swarm concurrency from vLLM health probes', async () => {
+  const modelProviderFactory = () => async () => ({
+    text: JSON.stringify({
+      summary: 'Model worker completed a health-adapted swarm attempt.',
+      verifierEvidence: ['dry-run verifier evidence'],
+      score: 0.82,
+    }),
+    usage: { inputTokens: 80, outputTokens: 20 },
+  });
+  const healthUrls = [];
+
+  await withSidecar(
+    async ({ sidecar }) => {
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'exercise adaptive vllm concurrency',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const healthEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'swarm.vllm_health_updated',
+      );
+      assert.equal(healthEvent.baseUrl, 'http://model.test/v1');
+      assert.equal(healthEvent.concurrency, 2);
+      assert.equal(healthEvent.reason, 'healthy_capacity_available');
+      assert.deepEqual([...new Set(healthUrls)], ['http://model.test/health']);
+
+      const runtimeEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'harness_runtime.enabled',
+      );
+      assert.equal(runtimeEvent.swarmConcurrency, 2);
+      assert.equal(runtimeEvent.vllmHealth.healthy, true);
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: {
+        modelProviderFactory,
+        vllmHealthFetch: async (url) => {
+          healthUrls.push(String(url));
+          return { ok: true, status: 200 };
+        },
+      },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  modelDrivenSwarm: true',
+            'models:',
+            '  swarmBaseUrl: http://model.test/v1',
+            '  swarmModelId: local-test',
+            'vllmHealth:',
+            '  probeConcurrency: 2',
+            '  maxConcurrency: 4',
+            '  targetLatencyMs: 1000',
+            '',
+          ].join('\n'),
+        );
+      },
+    },
+  );
+});
+
 test('task startup launches enabled MCP capabilities through injected runtime', async () => {
   await withSidecar(
     async ({ sidecar }) => {

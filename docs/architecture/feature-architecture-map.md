@@ -443,6 +443,7 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Local memory hierarchy feedback | `.harness/config.yaml` `features.localMemoryGraph: false` disables it; full runtime defaults to enabled |
 | Adaptive search | `.harness/config.yaml` `features.adaptiveSearch: true`; default mode remains `advisory` |
 | Bounded swarm concurrency | Optional `swarmExecution.concurrency` input; default remains sequential |
+| Adaptive vLLM swarm concurrency | Enabled for model-driven swarms unless `vllmHealth.enabled: false` or `HELIOS_VLLM_HEALTH_ENABLED=0`; probes `<swarmBaseUrl without /v1>/health` and clamps fanout with `vllmHealth.maxConcurrency` or `HELIOS_SWARM_MAX_CONCURRENCY` |
 | Policy evolution candidates | Shadow-only by default; promotion and mutation still require existing gates |
 | Auto-approval eligibility | Metadata only unless a future approved policy explicitly enables a narrow local tier |
 
