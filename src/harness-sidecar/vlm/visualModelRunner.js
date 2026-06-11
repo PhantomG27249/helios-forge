@@ -187,6 +187,7 @@ export async function runVisualModelObservation({
   );
   const request = buildMultimodalRequest({
     profileName,
+    profileOverride: modelGateway?.profileOverrides?.[profileName],
     prompt: [
       prompt,
       '',

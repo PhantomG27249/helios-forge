@@ -1,4 +1,5 @@
 import { createServer } from 'http';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { planSubgoals } from './bes/subgoalPlanner.js';
@@ -85,6 +86,8 @@ import { ModelGateway } from './model/modelGateway.js';
 import { getModelProfile } from './model/modelProfiles.js';
 import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
 import { createRoutingModelProvider } from './model/routingModelProvider.js';
+import { createModelRouterPolicy } from './model/modelRouterPolicy.js';
+import { createModelRouterState } from './model/modelRouterState.js';
 import { createVllmHealthController } from './model/vllmHealthController.js';
 import { buildPiBridgeState } from './pi/piBridgeState.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
@@ -525,6 +528,65 @@ export function createHarnessSidecar({
     );
   }
 
+  function resolveWorkspaceStatePath(configuredPath, fallbackPath) {
+    const resolved = path.resolve(resolvedWorkspaceRoot, configuredPath || fallbackPath);
+    const workspacePrefix = `${resolvedWorkspaceRoot}${path.sep}`;
+    if (resolved === resolvedWorkspaceRoot || resolved.startsWith(workspacePrefix)) return resolved;
+    return path.resolve(resolvedWorkspaceRoot, fallbackPath);
+  }
+
+  async function readJsonIfExists(filePath) {
+    try {
+      return JSON.parse(await readFile(filePath, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async function createRuntimeModelRouter(harnessConfig) {
+    const routerConfig = harnessConfig?.modelRouter || {};
+    const enabled = harnessConfig?.features?.adaptiveModelRouter === true
+      && routerConfig.enabled === true;
+    if (!enabled) return null;
+
+    const persistenceEnabled = routerConfig.persistence?.enabled === true;
+    const persistencePath = resolveWorkspaceStatePath(
+      routerConfig.persistence?.path,
+      '.harness/model-router-state.json',
+    );
+    const initialState = persistenceEnabled ? await readJsonIfExists(persistencePath) : null;
+    const state = createModelRouterState({ initialState });
+    return {
+      enabled: true,
+      mode: routerConfig.mode || 'advisory',
+      strategy: routerConfig.strategy || 'thompson_sampling',
+      authority: 'evidence_only',
+      canPromote: false,
+      rewardWeights: routerConfig.rewardWeights,
+      state,
+      policy: createModelRouterPolicy({
+        state,
+        explorationFloor: routerConfig.explorationFloor,
+        maxArmsPerDecision: routerConfig.maxArmsPerDecision,
+      }),
+      persistence: {
+        enabled: persistenceEnabled,
+        path: persistencePath,
+      },
+    };
+  }
+
+  async function persistRuntimeModelRouter(modelRouter) {
+    if (!modelRouter?.persistence?.enabled || typeof modelRouter?.state?.snapshot !== 'function') return;
+    await mkdir(path.dirname(modelRouter.persistence.path), { recursive: true });
+    await writeFile(
+      modelRouter.persistence.path,
+      `${JSON.stringify(modelRouter.state.snapshot(), null, 2)}\n`,
+      'utf8',
+    );
+  }
+
   async function runFullRuntimeSubsystems({
     task,
     subgoals,
@@ -721,6 +783,7 @@ export function createHarnessSidecar({
       'audit',
     ];
     const runtimeSwarmModel = await createRuntimeSwarmModelGateway();
+    const runtimeModelRouter = await createRuntimeModelRouter(harnessConfig);
     const activeToolCaps = resolveAgentProfileToolCaps(task.profileId);
     const defaultToolRegistry = createDefaultToolRegistry({
       workspaceRoot: resolvedWorkspaceRoot,
@@ -1976,6 +2039,7 @@ export function createHarnessSidecar({
         }
         : undefined,
       modelCouncil: runtimeSwarmModel?.modelCouncil,
+      modelRouter: runtimeModelRouter,
       featureFlags: {
         localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,
         localMemoryGraph: harnessConfig?.features?.localMemoryGraph !== false,
@@ -1987,6 +2051,7 @@ export function createHarnessSidecar({
       workspaceRoot: useWorktreeOptions ? resolvedWorkspaceRoot : undefined,
       worktreeManager: useWorktreeOptions ? swarmWorktreeManager : undefined,
     });
+    await persistRuntimeModelRouter(runtimeModelRouter);
     const attempts = swarmRun.attempts;
     await emitEvent({
       type: 'budget.dashboard_updated',

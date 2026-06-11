@@ -205,6 +205,46 @@ test('visual model runner can call an injected model gateway object', async () =
   assert.equal(result.observations[0].text, 'No visual regression found.');
 });
 
+test('visual model runner accepts custom VLM profiles supplied by gateway overrides', async () => {
+  const { workspaceRoot, artifactRoot, imagePath } = await makeWorkspaceImage();
+  const calls = [];
+
+  const result = await runVisualModelObservation({
+    taskId: 'task_custom_gateway_profile',
+    prompt: 'Inspect.',
+    imagePaths: [imagePath],
+    workspaceRoot,
+    artifactRoots: [artifactRoot],
+    profileName: 'workspace_qwen_vlm',
+    modelGateway: {
+      profileOverrides: {
+        workspace_qwen_vlm: {
+          model: 'Qwen/Qwen3.6-27B',
+          baseUrl: 'http://qwen.test/v1',
+          supportsVision: true,
+        },
+      },
+      call: async (input) => {
+        calls.push(input);
+        return {
+          structured: {
+            observations: [{ text: 'Custom profile handled the image.' }],
+            risks: [],
+            score: 0.9,
+            artifacts: [],
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].profileName, 'workspace_qwen_vlm');
+  assert.equal(calls[0].visionInputs.length, 1);
+  assert.equal(result.model.profileName, 'workspace_qwen_vlm');
+  assert.equal(result.observations[0].text, 'Custom profile handled the image.');
+});
+
 test('visual model runner rejects malformed model output before returning observations', async () => {
   const { workspaceRoot, artifactRoot, imagePath } = await makeWorkspaceImage();
 

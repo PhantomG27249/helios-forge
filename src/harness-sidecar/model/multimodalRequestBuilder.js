@@ -13,8 +13,28 @@ function collectVisualPaths(item) {
   return [];
 }
 
-export function buildMultimodalRequest({ profileName, prompt, visualItems = [] }) {
-  const profile = getModelProfile(profileName);
+function resolveProfile(profileName, profileOverride = {}) {
+  let baseProfile = {};
+  try {
+    baseProfile = getModelProfile(profileName);
+  } catch (error) {
+    if (!profileOverride || Object.keys(profileOverride).length === 0) throw error;
+    baseProfile = { name: profileName, supportsVision: false, supportsTools: true };
+  }
+  return {
+    ...baseProfile,
+    ...profileOverride,
+    name: profileOverride.name || baseProfile.name || profileName,
+  };
+}
+
+export function buildMultimodalRequest({
+  profileName,
+  profileOverride = {},
+  prompt,
+  visualItems = [],
+}) {
+  const profile = resolveProfile(profileName, profileOverride);
   if (visualItems.length > 0 && !profile.supportsVision) {
     throw new Error(`Model profile does not support vision inputs: ${profileName}`);
   }
