@@ -64,7 +64,12 @@ function artifactPath(artifact = {}) {
 export function sanitizeVisualArtifactPath(filePath) {
   const raw = String(filePath || '').trim();
   if (!raw) return null;
-  if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.startsWith('\\')) return null;
+  if (
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(raw)
+    || /^[A-Za-z]:[\\/]/.test(raw)
+    || raw.startsWith('/')
+    || raw.startsWith('\\')
+  ) return null;
   const normalized = raw.replaceAll('\\', '/').split('/').filter(Boolean);
   if (normalized.includes('..')) return null;
   const joined = normalized.join('/');

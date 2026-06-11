@@ -1,3 +1,8 @@
+import {
+  createVisualSwarmCell,
+  isVisualSwarmCellEnabled,
+} from '../vlm/visualSwarmCell.js';
+
 const SHARED_CELL_CONTRACT = {
   localMetaHarness: { enabled: true },
   localMemoryGraph: { enabled: true },
@@ -34,12 +39,6 @@ const DEFAULT_SWARM_CELLS = [
     ...SHARED_CELL_CONTRACT,
   },
   {
-    cellId: 'visual_vlm',
-    role: 'visual_vlm',
-    localAgents: ['visual_vlm', 'verifier'],
-    ...SHARED_CELL_CONTRACT,
-  },
-  {
     cellId: 'safety_review',
     role: 'safety_review',
     localAgents: ['safety_review', 'reviewer'],
@@ -51,11 +50,23 @@ function cloneCell(cell) {
   return JSON.parse(JSON.stringify(cell));
 }
 
-export function getDefaultSwarmCells() {
-  return DEFAULT_SWARM_CELLS.map(cloneCell);
+function normalizeRegistryOptions(optionsOrCells) {
+  if (Array.isArray(optionsOrCells)) return { cells: optionsOrCells };
+  if (optionsOrCells && typeof optionsOrCells === 'object') return optionsOrCells;
+  return {};
 }
 
-export function resolveSwarmCell(cellId, cells = DEFAULT_SWARM_CELLS) {
+export function getDefaultSwarmCells(options = {}) {
+  const cells = DEFAULT_SWARM_CELLS.map(cloneCell);
+  if (isVisualSwarmCellEnabled(options.config)) {
+    cells.push(createVisualSwarmCell());
+  }
+  return cells;
+}
+
+export function resolveSwarmCell(cellId, optionsOrCells = DEFAULT_SWARM_CELLS) {
+  const options = normalizeRegistryOptions(optionsOrCells);
+  const cells = options.cells ?? getDefaultSwarmCells({ config: options.config });
   const found = cells.find((cell) => cell.cellId === cellId);
   return found ? cloneCell(found) : null;
 }

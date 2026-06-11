@@ -1,4 +1,5 @@
 import { decideAutoApproval } from './autoApprovalPolicy.js';
+import { evaluateProductionAutonomy } from './productionAutonomyPolicy.js';
 import { updateHarnessFrontier } from './harnessFrontier.js';
 import { summarizeLongitudinalFrontier } from './longitudinalFrontier.js';
 
@@ -260,6 +261,30 @@ function hasLocalReversibleScope(candidate = {}) {
   return ['local', 'local_config', 'workspace', 'workspace_local', 'repo', 'repo_local'].includes(scope);
 }
 
+function productionAutonomyAutoApprovalBlockers(productionAutonomy) {
+  if (!productionAutonomy) return [];
+  const reasons = [];
+  if (productionAutonomy.promotionEligible === false) reasons.push('production_autonomy_blocked');
+  if (productionAutonomy.canApply === false) reasons.push('production_autonomy_no_apply_authority');
+  for (const blocker of productionAutonomy.blockers || []) {
+    if (!reasons.includes(blocker)) reasons.push(blocker);
+  }
+  return reasons;
+}
+
+function mergeRollbackEvidence(evidenceRollback, rollback) {
+  const evidenceValue = evidenceRollback && typeof evidenceRollback === 'object' && !Array.isArray(evidenceRollback)
+    ? evidenceRollback
+    : {};
+  const rollbackValue = rollback && typeof rollback === 'object' && !Array.isArray(rollback)
+    ? rollback
+    : {};
+  return {
+    ...rollbackValue,
+    ...evidenceValue,
+  };
+}
+
 export function decideGovernanceAction({
   autonomyLevel = 0,
   candidate = {},
@@ -272,11 +297,27 @@ export function decideGovernanceAction({
   actor = 'system',
 } = {}) {
   const autonomy = normalizeAutonomyLevel(autonomyLevel);
+  const productionAutonomyGate = policy.productionCapabilities?.productionAutonomyPolicy
+    || policy.productionAutonomyPolicy;
+  const productionAutonomy = policy.productionAutonomy || (
+    productionAutonomyGate
+      ? evaluateProductionAutonomy({
+        candidate,
+        evidence: {
+          ...evidence,
+          rollback: mergeRollbackEvidence(evidence.rollback, rollback),
+        },
+        risk: { level: candidate.risk },
+        operatorPolicy: policy,
+      })
+      : null
+  );
   if (override?.approvedBy) {
     const reasons = [override.reason || 'operator_override'];
     return {
       decision: 'override_approved',
       autonomy,
+      productionAutonomy,
       reasons,
       auditEvent: auditEvent({
         type: 'governance.override',
@@ -292,11 +333,28 @@ export function decideGovernanceAction({
   const approval = decideAutoApproval({ candidate, evidence, rollback, trust, approvals, policy });
   const lowRisk = !candidate.risk || candidate.risk === 'low';
   if (approval.status === 'auto_approved' && lowRisk && autonomy.level >= 2) {
+    const productionBlockers = productionAutonomyAutoApprovalBlockers(productionAutonomy);
+    if (productionBlockers.length) {
+      return {
+        decision: 'escalated',
+        autonomy,
+        productionAutonomy,
+        reasons: productionBlockers,
+        auditEvent: auditEvent({
+          type: 'governance.escalation',
+          actor,
+          candidate,
+          reasons: productionBlockers,
+          decision: 'escalated',
+        }),
+      };
+    }
     if (!hasLocalReversibleScope(candidate)) {
       const reasons = ['auto_approval_limited_to_local_reversible_scope'];
       return {
         decision: 'escalated',
         autonomy,
+        productionAutonomy,
         reasons,
         auditEvent: auditEvent({
           type: 'governance.escalation',
@@ -310,6 +368,7 @@ export function decideGovernanceAction({
     return {
       decision: 'auto_approved',
       autonomy,
+      productionAutonomy,
       reasons: approval.reasons,
       auditEvent: auditEvent({
         type: 'governance.auto_approval',
@@ -325,6 +384,7 @@ export function decideGovernanceAction({
   return {
     decision: 'escalated',
     autonomy,
+    productionAutonomy,
     reasons,
     auditEvent: auditEvent({
       type: 'governance.escalation',

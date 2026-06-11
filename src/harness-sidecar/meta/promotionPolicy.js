@@ -400,6 +400,27 @@ function evaluateSoulPromotion({
   };
 }
 
+function productionAutonomyDecision({ candidateRun, productionAutonomy, autoApproval }) {
+  return productionAutonomy
+    || candidateRun?.productionAutonomy
+    || autoApproval?.productionAutonomy
+    || null;
+}
+
+function productionAutonomyBlocked(decision) {
+  return decision && decision.promotionEligible === false;
+}
+
+function rejectedByProductionAutonomy({ candidateRun, decision }) {
+  return {
+    candidateId: candidateRun?.candidateId,
+    status: 'rejected',
+    reasons: ['production_autonomy_blocked', ...(decision.blockers || decision.reasons || [])],
+    metrics: candidateRun?.metrics || {},
+    productionAutonomy: decision,
+  };
+}
+
 export function evaluatePromotion({
   candidateRun,
   baselineFrontier = [],
@@ -410,7 +431,12 @@ export function evaluatePromotion({
   verifierPolicy = {},
   skillPolicy = {},
   autoApproval = null,
+  productionAutonomy = null,
 } = {}) {
+  const autonomyDecision = productionAutonomyDecision({ candidateRun, productionAutonomy, autoApproval });
+  if (productionAutonomyBlocked(autonomyDecision)) {
+    return rejectedByProductionAutonomy({ candidateRun, decision: autonomyDecision });
+  }
   if (isSoulCandidate(candidateRun)) {
     return evaluateSoulPromotion({
       candidateRun,

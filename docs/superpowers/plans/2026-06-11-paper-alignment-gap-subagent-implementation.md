@@ -157,7 +157,7 @@ Run workers in parallel only when their write sets are disjoint. The following f
 
 **Goal:** Add root-constrained, schema-validated held-out benchmark suite manifests.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Test cases:
 
@@ -182,7 +182,7 @@ Add tests for:
 - quarantine flags;
 - persistence under `.harness/benchmarks/suites/<suite-id>.json`.
 
-- [ ] **Step 2: Run the failing test**
+- [x] **Step 2: Run the failing test**
 
 Run:
 
@@ -192,7 +192,7 @@ node --test tests\held-out-suite-store.test.js
 
 Expected: FAIL because the benchmark modules do not exist.
 
-- [ ] **Step 3: Implement schema and store**
+- [x] **Step 3: Implement schema and store**
 
 Required API:
 
@@ -215,7 +215,7 @@ Implementation requirements:
 - keep filesystem writes under `.harness/benchmarks/suites`;
 - no network calls.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run:
 
@@ -225,7 +225,7 @@ node --test tests\held-out-suite-store.test.js
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src\harness-sidecar\benchmarks tests\held-out-suite-store.test.js
@@ -313,9 +313,9 @@ export function buildOperatorDashboardSnapshot({
 
 **Goal:** Allow gated model-assisted extraction society roles while preserving deterministic fallback and guarded role-output contracts.
 
-- [ ] Write failing tests proving model assistance is disabled by default.
-- [ ] Add tests proving enabled model outputs are schema-validated, provenance-bound, and evidence-only.
-- [ ] Implement:
+- [x] Write failing tests proving model assistance is disabled by default.
+- [x] Add tests proving enabled model outputs are schema-validated, provenance-bound, and evidence-only.
+- [x] Implement:
 
 ```js
 export function chooseMemoryExtractionMode({ config, caseContext, budget, risk }) {
@@ -323,10 +323,10 @@ export function chooseMemoryExtractionMode({ config, caseContext, budget, risk }
 }
 ```
 
-- [ ] Reject ungrounded claims that lack retrieved provenance references.
-- [ ] Ensure model-assisted output cannot write promoted memory directly.
-- [ ] Run `node --test tests\harness-memory-model-assisted-extraction.test.js`.
-- [ ] Commit with `feat: gate model-assisted memory extraction`.
+- [x] Reject ungrounded claims that lack retrieved provenance references.
+- [x] Ensure model-assisted output cannot write promoted memory directly.
+- [x] Run `node --test tests\harness-memory-model-assisted-extraction.test.js`.
+- [x] Commit with `feat: gate model-assisted memory extraction`.
 
 ### Worker 5: Guarded Provenance Resolution Agents
 
@@ -369,10 +369,10 @@ export function chooseMemoryExtractionMode({ config, caseContext, budget, risk }
 
 **Goal:** Add production-scale RHO selection hooks with deterministic fallback embeddings and replay schedules across code, research, memory, visual, tool, swarm, and safety domains.
 
-- [ ] Write failing tests for deterministic fallback embeddings and model-backed provider adapters.
-- [ ] Write tests for larger DPP-like selection preserving difficulty/diversity metadata.
-- [ ] Write tests for replay schedules that cover every major domain without mixing quarantined cases into promotion evidence.
-- [ ] Implement provider API:
+- [x] Write failing tests for deterministic fallback embeddings and model-backed provider adapters.
+- [x] Write tests for larger DPP-like selection preserving difficulty/diversity metadata.
+- [x] Write tests for replay schedules that cover every major domain without mixing quarantined cases into promotion evidence.
+- [x] Implement provider API:
 
 ```js
 export function createEmbeddingProvider({ modelProvider, fallback } = {}) {
@@ -380,14 +380,14 @@ export function createEmbeddingProvider({ modelProvider, fallback } = {}) {
 }
 ```
 
-- [ ] Implement planner API:
+- [x] Implement planner API:
 
 ```js
 export function planRhoReplaySchedule({ cases, suites, cadence, budget, now }) {}
 ```
 
-- [ ] Run both focused tests and `node --test tests\harness-rho-coreset.test.js`.
-- [ ] Commit with `feat: scale RHO embeddings and replay scheduling`.
+- [x] Run both focused tests and `node --test tests\harness-rho-coreset.test.js`.
+- [x] Commit with `feat: scale RHO embeddings and replay scheduling`.
 
 ---
 
@@ -404,8 +404,8 @@ export function planRhoReplaySchedule({ cases, suites, cadence, budget, now }) {
 
 **Goal:** Run isolated full source-tree harness variants with executable entrypoints and no active-workspace mutation.
 
-- [ ] Write failing tests for source-tree materialization, command allowlist, artifact capture, and active workspace isolation.
-- [ ] Implement:
+- [x] Write failing tests for source-tree materialization, command allowlist, artifact capture, and active workspace isolation.
+- [x] Implement:
 
 ```js
 export function createSourceTreeVariantRunner({ workspaceRoot, variantRoot, commandRunner }) {
@@ -413,11 +413,11 @@ export function createSourceTreeVariantRunner({ workspaceRoot, variantRoot, comm
 }
 ```
 
-- [ ] Use the existing `.harness/meta/harness-variants/<cycle-id>/<candidate-id>/` root from `harnessVariantWorkspace.js`; do not create a second variant tree.
-- [ ] Add compatibility tests proving existing `harnessVariantWorkspace.js` manifests and symlink-safe boundaries still work.
-- [ ] Capture source/config/trace/metric/replay artifacts.
-- [ ] Run `node --test tests\harness-source-tree-variant-runner.test.js`.
-- [ ] Commit with `feat: run isolated source-tree harness variants`.
+- [x] Use the existing `.harness/meta/harness-variants/<cycle-id>/<candidate-id>/` root from `harnessVariantWorkspace.js`; do not create a second variant tree.
+- [x] Add compatibility tests proving existing `harnessVariantWorkspace.js` manifests and symlink-safe boundaries still work.
+- [x] Capture source/config/trace/metric/replay artifacts.
+- [x] Run `node --test tests\harness-source-tree-variant-runner.test.js`.
+- [x] Commit with `feat: run isolated source-tree harness variants`.
 
 ### Worker 8: Harness-Of-Harnesses Optimizer
 
@@ -491,11 +491,11 @@ export function judgeDenseSubgoalWithModel({ subgoal, evidence, modelProvider, p
 
 **Goal:** Add a dedicated visual SwarmCell for screenshots, UI states, diagrams, plots, PDFs, OCR, charts, and generated artifacts.
 
-- [ ] Write failing contract tests for accepted visual task kinds and required evidence refs.
-- [ ] Implement visual SwarmCell registration as disabled-by-default unless visual features are enabled.
-- [ ] Require artifact hashes for visual-impacting evidence.
-- [ ] Run `node --test tests\harness-visual-swarmcell.test.js`.
-- [ ] Commit with `feat: add visual SwarmCell runtime`.
+- [x] Write failing contract tests for accepted visual task kinds and required evidence refs.
+- [x] Implement visual SwarmCell registration as disabled-by-default unless visual features are enabled.
+- [x] Require artifact hashes for visual-impacting evidence.
+- [x] Run `node --test tests\harness-visual-swarmcell.test.js`.
+- [x] Commit with `feat: add visual SwarmCell runtime`.
 
 ### Worker 11: Visual Replay Suites And Policy Frontier
 
@@ -557,12 +557,12 @@ export function judgeDenseSubgoalWithModel({ subgoal, evidence, modelProvider, p
 
 **Goal:** Promote local A2A envelopes into long-lived server/client transport services while preserving gateway quarantine.
 
-- [ ] Write tests for handshake, message submit, progress, cancel, retry, and streaming envelope transport.
-- [ ] Write hostile-network tests for token scope failures, replayed messages, oversized payloads, credential-shaped free text, mutation requests from external peers, and attempts to escalate `verified: true`.
-- [ ] Implement transport without requiring live network access in tests; use injectable fetch/listener adapters.
-- [ ] Mark inbound external claims as `external: true`, `verified: false`.
-- [ ] Run `node --test tests\harness-a2a-transport.test.js`.
-- [ ] Commit with `feat: add external A2A transport adapters`.
+- [x] Write tests for handshake, message submit, progress, cancel, retry, and streaming envelope transport.
+- [x] Write hostile-network tests for token scope failures, replayed messages, oversized payloads, credential-shaped free text, mutation requests from external peers, and attempts to escalate `verified: true`.
+- [x] Implement transport without requiring live network access in tests; use injectable fetch/listener adapters.
+- [x] Mark inbound external claims as `external: true`, `verified: false`.
+- [x] Run `node --test tests\harness-a2a-transport.test.js`.
+- [x] Commit with `feat: add external A2A transport adapters`.
 
 ### Worker 14: Restart-Persistent Production Queue And Issuer Secret Providers
 
@@ -722,8 +722,8 @@ export function recommendEndpointCapacityActions({ endpoints, routerHealth, poli
 
 **Goal:** Encode production autonomy levels, approval narrowing, escalation, external evidence policy, VLM-required policy, override audit, rollback, and quarantine behavior.
 
-- [ ] Write tests for candidate types: docs, config, prompt, skill, verifier, code, model routing, A2A transport, visual policy, memory policy.
-- [ ] Implement:
+- [x] Write tests for candidate types: docs, config, prompt, skill, verifier, code, model routing, A2A transport, visual policy, memory policy.
+- [x] Implement:
 
 ```js
 export function evaluateProductionAutonomy({
@@ -734,14 +734,14 @@ export function evaluateProductionAutonomy({
 }) {}
 ```
 
-- [ ] Ensure high-risk changes always require human approval.
-- [ ] Ensure external A2A and VLM evidence policies can block promotion.
-- [ ] Add integration tests proving low-risk approval narrowing remains eligibility-only and cannot apply directly.
-- [ ] Add integration tests against `src/harness-sidecar/core/trustKernelBoundary.js`, `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/tools/verifierConfigApply.js`, and `src/harness-sidecar/meta/autoApprovalPolicy.js`.
-- [ ] Prove autonomy policy cannot weaken verifier floors, bypass safe apply, or mark external evidence verified.
-- [ ] Run `node --test tests\harness-production-autonomy-policy.test.js`.
-- [ ] Run `node --test tests\harness-authority-boundary-integration.test.js`.
-- [ ] Commit with `feat: add production autonomy policy`.
+- [x] Ensure high-risk changes always require human approval.
+- [x] Ensure external A2A and VLM evidence policies can block promotion.
+- [x] Add integration tests proving low-risk approval narrowing remains eligibility-only and cannot apply directly.
+- [x] Add integration tests against `src/harness-sidecar/core/trustKernelBoundary.js`, `src/harness-sidecar/core/approvalResume.js`, `src/harness-sidecar/tools/verifierConfigApply.js`, and `src/harness-sidecar/meta/autoApprovalPolicy.js`.
+- [x] Prove autonomy policy cannot weaken verifier floors, bypass safe apply, or mark external evidence verified.
+- [x] Run `node --test tests\harness-production-autonomy-policy.test.js`.
+- [x] Run `node --test tests\harness-authority-boundary-integration.test.js`.
+- [x] Commit with `feat: add production autonomy policy`.
 
 ### Worker 20: Feature Gates And Shared Quarantine
 

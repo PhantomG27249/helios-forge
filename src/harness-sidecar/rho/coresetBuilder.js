@@ -522,7 +522,7 @@ function compareRankedItems(a, b) {
   return a.taskId.localeCompare(b.taskId);
 }
 
-function normalizeEmbedding(value) {
+export function normalizeEmbedding(value) {
   if (!Array.isArray(value) || value.length === 0) {
     return null;
   }
@@ -593,7 +593,7 @@ function fallbackEmbeddingText(source = {}, id = '') {
   return fields.map(stableString).filter(Boolean).join(' ');
 }
 
-function deterministicFallbackEmbedding(source, id, dimensions) {
+export function deterministicFallbackEmbedding(source, id, dimensions) {
   const safeDimensions = Math.max(0, Math.floor(Number(dimensions) || 0));
   const text = fallbackEmbeddingText(source, id);
   if (safeDimensions === 0 || text.length === 0) {
