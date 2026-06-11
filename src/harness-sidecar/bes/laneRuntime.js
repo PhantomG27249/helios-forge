@@ -2,6 +2,8 @@ import { verifyDenseSubgoals } from './denseSubgoalVerifier.js';
 import { recordLineage } from './globalLineageTracker.js';
 import { getBesLaneContract } from './laneContracts.js';
 import { normalizeLaneEvidence, summarizeLanePromotion } from './laneEvidence.js';
+import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
+import { normalizeSoulRefs } from '../souls/soulEvidence.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -11,6 +13,23 @@ function asArray(value) {
 function normalizeId(value, fallback) {
   const normalized = String(value ?? fallback).trim();
   return normalized || fallback;
+}
+
+function soulMetadataFrom(source = {}) {
+  return source.soulRefs ?? source.soulRef ?? source.soulMetadata ?? {
+    soulId: source.soulId,
+    soulVersion: source.soulVersion,
+    oversoulVersion: source.oversoulVersion,
+    mutationLineage: source.mutationLineage,
+  };
+}
+
+function evolutionLevelMetadataFrom(source = {}) {
+  return source.evolutionLevelRefs
+    ?? source.evolutionLevelRef
+    ?? source.evolutionLevel
+    ?? source.levelRefs
+    ?? null;
 }
 
 function cloneJson(value, fallback = undefined) {
@@ -341,6 +360,8 @@ export async function runBesLaneRuntime({
     const candidateChampionArchive = candidate.championArchive ?? championArchive;
     const candidateFrontier = candidate.frontier ?? frontier;
     const candidateExternalPolicyEvidence = candidate.externalPolicyEvidence ?? externalPolicyEvidence;
+    const soulRefs = normalizeSoulRefs(soulMetadataFrom(candidate));
+    const evolutionLevelRefs = normalizeEvolutionLevelRefs(evolutionLevelMetadataFrom(candidate));
     const championFrontierBridge = buildChampionFrontierBridge({
       candidateId,
       lane: contract.lane,
@@ -362,6 +383,8 @@ export async function runBesLaneRuntime({
       externalPolicyEvidence: candidateExternalPolicyEvidence,
       a2a,
       memoryGraph,
+      soulRefs,
+      evolutionLevelRefs,
     });
     const promotion = summarizeLanePromotion({
       candidate,
@@ -395,6 +418,8 @@ export async function runBesLaneRuntime({
       ...(visualEvidence ? { visualEvidence } : {}),
       ...(memoryGraph ? { memoryGraph } : {}),
       ...(candidateExternalPolicyEvidence ? { externalPolicyEvidence: candidateExternalPolicyEvidence } : {}),
+      ...(soulRefs ? { soulRefs } : {}),
+      ...(evolutionLevelRefs ? { evolutionLevelRefs } : {}),
       promotion,
       updatedAt: now,
     };

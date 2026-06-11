@@ -17,6 +17,7 @@ Current state after the latest implementation pass:
 - **Architecture maturity:** high. The docs now describe the right shape: swarm of swarms, harnesses of harnesses, Memory Graph RAG, A2A lineage, RHO/BES/adaptive search, trust kernel.
 - **Primitive maturity:** high for a deterministic local harness. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, durable local A2A queues, governance loops, capability-goal status, and trust gates.
 - **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, benchmark/frontier history, executable variant workspaces, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, capability-goal rows, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
+- **Recursive soul evolution levels:** implemented as an evidence-only lineage spine across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness. This is metadata/status plumbing only; nested execution remains future work.
 
 Approximate level:
 
@@ -41,6 +42,8 @@ These pieces already exist in the current codebase and should be reused rather t
 | BES/evolution | `src/harness-sidecar/bes/*`, `src/harness-sidecar/meta/besMetaOptimizer.js`, `verifierEvolutionLoop.js`, `verifierGenome.js` | Strong primitives plus shared lane runtime, forward/backward fusion metadata, lane-specific verifier contracts, trajectory provenance, compatible-family metadata, and champion frontier bridge |
 | Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers |
 | Skill evolution | `src/harness-sidecar/skills/*` | Implemented workspace-local skill candidate lifecycle |
+| Soul and oversoul runtime | `src/harness-sidecar/souls/*`, `src/harness-sidecar/swarm/rolePrompts.js`, `swarmOrchestrator.js`, `src/harness-sidecar/meta/capabilityGoalStatus.js` | Implemented first identity/collective advisory layer: strict Markdown parsing, workspace store, sanitized prompt context, reference-only BES/SwarmCell metadata, shadow variants, status rows, and governance blockers |
+| Recursive soul evolution levels | `src/harness-sidecar/souls/*`, `src/harness-sidecar/swarm/swarmCellContracts.js`, `src/harness-sidecar/bes/laneEvidence.js`, `src/harness-sidecar/meta/capabilityGoalStatus.js` | Evidence-only lineage metadata across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness; not nested execution |
 | Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js`, `visualBenchmarkCases.js` | Implemented visual artifact/verifier substrate, sanitized visual benchmark cases, visual RHO seeds, and budget-aware VLM routing metadata |
 | A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `a2aEndpointRegistry.js`, `a2aDurableStore.js`, `delegatedCapabilityTokens.js` | Local durable inbox/outbox, retries, progress/cancel, endpoint registry, negotiation envelopes, streaming envelopes, stable secret/store adapters, root/symlink-safe durable state, scoped delegated trust |
 | Capability-goal status | `src/harness-sidecar/meta/capabilityGoalStatus.js`, `public/app.js`, `src/harness/harnessManager.js` | Advisory paper-alignment capability rows in status and UI; evidence-only, no promotion authority |
@@ -261,7 +264,9 @@ and mutation policy. Fusion does not erase lineage. Every layer can remember,
 replay, mutate, recombine, and report upward. No layer can approve its own
 durable mutation. The global harness compares cells, candidate families,
 soul/oversoul variants, and source-tree harness variants over stable held-out
-tasks. The trust kernel remains outside the self-modifying loop.
+tasks. The current evolution levels record that lineage as evidence-only
+metadata across the stack; they do not yet run nested harness execution. The
+trust kernel remains outside the self-modifying loop.
 
 That is the line: self-evolving, memory-grounded, multimodal, networked,
 recursively harnessed, and governed.

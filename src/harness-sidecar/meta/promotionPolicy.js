@@ -112,6 +112,15 @@ function isSkillCandidate(candidateRun = {}) {
   );
 }
 
+function isSoulCandidate(candidateRun = {}) {
+  const target = String(candidateRun.target || '').toLowerCase();
+  const candidateId = String(candidateRun.candidateId || '').toLowerCase();
+  return target.includes('soul')
+    || candidateId.startsWith('soul_candidate_')
+    || candidateRun.soulCandidate === true
+    || candidateRun.oversoulCandidate === true;
+}
+
 function isShadowOnlyCandidate(candidateRun = {}) {
   return candidateRun.status === 'shadow_only' || candidateRun.directApplyAllowed === false;
 }
@@ -363,6 +372,34 @@ function evaluateSkillPromotion({
   };
 }
 
+function evaluateSoulPromotion({
+  candidateRun,
+  approvals = [],
+} = {}) {
+  const candidateId = candidateRun?.candidateId;
+  const reasons = [];
+
+  if (isApproved(candidateId, approvals)) {
+    reasons.push('human_approved');
+  } else {
+    reasons.push('missing_human_approval');
+  }
+  if (isShadowOnlyCandidate(candidateRun)) {
+    reasons.push('soul_shadow_only');
+  }
+  reasons.push('soul_requires_operator_promotion_path');
+  addRequiredPromotionEvidenceReasons(reasons, candidateRun);
+
+  return {
+    candidateId,
+    status: 'rejected',
+    reasons,
+    metrics: candidateRun?.metrics || {},
+    authority: 'shadow_only',
+    canPromote: false,
+  };
+}
+
 export function evaluatePromotion({
   candidateRun,
   baselineFrontier = [],
@@ -374,6 +411,12 @@ export function evaluatePromotion({
   skillPolicy = {},
   autoApproval = null,
 } = {}) {
+  if (isSoulCandidate(candidateRun)) {
+    return evaluateSoulPromotion({
+      candidateRun,
+      approvals,
+    });
+  }
   if (isVerifierPolicyCandidate(candidateRun)) {
     return evaluateVerifierPromotion({
       candidateRun,

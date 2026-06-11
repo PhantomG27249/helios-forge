@@ -47,6 +47,14 @@ function profileLines(profile) {
   ];
 }
 
+function soulContextBlock(context = {}) {
+  if (typeof context.soulContext === 'string' && context.soulContext.trim()) {
+    return context.soulContext.trim();
+  }
+  if (context.soulContext?.text) return context.soulContext.text;
+  return null;
+}
+
 export function buildRolePrompt({
   role,
   task = {},
@@ -74,7 +82,8 @@ export function buildRolePrompt({
     `Scope notes:\n${listLines(scope.notes)}`,
     `Budget: ${budget.tokens || 0} tokens, ${budget.maxOutputChars || 'unbounded'} output chars`,
     `Required output fields: ${requiredFields.length ? requiredFields.join(', ') : 'none'}`,
-  ].join('\n\n');
+    soulContextBlock(context),
+  ].filter(Boolean).join('\n\n');
 
   return {
     role: registryEntry,

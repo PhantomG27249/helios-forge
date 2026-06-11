@@ -29,6 +29,19 @@ function featureEnabled(featureFlags = {}, name) {
   return featureFlags?.[name] === true;
 }
 
+function oversoulAttemptMetadata(oversoulContext = null) {
+  if (!oversoulContext?.oversoulRef) return {};
+  return {
+    oversoulRef: oversoulContext.oversoulRef,
+    oversoulAdvisory: {
+      authority: 'advisory',
+      canPromote: false,
+      roleEcology: oversoulContext.roleEcology,
+      strategyPosture: oversoulContext.strategyPosture,
+    },
+  };
+}
+
 function resolveAttemptCell({ attempt = {}, role } = {}) {
   const profileRole = attempt.profile?.role || role;
   const direct = resolveSwarmCell(attempt.cellId || profileRole);
@@ -371,6 +384,7 @@ export async function orchestrateSwarm({
   onAttemptEvent,
   emitEvent,
   featureFlags = {},
+  oversoulContext = null,
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
   const hasModelWorker = Boolean(modelWorkerProvider({
@@ -403,6 +417,7 @@ export async function orchestrateSwarm({
   }
   const profiledAttempts = scheduledBaseAttempts.map((attempt) => ({
     ...attempt,
+    ...oversoulAttemptMetadata(oversoulContext),
     profile: attempt.profile || selectAgentProfileForAttempt({
       profiles,
       attempt,
@@ -444,6 +459,8 @@ export async function orchestrateSwarm({
           planning: scheduledAttempt.planning,
           budget: scheduledAttempt.budget,
           budgetRationale: scheduledAttempt.budgetRationale,
+          oversoulRef: scheduledAttempt.oversoulRef,
+          oversoulAdvisory: scheduledAttempt.oversoulAdvisory,
           worker: {
             kind: workerKind,
             requestId,
@@ -467,6 +484,8 @@ export async function orchestrateSwarm({
         planning: attemptRecord.planning,
         budget: attemptRecord.budget,
         budgetRationale: attemptRecord.budgetRationale,
+        oversoulRef: attemptRecord.oversoulRef,
+        oversoulAdvisory: attemptRecord.oversoulAdvisory,
         worker: attemptRecord.worker,
         model: attemptRecord.model,
         status: attemptRecord.status,
@@ -593,6 +612,15 @@ export async function orchestrateSwarm({
     reviews,
     recombination,
     champion,
+    oversoul: oversoulContext
+      ? {
+        authority: 'advisory',
+        canPromote: false,
+        oversoulRef: oversoulContext.oversoulRef || null,
+        roleEcology: oversoulContext.roleEcology,
+        strategyPosture: oversoulContext.strategyPosture,
+      }
+      : null,
     planning: {
       strategy: planner?.enabled ? planner.strategy : 'seeded',
       adaptiveSearch: adaptiveSearchAction

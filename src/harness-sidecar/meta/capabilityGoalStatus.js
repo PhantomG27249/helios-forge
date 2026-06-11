@@ -39,6 +39,16 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     label: 'Governance and autonomy tuning',
     requiredEvidence: ['autonomy_level', 'approval_policy', 'escalation_policy', 'override_audit', 'rollback_drill'],
   },
+  {
+    goalId: 'soul_coverage',
+    label: 'Soul coverage and advisory evidence',
+    requiredEvidence: ['soul_records', 'runtime_store', 'prompt_adapter'],
+  },
+  {
+    goalId: 'oversoul_coverage',
+    label: 'Oversoul advisory runtime coverage',
+    requiredEvidence: ['oversoul_contract', 'role_ecology', 'strategy_posture', 'governance_posture'],
+  },
 ]);
 
 function asArray(value) {

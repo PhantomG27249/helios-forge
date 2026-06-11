@@ -1,3 +1,6 @@
+import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
+import { normalizeSoulRefList } from '../souls/soulEvidence.js';
+
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -80,9 +83,13 @@ export function normalizeLaneEvidence({
   a2a,
   memoryGraph,
   externalPolicyEvidence,
+  soulRefs,
+  evolutionLevelRefs,
   extraSources = [],
 } = {}) {
   const sources = new Set(asArray(extraSources).map(String).filter(Boolean));
+  const normalizedSoulRefs = normalizeSoulRefList(soulRefs);
+  const normalizedEvolutionLevelRefs = normalizeEvolutionLevelRefs(evolutionLevelRefs);
 
   if (isPresent(domain)) sources.add('domain_eval');
   if (isPresent(rho)) sources.add('rho_replay');
@@ -97,11 +104,15 @@ export function normalizeLaneEvidence({
   if (isPresent(a2a)) sources.add('a2a_lineage');
   if (isPresent(memoryGraph)) sources.add('memory_graph');
   if (isPresent(externalPolicyEvidence)) sources.add('external_policy_evidence');
+  if (normalizedSoulRefs.length > 0) sources.add('soul_refs');
+  if (normalizedEvolutionLevelRefs.length > 0) sources.add('evolution_level_refs');
 
   const normalizedSources = [...sources].sort((left, right) => left.localeCompare(right));
+  const evidenceOnlySources = new Set(['evolution_level_refs', 'soul_refs']);
+  const substantiveSources = normalizedSources.filter((source) => !evidenceOnlySources.has(source));
   return {
     sources: normalizedSources,
-    hasRequiredEvidence: normalizedSources.length > 0,
+    hasRequiredEvidence: substantiveSources.length > 0,
     summary: {
       domainScore: Number.isFinite(Number(domain?.score)) ? Number(domain.score) : null,
       rhoValidationPassed: typeof rho?.validation?.passed === 'boolean' ? rho.validation.passed : null,
@@ -114,6 +125,8 @@ export function normalizeLaneEvidence({
       championArchiveIds: uniqueSorted(championRecords(championArchive).map(objectId)),
       frontierRecordIds: uniqueSorted(frontierRecords(frontier).map(recordId)),
       externalPolicyEvidenceId: externalPolicyEvidenceId(externalPolicyEvidence),
+      soulRefCount: normalizedSoulRefs.length,
+      evolutionLevelRefCount: normalizedEvolutionLevelRefs.length,
     },
   };
 }

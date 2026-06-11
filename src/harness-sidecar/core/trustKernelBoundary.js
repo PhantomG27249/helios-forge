@@ -28,20 +28,37 @@ function proposalPaths(proposal = {}) {
   return [];
 }
 
+function definedEntries(object = {}) {
+  return Object.fromEntries(
+    Object.entries(object).filter(([, value]) => value !== undefined),
+  );
+}
+
 function changesOf(proposal = {}) {
   return {
     ...(proposal.changes && typeof proposal.changes === 'object' ? proposal.changes : {}),
-    auditEnabled: proposal.auditEnabled,
-    auditLogEnabled: proposal.auditLogEnabled,
-    auditRequired: proposal.auditRequired,
-    disableAudit: proposal.disableAudit,
-    secretRedactionEnabled: proposal.secretRedactionEnabled,
-    redactSecrets: proposal.redactSecrets,
-    secretsRedacted: proposal.secretsRedacted,
-    disableSecretRedaction: proposal.disableSecretRedaction,
-    autoMerge: proposal.autoMerge,
-    autoMergeEnabled: proposal.autoMergeEnabled,
+    ...definedEntries({
+      auditEnabled: proposal.auditEnabled,
+      auditLogEnabled: proposal.auditLogEnabled,
+      auditRequired: proposal.auditRequired,
+      disableAudit: proposal.disableAudit,
+      secretRedactionEnabled: proposal.secretRedactionEnabled,
+      redactSecrets: proposal.redactSecrets,
+      secretsRedacted: proposal.secretsRedacted,
+      disableSecretRedaction: proposal.disableSecretRedaction,
+      autoMerge: proposal.autoMerge,
+      autoMergeEnabled: proposal.autoMergeEnabled,
+    }),
   };
+}
+
+function isSoulOrOversoulProposal(proposal = {}) {
+  const kind = String(proposal.kind || '').toLowerCase();
+  const target = String(proposal.target || '').toLowerCase();
+  return kind.includes('soul')
+    || target.includes('soul')
+    || proposal.soulCandidate === true
+    || proposal.oversoulCandidate === true;
 }
 
 function verifierFloorWeakened(proposal = {}) {
@@ -52,7 +69,9 @@ function verifierFloorWeakened(proposal = {}) {
       ?? changes.requiredVerifierPasses
       ?? changes.minPasses,
   );
-  return proposal.kind === 'verifier_policy' && Number.isFinite(floor) && floor < 1;
+  return (proposal.kind === 'verifier_policy' || isSoulOrOversoulProposal(proposal))
+    && Number.isFinite(floor)
+    && floor < 1;
 }
 
 function auditDisabled(proposal = {}) {
@@ -77,6 +96,50 @@ function autoMergeRequested(proposal = {}) {
     || proposal.autoMerge === true
     || changes.autoMerge === true
     || changes.autoMergeEnabled === true;
+}
+
+function soulAuthorityExpanded(proposal = {}) {
+  if (!isSoulOrOversoulProposal(proposal)) return false;
+  const changes = changesOf(proposal);
+  const workspaceWriteScope = String(changes.workspaceWriteScope || changes.writeScope || '').toLowerCase();
+  const authority = String(changes.authority || changes.authorityLevel || '').toLowerCase();
+  const toolAuthority = asStructuredList(changes.toolAuthority || changes.toolAuthorities || changes.tools);
+  const toolCaps = asStructuredList(changes.toolCaps?.allowed || changes.allowedTools);
+
+  return changes.promotionAuthority === true
+    || changes.approvalAuthority === true
+    || changes.canPromote === true
+    || changes.directApplyAllowed === true
+    || changes.durableApplyApproved === true
+    || ['global', 'repo', 'repository', 'workspace', 'all'].includes(workspaceWriteScope)
+    || ['apply', 'promote', 'operator', 'approval', 'admin'].includes(authority)
+    || toolAuthority.length > 0
+    || toolCaps.length > 0;
+}
+
+function asStructuredList(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
+}
+
+function soulLineageHidden(proposal = {}) {
+  if (!isSoulOrOversoulProposal(proposal)) return false;
+  const changes = changesOf(proposal);
+  return changes.hideLineage === true
+    || changes.omitLineage === true
+    || changes.stripLineage === true
+    || changes.lineageRequired === false
+    || changes.provenanceRequired === false;
+}
+
+function soulSelfApproved(proposal = {}) {
+  if (!isSoulOrOversoulProposal(proposal)) return false;
+  const changes = changesOf(proposal);
+  return changes.selfApprove === true
+    || changes.selfApproved === true
+    || changes.approvedBySelf === true
+    || changes.localApproval === true
+    || changes.localApproved === true;
 }
 
 function visualTaskRequiresEvidence(proposal = {}) {
@@ -177,6 +240,24 @@ export function evaluateTrustKernelBoundary({
     return decision({
       reason: 'secret_redaction_disable_rejected',
       reasons: ['secret_redaction_disable_rejected'],
+    });
+  }
+  if (soulAuthorityExpanded(proposal)) {
+    return decision({
+      reason: 'soul_authority_expansion_rejected',
+      reasons: ['soul_authority_expansion_rejected'],
+    });
+  }
+  if (soulLineageHidden(proposal)) {
+    return decision({
+      reason: 'soul_lineage_hide_rejected',
+      reasons: ['soul_lineage_hide_rejected'],
+    });
+  }
+  if (soulSelfApproved(proposal)) {
+    return decision({
+      reason: 'soul_self_approval_rejected',
+      reasons: ['soul_self_approval_rejected'],
     });
   }
   if (autoMergeRequested(proposal)) {

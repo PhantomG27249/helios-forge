@@ -1,3 +1,6 @@
+import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
+import { normalizeSoulRefs } from '../souls/soulEvidence.js';
+
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -38,13 +41,34 @@ function legacyEvolutionSource(output = {}) {
   return output || {};
 }
 
+function soulMetadataFrom(source = {}) {
+  return source.soulRefs ?? source.soulRef ?? source.soulMetadata ?? {
+    soulId: source.soulId,
+    soulVersion: source.soulVersion,
+    oversoulVersion: source.oversoulVersion,
+    mutationLineage: source.mutationLineage,
+  };
+}
+
+function evolutionLevelMetadataFrom(source = {}) {
+  return source.evolutionLevelRefs
+    ?? source.evolutionLevelRef
+    ?? source.evolutionLevel
+    ?? source.levelRefs
+    ?? null;
+}
+
 export function normalizeEvolutionOutput(evolution = {}) {
   const source = evolution && typeof evolution === 'object' && !Array.isArray(evolution) ? evolution : {};
   const durableApplyApproved = false;
+  const soulRefs = normalizeSoulRefs(soulMetadataFrom(source));
+  const evolutionLevelRefs = normalizeEvolutionLevelRefs(evolutionLevelMetadataFrom(source));
 
   return {
     hardCaseTags: normalizedStringList(source.hardCaseTags ?? source.hardCases ?? source.tags),
     evidenceRefs: normalizedStringList(source.evidenceRefs ?? source.evidenceReferences),
+    ...(soulRefs ? { soulRefs } : {}),
+    ...(evolutionLevelRefs.length ? { evolutionLevelRefs } : {}),
     roleWeakness: source.roleWeakness ?? null,
     suggestedProfileChange: source.suggestedProfileChange ?? null,
     suggestedSkill: source.suggestedSkill ?? null,
@@ -61,12 +85,16 @@ export function normalizeEvolutionOutput(evolution = {}) {
 
 export function normalizeTaskOutput(output = {}) {
   const source = legacyTaskSource(output);
+  const soulRefs = normalizeSoulRefs(soulMetadataFrom(source));
+  const evolutionLevelRefs = normalizeEvolutionLevelRefs(evolutionLevelMetadataFrom(source));
   return {
     ...source,
     summary: nonEmptyString(source.summary) || '',
     verifierEvidence: normalizedStringList(source.verifierEvidence),
     evidence: normalizedStringList(source.evidence),
     evidenceRefs: normalizedStringList(source.evidenceRefs),
+    ...(soulRefs ? { soulRefs } : {}),
+    ...(evolutionLevelRefs.length ? { evolutionLevelRefs } : {}),
   };
 }
 
