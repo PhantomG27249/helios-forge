@@ -501,6 +501,27 @@ export function createHarnessSidecar({
     return vllmHealthControllers.get(controllerKey);
   }
 
+  function configuredSwarmWorkerMode(harnessConfig) {
+    const mode = String(
+      process.env.HELIOS_SWARM_WORKER_MODE
+      || harnessConfig?.swarmExecution?.workerMode
+      || '',
+    ).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    if (['model_driven', 'pi_native', 'auto'].includes(mode)) return mode;
+    return 'auto';
+  }
+
+  function maxSwarmConcurrencyForConfig(harnessConfig) {
+    return numericSetting(
+      process.env.HELIOS_SWARM_MAX_CONCURRENCY,
+      process.env.HELIOS_VLLM_HEALTH_MAX_CONCURRENCY,
+      harnessConfig?.vllmHealth?.maxConcurrency,
+      harnessConfig?.swarmExecution?.maxConcurrency,
+      harnessConfig?.swarmExecution?.concurrency,
+      4,
+    );
+  }
+
   async function runFullRuntimeSubsystems({
     task,
     subgoals,
@@ -588,8 +609,11 @@ export function createHarnessSidecar({
       return {
         profileName,
         vlmProfileName,
+        baseUrl,
+        modelId,
         supportsVision,
         adaptiveConcurrency,
+        maxConcurrency: maxSwarmConcurrencyForConfig(harnessConfig),
         vllmHealth,
         gateway: new ModelGateway({
           provider,
@@ -726,16 +750,26 @@ export function createHarnessSidecar({
         });
       }
     }
+    const swarmWorkerMode = configuredSwarmWorkerMode(harnessConfig);
+    const piNativeSwarmEnabled = swarmWorkerMode === 'model_driven'
+      ? false
+      : (swarmWorkerMode === 'pi_native'
+        || harnessConfig?.features?.piNativeSwarm === true
+        || process.env.HELIOS_PI_NATIVE_SWARM === '1');
+    const resolvedSwarmWorkerMode = piNativeSwarmEnabled ? 'pi_native' : 'model_driven';
+    const selectedSwarmConcurrency = runtimeSwarmModel?.adaptiveConcurrency
+      || Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1));
+
     await emitEvent({
       type: 'harness_runtime.enabled',
       taskId: task.taskId,
       mode: task.mode,
       enabledSubsystems,
       modelDrivenSwarm: Boolean(runtimeSwarmModel),
-      piNativeSwarm: harnessConfig?.features?.piNativeSwarm === true
-        || process.env.HELIOS_PI_NATIVE_SWARM === '1',
-      swarmConcurrency: runtimeSwarmModel?.adaptiveConcurrency
-        || Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
+      piNativeSwarm: piNativeSwarmEnabled,
+      swarmWorkerMode: resolvedSwarmWorkerMode,
+      configuredSwarmWorkerMode: swarmWorkerMode,
+      swarmConcurrency: selectedSwarmConcurrency,
       vllmHealth: runtimeSwarmModel?.vllmHealth
         ? {
           healthy: runtimeSwarmModel.vllmHealth.healthy,
@@ -1762,11 +1796,24 @@ export function createHarnessSidecar({
     });
     const worktreeOptIn = harnessConfig?.features?.worktreeSwarm === true
       || process.env.HELIOS_SWARM_WORKTREE === '1';
-    const piNativeSwarmEnabled = harnessConfig?.features?.piNativeSwarm === true
-      || process.env.HELIOS_PI_NATIVE_SWARM === '1';
     const injectedSafeWorktree = Boolean(swarmWorktreeManager && swarmCommandAdapter);
     const useWorktreeOptions = !runtimeSwarmModel && (worktreeOptIn || injectedSafeWorktree);
     const swarmCommandRunner = swarmCommandAdapter || defaultSwarmCommandAdapter;
+    const piModelConcurrency = runtimeSwarmModel
+      ? {
+        baseUrl: runtimeSwarmModel.baseUrl,
+        modelId: runtimeSwarmModel.modelId,
+        profileName: runtimeSwarmModel.profileName,
+        workerMode: resolvedSwarmWorkerMode,
+        source: runtimeSwarmModel.vllmHealth ? 'vllm_health' : 'static',
+        concurrency: selectedSwarmConcurrency,
+        maxConcurrency: runtimeSwarmModel.maxConcurrency,
+        healthUrl: runtimeSwarmModel.vllmHealth?.healthUrl,
+        healthy: runtimeSwarmModel.vllmHealth?.healthy,
+        p95LatencyMs: runtimeSwarmModel.vllmHealth?.p95LatencyMs,
+        probeConcurrency: runtimeSwarmModel.vllmHealth?.sampleCount,
+      }
+      : null;
 
     const swarmRun = await orchestrateSwarm({
       task,
@@ -1826,9 +1873,10 @@ export function createHarnessSidecar({
       modelProfileName: runtimeSwarmModel?.profileName,
       swarmExecution: {
         piNative: piNativeSwarmEnabled,
-        concurrency: runtimeSwarmModel?.adaptiveConcurrency
-          || Math.max(1, Number(harnessConfig?.swarmExecution?.concurrency || 1)),
+        workerMode: resolvedSwarmWorkerMode,
+        concurrency: selectedSwarmConcurrency,
       },
+      piBridgeContext: piModelConcurrency ? { modelConcurrency: piModelConcurrency } : undefined,
       featureFlags: {
         localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,
         localMemoryGraph: harnessConfig?.features?.localMemoryGraph !== false,

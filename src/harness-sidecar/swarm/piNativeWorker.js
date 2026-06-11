@@ -139,6 +139,28 @@ function compactCallbackHints(hints = {}) {
   );
 }
 
+function compactModelConcurrencyHints(hints = {}) {
+  if (!hints || typeof hints !== 'object' || Array.isArray(hints)) return undefined;
+  const concurrency = Number(hints.concurrency);
+  const maxConcurrency = Number(hints.maxConcurrency);
+  const probeConcurrency = Number(hints.probeConcurrency);
+  const result = {
+    baseUrl: boundedText(hints.baseUrl || hints.endpoint || '', 256) || undefined,
+    modelId: boundedText(hints.modelId || hints.model || '', 160) || undefined,
+    profileName: boundedText(hints.profileName || hints.profile || '', 96) || undefined,
+    workerMode: boundedText(hints.workerMode || '', 48) || undefined,
+    source: boundedText(hints.source || '', 64) || undefined,
+    healthUrl: boundedText(hints.healthUrl || '', 256) || undefined,
+    healthy: typeof hints.healthy === 'boolean' ? hints.healthy : undefined,
+    concurrency: Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : undefined,
+    maxConcurrency: Number.isFinite(maxConcurrency) ? Math.max(1, Math.floor(maxConcurrency)) : undefined,
+    probeConcurrency: Number.isFinite(probeConcurrency) ? Math.max(1, Math.floor(probeConcurrency)) : undefined,
+    p95LatencyMs: Number.isFinite(Number(hints.p95LatencyMs)) ? Number(hints.p95LatencyMs) : undefined,
+  };
+  const compacted = Object.fromEntries(Object.entries(result).filter(([, value]) => value !== undefined));
+  return Object.keys(compacted).length ? compacted : undefined;
+}
+
 function normalizeBridgeContext({
   piBridgeContext,
   capabilitiesManifest,
@@ -164,6 +186,7 @@ function normalizeBridgeContext({
     },
     taskCorrelationId: boundedText(taskCorrelationId, 128) || undefined,
     sidecarCallbackHints: compactCallbackHints(safeObject(bridge.sidecarCallbackHints || bridge.callbacks)),
+    modelConcurrency: compactModelConcurrencyHints(bridge.modelConcurrency || bridge.vllmConcurrency),
     capabilitiesManifest: compactCapabilitiesManifest(capabilitiesManifest || bridge.capabilitiesManifest),
     mutationOptimization: {
       heliosDeterministicCandidates: asArray(
@@ -232,6 +255,20 @@ function bridgePromptLines(bridgeContext = {}) {
 
   const warnings = asArray(bridgeContext.modelWarnings).map(modelWarningText).filter(Boolean);
   if (warnings.length) lines.push(`Bridge warnings: ${warnings.join(' ')}`);
+  if (bridgeContext.modelConcurrency) {
+    const hints = bridgeContext.modelConcurrency;
+    lines.push(
+      [
+        'Model concurrency hints:',
+        hints.modelId ? `model=${hints.modelId}` : null,
+        hints.baseUrl ? `endpoint=${hints.baseUrl}` : null,
+        hints.workerMode ? `workerMode=${hints.workerMode}` : null,
+        hints.concurrency ? `concurrency=${hints.concurrency}` : null,
+        hints.maxConcurrency ? `max=${hints.maxConcurrency}` : null,
+        hints.source ? `source=${hints.source}` : null,
+      ].filter(Boolean).join(' '),
+    );
+  }
   return lines;
 }
 

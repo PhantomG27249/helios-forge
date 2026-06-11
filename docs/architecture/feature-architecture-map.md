@@ -444,6 +444,7 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Adaptive search | `.harness/config.yaml` `features.adaptiveSearch: true`; default mode remains `advisory` |
 | Bounded swarm concurrency | Optional `swarmExecution.concurrency` input; default remains sequential |
 | Adaptive vLLM swarm concurrency | Enabled for model-driven swarms unless `vllmHealth.enabled: false` or `HELIOS_VLLM_HEALTH_ENABLED=0`; probes `<swarmBaseUrl without /v1>/health` and clamps fanout with `vllmHealth.maxConcurrency` or `HELIOS_SWARM_MAX_CONCURRENCY` |
+| Pi-native vLLM concurrency | `features.piNativeSwarm: true` with `features.modelDrivenSwarm: true`; `swarmExecution.workerMode: pi_native` runs concurrent Pi workers using the vLLM health-selected fanout and passes endpoint/concurrency hints through the Pi bridge |
 | Policy evolution candidates | Shadow-only by default; promotion and mutation still require existing gates |
 | Auto-approval eligibility | Metadata only unless a future approved policy explicitly enables a narrow local tier |
 

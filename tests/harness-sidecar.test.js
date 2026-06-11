@@ -443,6 +443,8 @@ test('full runtime adapts swarm concurrency from vLLM health probes', async () =
         (event) => event.taskId === body.taskId && event.type === 'harness_runtime.enabled',
       );
       assert.equal(runtimeEvent.swarmConcurrency, 2);
+      assert.equal(runtimeEvent.swarmWorkerMode, 'model_driven');
+      assert.equal(runtimeEvent.configuredSwarmWorkerMode, 'auto');
       assert.equal(runtimeEvent.vllmHealth.healthy, true);
 
       unsubscribe();

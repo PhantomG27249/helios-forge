@@ -5,6 +5,14 @@ import { buildSwarmA2AEnvelope } from '../src/harness-sidecar/interop/a2aSwarmEn
 import { runPiNativeAttempt } from '../src/harness-sidecar/swarm/piNativeWorker.js';
 import { orchestrateSwarm } from '../src/harness-sidecar/swarm/swarmOrchestrator.js';
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+}
+
 test('swarm A2A envelope scopes subagent role context budget and output contract', () => {
   const envelope = buildSwarmA2AEnvelope({
     task: { taskId: 'task_a2a', task: 'Patch the swarm UI' },
@@ -327,6 +335,109 @@ test('swarm orchestrator can run Pi-native attempts behind explicit opt-in', asy
   assert.equal(events.some((event) => event.type === 'swarm.subagent_started' && event.worker.kind === 'pi_native_subagent'), true);
   assert.equal(events.some((event) => event.type === 'swarm.subagent_trace' && event.phase === 'handoff_created'), true);
   assert.equal(events.some((event) => event.type === 'swarm.subagent_completed' && event.worker.kind === 'pi_native_subagent'), true);
+});
+
+test('swarm orchestrator runs Pi-native attempts concurrently when vLLM concurrency is available', async () => {
+  const releases = {};
+  const started = [];
+  const runningCounts = [];
+  let running = 0;
+  const resultPromise = orchestrateSwarm({
+    task: { taskId: 'task_pi_swarm_parallel', task: 'Run Pi-native subagents concurrently' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 3,
+    context: { allowedFiles: ['src/harness-sidecar/swarm/piNativeWorker.js'] },
+    budget: { maxOutputChars: 1000 },
+    swarmExecution: { piNative: true, concurrency: 3 },
+    piWorkerFactory: async ({ attempt }) => ({
+      start: async () => {},
+      sendCommand: async () => {
+        started.push(attempt.attemptId);
+        running += 1;
+        runningCounts.push(running);
+        releases[attempt.attemptId] = deferred();
+        await releases[attempt.attemptId].promise;
+        running -= 1;
+        return {
+          success: true,
+          data: {
+            summary: `${attempt.attemptId} completed.`,
+            verifierEvidence: ['focused verifier passed'],
+            compactHandoff: {
+              summary: `${attempt.attemptId} completed.`,
+              filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
+              filesChanged: [],
+              testsRun: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+              nextAction: 'Review champion.',
+              sourcePointers: ['swarmOrchestrator.js:runSwarmAttemptsBounded'],
+              risks: ['fake_worker_only'],
+            },
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(started.length, 3);
+  assert.equal(Math.max(...runningCounts), 3);
+  Object.values(releases).forEach((release) => release.resolve());
+  const result = await resultPromise;
+  assert.equal(result.attempts.length, 3);
+  assert.equal(result.attempts.every((attempt) => attempt.worker.kind === 'pi_native_subagent'), true);
+});
+
+test('Pi-native workers receive vLLM concurrency hints through bridge context', async () => {
+  let bridgeContext;
+  await orchestrateSwarm({
+    task: { taskId: 'task_pi_vllm_bridge', task: 'Run Pi-native worker with vLLM hints' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    context: { allowedFiles: ['src/harness-sidecar/swarm/piNativeWorker.js'] },
+    budget: { maxOutputChars: 1000 },
+    swarmExecution: { piNative: true, concurrency: 5 },
+    piBridgeContext: {
+      modelConcurrency: {
+        baseUrl: 'http://model.test/v1',
+        modelId: 'local-vllm',
+        workerMode: 'pi_native',
+        concurrency: 5,
+        maxConcurrency: 8,
+        source: 'vllm_health',
+      },
+    },
+    piWorkerFactory: async ({ piBridgeContext: receivedBridgeContext }) => ({
+      start: async () => {},
+      sendCommand: async () => {
+        bridgeContext = receivedBridgeContext;
+        return {
+          success: true,
+          data: {
+            summary: 'Pi-native worker received vLLM hints.',
+            verifierEvidence: ['focused verifier passed'],
+            compactHandoff: {
+              summary: 'Pi-native worker received vLLM hints.',
+              filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
+              filesChanged: [],
+              testsRun: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+              nextAction: 'Review bridge hints.',
+              sourcePointers: ['piNativeWorker.js:normalizeBridgeContext'],
+              risks: ['fake_worker_only'],
+            },
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  assert.equal(bridgeContext.modelConcurrency.baseUrl, 'http://model.test/v1');
+  assert.equal(bridgeContext.modelConcurrency.concurrency, 5);
+  assert.equal(bridgeContext.modelConcurrency.maxConcurrency, 8);
+  assert.equal(bridgeContext.modelConcurrency.workerMode, 'pi_native');
+  assert.equal(bridgeContext.modelConcurrency.source, 'vllm_health');
 });
 
 test('swarm orchestrator uses selected profile output contract for Pi-native attempts', async () => {
