@@ -476,15 +476,21 @@ function connect() {
     if (socket !== ws) return;
     try {
       const msg = JSON.parse(e.data);
-      debug(`WS: ${msg.type}${msg.event ? '/' + msg.event : ''}`);
+      debug(`WS: ${describeWsMessage(msg)}`);
       handleMessage(msg);
     } catch (err) { debug(`WS: Parse error: ${err.message}`); }
   };
 }
 
+function describeWsMessage(msg) {
+  const suffix = msg.event?.type || (typeof msg.event === 'string' ? msg.event : '');
+  return `${msg.type || 'unknown'}${suffix ? '/' + suffix : ''}`;
+}
+
 function send(msg) {
   if (ws?.readyState === WebSocket.OPEN) {
     try {
+      debug(`WS: Send ${msg.type || 'unknown'} len=${String(msg.message || '').length} images=${Array.isArray(msg.images) ? msg.images.length : 0}`);
       ws.send(JSON.stringify(msg));
     } catch (error) {
       debug(`WS: Send failed (${error.message})`);
@@ -722,7 +728,7 @@ function handleMessage(msg) {
       }
       break;
     case 'message_update': handleMessageUpdate(msg); break;
-    case 'message_end': if (activeStream) finalizeStream(); break;
+    case 'message_end': handleMessageEnd(msg); break;
     case 'tool_execution_start': handleToolStart(msg); break;
     case 'tool_execution_update': handleToolUpdate(msg); break;
     case 'tool_execution_end': handleToolEnd(msg); break;
@@ -2887,6 +2893,31 @@ function assistantMessageHasRenderableContent(msg) {
 function renderAssistantError(contentEl, msg) {
   const reason = String(msg.errorMessage || msg.error || msg.stopReason || 'Assistant response failed.').trim();
   contentEl.innerHTML = `<div class="msg-error">${esc(reason)}</div>`;
+}
+
+function assistantMessageError(msg = {}) {
+  return msg.errorMessage || msg.error || msg.stopReason === 'error'
+    ? String(msg.errorMessage || msg.error || msg.stopReason || 'Assistant response failed.')
+    : '';
+}
+
+function handleMessageEnd(msg) {
+  if (!activeStream) return;
+  const error = assistantMessageError(msg.message || msg);
+  if (error) {
+    renderAssistantError(activeStream.contentEl, msg.message || msg);
+    activeStream = null;
+    savedThinkingBlocks = [];
+    setAssistantActivity({
+      phase: 'error',
+      detail: error,
+      errors: assistantActivity.errors + 1,
+    });
+    debug(`Assistant error: ${error}`);
+    scroll();
+    return;
+  }
+  finalizeStream();
 }
 
 function renderHistory(messages) {

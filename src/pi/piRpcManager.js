@@ -9,6 +9,8 @@ export class PiRpcManager {
     spawnImpl = spawn,
     resolvePiCommandImpl = resolvePiCommand,
     readyDelayMs = 2000,
+    commandTimeoutMs = 60000,
+    logger = console,
   } = {}) {
     this.process = null;
     this.cwd = initialCwd;
@@ -21,12 +23,44 @@ export class PiRpcManager {
     this.spawnImpl = spawnImpl;
     this.resolvePiCommandImpl = resolvePiCommandImpl;
     this.readyDelayMs = readyDelayMs;
+    this.commandTimeoutMs = commandTimeoutMs;
+    this.logger = logger;
     this.scopedEnv = {};
+  }
+
+  log(level, message, data = {}) {
+    const sink = typeof this.logger?.[level] === 'function' ? this.logger[level] : this.logger?.log;
+    if (!sink) return;
+    sink.call(this.logger, message, JSON.stringify(data));
+  }
+
+  commandSummary(cmd = {}, id) {
+    return {
+      id,
+      type: cmd.type || 'unknown',
+      cwd: this.cwd,
+      messageLength: typeof cmd.message === 'string' ? cmd.message.length : 0,
+      imageCount: Array.isArray(cmd.images) ? cmd.images.length : 0,
+      streamingBehavior: cmd.streamingBehavior || null,
+      sessionPath: cmd.sessionPath || null,
+      modelId: cmd.modelId || null,
+    };
+  }
+
+  pendingSummary() {
+    return {
+      pendingCount: this.pending.size,
+      pending: [...this.pending.values()].map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        ageMs: Date.now() - entry.startedAt,
+      })),
+    };
   }
 
   async start() {
     return new Promise((resolve) => {
-      console.log('[PiRPC] Starting...');
+      this.log('info', '[PiRPC] Starting...', { cwd: this.cwd });
       this.buffer = '';
       const piCommand = this.resolvePiCommandImpl();
       const child = this.spawnImpl(piCommand.command, [...piCommand.args, '--mode', 'rpc'], {
@@ -42,7 +76,8 @@ export class PiRpcManager {
       });
 
       child.stderr.on('data', (chunk) => {
-        if (chunk.toString().includes('Error')) console.error(chunk.toString().trim());
+        const text = chunk.toString().trim();
+        if (text) this.log(text.includes('Error') ? 'error' : 'warn', '[PiRPC] stderr', { text });
       });
 
       child.on('close', (code) => {
@@ -58,6 +93,7 @@ export class PiRpcManager {
       });
 
       child.on('error', (err) => {
+        this.log('error', '[PiRPC] process.error', { error: err.message });
         this.broadcast({ type: 'system', event: 'pi_error', error: err.message });
       });
 
@@ -111,7 +147,7 @@ export class PiRpcManager {
       .then((resp) => {
         if (resp.success) {
           this.readyData = resp.data;
-          console.log('[PiRPC] Ready - Model:', resp.data?.model?.name || 'unknown');
+          this.log('info', '[PiRPC] Ready', { model: resp.data?.model?.name || resp.data?.model?.id || 'unknown' });
           this.broadcast({ type: 'system', event: 'pi_ready', data: resp.data });
           if (resolve) resolve();
         } else {
@@ -136,13 +172,23 @@ export class PiRpcManager {
           if (pending) {
             clearTimeout(pending.timeout);
             this.pending.delete(parsed.id);
+            this.log('info', '[PiRPC] command.response', {
+              id: parsed.id,
+              type: pending.type,
+              success: parsed.success !== false,
+              durationMs: Date.now() - pending.startedAt,
+              pendingCount: this.pending.size,
+            });
             pending.resolve(parsed);
+          } else {
+            this.log('warn', '[PiRPC] command.unmatched_response', { id: parsed.id });
           }
         } else {
+          this.log('info', '[PiRPC] event', { type: parsed.type || 'unknown' });
           this.broadcast(parsed);
         }
       } catch {
-        // Ignore non-JSON Pi output.
+        this.log('warn', '[PiRPC] non_json_output', { line: line.slice(0, 500) });
       }
     }
   }
@@ -150,12 +196,20 @@ export class PiRpcManager {
   sendCommand(cmd) {
     if (!this.process || this.process.exitCode !== null) return Promise.reject(new Error('Pi not running'));
     const id = `cmd-${++this.idCounter}`;
+    const summary = this.commandSummary(cmd, id);
+    this.log('info', '[PiRPC] command.start', summary);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
+        this.log('warn', '[PiRPC] command.timeout', {
+          ...summary,
+          durationMs: Date.now() - startedAt,
+          ...this.pendingSummary(),
+        });
         reject(new Error('Timeout'));
-      }, 60000);
-      this.pending.set(id, { resolve, reject, timeout });
+      }, this.commandTimeoutMs);
+      const startedAt = Date.now();
+      this.pending.set(id, { id, type: summary.type, resolve, reject, timeout, startedAt });
       this.process.stdin.write(`${JSON.stringify({ ...cmd, id })}\n`);
     });
   }

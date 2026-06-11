@@ -198,6 +198,11 @@ test('chat rendering does not keep blank assistant messages for empty or failed 
 
   assert.match(appJs, /function assistantMessageHasRenderableContent\(msg\)/);
   assert.match(appJs, /function renderAssistantError\(contentEl, msg\)/);
+  assert.match(appJs, /function handleMessageEnd\(msg\)/);
+  assert.match(appJs, /renderAssistantError\(activeStream\.contentEl, msg\.message \|\| msg\)/);
+  assert.match(appJs, /case 'message_end': handleMessageEnd\(msg\); break;/);
+  assert.match(appJs, /function describeWsMessage\(msg\)/);
+  assert.match(appJs, /msg\.event\?\.type/);
   assert.match(appJs, /lastAssistant\.remove\(\)/);
   assert.match(appJs, /activeStream\.el\.remove\(\)/);
   assert.match(css, /\.msg-error\s*\{/);

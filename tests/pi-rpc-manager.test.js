@@ -31,6 +31,34 @@ function createFakePiProcess() {
   return child;
 }
 
+function createSilentPiProcess(writes = []) {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.exitCode = null;
+  child.stdin = {
+    write(line) {
+      const request = JSON.parse(line);
+      writes.push(request);
+      if (request.type === 'get_state') {
+        queueMicrotask(() => {
+          child.stdout.emit('data', `${JSON.stringify({
+            type: 'response',
+            id: request.id,
+            success: true,
+            data: { model: { name: 'fake-pi' } },
+          })}\n`);
+        });
+      }
+    },
+  };
+  child.kill = () => {
+    child.exitCode = 0;
+    queueMicrotask(() => child.emit('close', 0));
+  };
+  return child;
+}
+
 test('pi rpc manager restarts the pi process in the selected workspace', async () => {
   const spawns = [];
   const manager = new PiRpcManager({
@@ -83,4 +111,42 @@ test('pi rpc manager scopes capability manifest env to spawned pi process', asyn
 
   assert.equal(spawns.length, 2);
   assert.equal('HELIOS_CAPABILITIES_MANIFEST' in spawns[1].options.env, false);
+});
+
+test('pi rpc manager logs command lifecycle with safe metadata and pending timeout details', async () => {
+  const logs = [];
+  const writes = [];
+  const manager = new PiRpcManager({
+    initialCwd: 'C:\\Users\\jackj\\Github\\helios-forge',
+    readyDelayMs: 1000,
+    commandTimeoutMs: 10,
+    logger: {
+      info: (...args) => logs.push(['info', ...args]),
+      warn: (...args) => logs.push(['warn', ...args]),
+      error: (...args) => logs.push(['error', ...args]),
+    },
+    resolvePiCommandImpl: () => ({ command: 'pi', args: [] }),
+    spawnImpl: () => createSilentPiProcess(writes),
+  });
+
+  await manager.start();
+
+  await assert.rejects(
+    manager.sendCommand({ type: 'prompt', message: 'hello', images: ['data:image/png;base64,secret'] }),
+    /Timeout/,
+  );
+
+  const promptWrites = writes.filter((write) => write.type === 'prompt');
+  assert.equal(promptWrites.length, 1);
+  assert.equal(promptWrites[0].message, 'hello');
+  assert.equal(promptWrites[0].images.length, 1);
+
+  assert.ok(logs.some((entry) => entry.join(' ').includes('[PiRPC] command.start')));
+  assert.ok(logs.some((entry) => entry.join(' ').includes('"type":"prompt"')));
+  assert.ok(logs.some((entry) => entry.join(' ').includes('"imageCount":1')));
+  assert.ok(logs.some((entry) => entry.join(' ').includes('[PiRPC] command.timeout')));
+  assert.ok(logs.some((entry) => entry.join(' ').includes('"pendingCount":0')));
+  assert.equal(logs.some((entry) => entry.join(' ').includes('data:image/png')), false);
+
+  await manager.stopForRestart();
 });
