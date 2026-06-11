@@ -67,6 +67,18 @@ export class HarnessClient {
     });
   }
 
+  async prepareModelCouncilPassKEval({ taskId, context, cases, k, minCases, upliftThreshold } = {}) {
+    return this.postJson('/v1/model-council/passk-eval/prepare', {
+      command: 'harness_model_council_passk_eval_prepare',
+      taskId,
+      context,
+      cases,
+      k,
+      minCases,
+      upliftThreshold,
+    });
+  }
+
   async listSkillCandidates({ limit } = {}) {
     const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
     return this.getJson(`/v1/skill-candidates${query}`);

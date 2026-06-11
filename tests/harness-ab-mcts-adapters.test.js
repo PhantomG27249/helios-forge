@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  buildAdaptiveSearchContextForModelRouter,
   buildAdaptiveSearchContextForContextMemory,
   buildAdaptiveSearchContextForResearch,
   buildAdaptiveSearchContextForVerifier,
   buildAdaptiveSearchContextForVisual,
+  deriveModelChoiceArmsFromRouterHardCases,
+  normalizeAdaptiveSearchRewardForModelRouter,
   normalizeAdaptiveSearchRewardForContextMemory,
   normalizeAdaptiveSearchRewardForResearch,
   normalizeAdaptiveSearchRewardForVerifier,
@@ -125,4 +128,43 @@ test('context memory adapter captures breadth and graph depth signals without mu
   assert.equal(context.signals.graphDepth, 2);
   assert.equal(context.signals.compactionPressure, 0.83);
   assert.equal(reward <= 1 && reward >= 0, true);
+});
+
+test('model router adapter derives model-choice exploration arms from hard-case evidence', () => {
+  const hardCases = [
+    {
+      taskId: 'wrong-model',
+      role: 'implementer',
+      taskType: 'code',
+      selectedModel: 'fast',
+      bestModel: 'deep',
+      failureModes: ['model_router_wrong_model'],
+      evidence: { authority: 'evidence_only', canPromote: false },
+    },
+    {
+      taskId: 'unsafe-model',
+      role: 'reviewer',
+      taskType: 'review',
+      selectedModel: 'unsafe',
+      failureModes: ['model_router_safety_regression'],
+    },
+  ];
+
+  const arms = deriveModelChoiceArmsFromRouterHardCases({ hardCases });
+  const context = buildAdaptiveSearchContextForModelRouter({ taskId: 'router-replay', hardCases });
+  const reward = normalizeAdaptiveSearchRewardForModelRouter({
+    verifierPassed: true,
+    selectedBestModel: true,
+    safetyBlocked: false,
+    latencyDelta: -0.1,
+  });
+
+  assert.deepEqual(arms.map((arm) => arm.armId), ['explore_implementer_deep', 'quarantine_reviewer_unsafe']);
+  assert.equal(arms.every((arm) => arm.authority === 'evidence_only'), true);
+  assert.equal(arms.every((arm) => arm.canPromote === false), true);
+  assert.equal(context.subsystem, 'model_router');
+  assert.equal(context.evidenceCount, 2);
+  assert.equal(context.signals.routerFailureCount, 2);
+  assert.equal(context.modelChoiceArms.length, 2);
+  assert.equal(reward > 0.7, true);
 });

@@ -1,3 +1,6 @@
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
+import { chooseMemoryExtractionMode } from './modelAssistedExtractionPolicy.js';
+
 export const MEMORY_EXTRACTION_SOCIETY_SCHEMA_VERSION = 1;
 export const MEMORY_EXTRACTION_ROLES = [
   'passage_collector',
@@ -68,16 +71,86 @@ function normalizeFact(observation = {}) {
   };
 }
 
-function factPassageSupport(fact = {}, passages = []) {
+function factPassageSupport(fact = {}, passages = [], options = {}) {
   const passageIds = normalizeList(fact.passageIds).map(String);
   const available = new Set(passages.map((passage) => String(passage.passageId || passage.id)));
   const missing = passageIds.filter((passageId) => !available.has(passageId));
+  const allowedProvenance = options.allowedProvenance;
+  const requireAllowedProvenance = options.requireAllowedProvenance === true;
+  const callerSupportPassageIds = options.callerSupportPassageIds;
+  const requireCallerSupport = options.requireCallerSupport === true;
+  const modelProvenanceIdCollisions = options.modelProvenanceIdCollisions;
+  const missingRetrieved = allowedProvenance?.size
+    ? passageIds.filter((passageId) => !allowedProvenance.has(passageId))
+    : (requireAllowedProvenance ? passageIds : []);
+  const missingCallerSupport = requireCallerSupport
+    ? (
+      callerSupportPassageIds?.size
+        ? passageIds.filter((passageId) => !callerSupportPassageIds.has(passageId))
+        : passageIds
+    )
+    : [];
+  const collisionIds = modelProvenanceIdCollisions?.size
+    ? passageIds.filter((passageId) => modelProvenanceIdCollisions.has(passageId))
+    : [];
   const reasons = [];
   if (passageIds.length === 0 || missing.length > 0) reasons.push('missing_passage_support');
+  if (requireAllowedProvenance && (!allowedProvenance?.size || passageIds.length === 0)) {
+    reasons.push('missing_retrieved_provenance');
+  } else if (missingRetrieved.length > 0) {
+    reasons.push('missing_retrieved_provenance');
+  }
+  if (requireCallerSupport && (!callerSupportPassageIds?.size || passageIds.length === 0)) {
+    reasons.push('missing_caller_provenance_support');
+  } else if (missingCallerSupport.length > 0) {
+    reasons.push('missing_caller_provenance_support');
+  }
+  if (collisionIds.length > 0) reasons.push('model_provenance_id_collision');
   return {
     supported: reasons.length === 0,
-    reasons,
+    reasons: [...new Set(reasons)].sort(),
     missingPassageIds: missing.sort(),
+    missingRetrievedProvenanceIds: missingRetrieved.sort(),
+    missingCallerSupportPassageIds: missingCallerSupport.sort(),
+    modelProvenanceIdCollisionIds: collisionIds.sort(),
+  };
+}
+
+function factSchemaSupport(fact = {}, schemas = [], options = {}) {
+  if (options.requireSchema !== true) {
+    return { supported: true, reasons: [] };
+  }
+  const supported = schemas.some((schema) => (
+    schema.headType === fact.subjectType
+    && schema.relation === fact.relation
+    && schema.tailType === fact.objectType
+  ));
+  return {
+    supported,
+    reasons: supported ? [] : ['missing_schema_support'],
+  };
+}
+
+function combineFactGuards(...guards) {
+  const reasons = new Set();
+  const missingPassageIds = [];
+  const missingRetrievedProvenanceIds = [];
+  const missingCallerSupportPassageIds = [];
+  const modelProvenanceIdCollisionIds = [];
+  for (const guard of guards) {
+    normalizeList(guard?.reasons).forEach((reason) => reasons.add(reason));
+    missingPassageIds.push(...normalizeList(guard?.missingPassageIds));
+    missingRetrievedProvenanceIds.push(...normalizeList(guard?.missingRetrievedProvenanceIds));
+    missingCallerSupportPassageIds.push(...normalizeList(guard?.missingCallerSupportPassageIds));
+    modelProvenanceIdCollisionIds.push(...normalizeList(guard?.modelProvenanceIdCollisionIds));
+  }
+  return {
+    supported: guards.every((guard) => guard?.supported === true),
+    reasons: [...reasons].sort(),
+    missingPassageIds: [...new Set(missingPassageIds.map(String))].sort(),
+    missingRetrievedProvenanceIds: [...new Set(missingRetrievedProvenanceIds.map(String))].sort(),
+    missingCallerSupportPassageIds: [...new Set(missingCallerSupportPassageIds.map(String))].sort(),
+    modelProvenanceIdCollisionIds: [...new Set(modelProvenanceIdCollisionIds.map(String))].sort(),
   };
 }
 
@@ -130,15 +203,100 @@ function upsertByIdentity(items, item, identity) {
   };
 }
 
+function cloneForRole(value) {
+  if (value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
 function callRole({ roleHandlers = {}, role, fallbackHook, fallbackName, context, roleTrace, hookTrace }) {
   const hook = roleHandlers[role] || fallbackHook;
   if (typeof hook !== 'function') return [];
-  const result = normalizeList(hook(context));
+  const result = normalizeList(hook(cloneForRole(context)));
   if (result.length > 0) {
     roleTrace.push(role);
     if (fallbackName && hook === fallbackHook) hookTrace.push(fallbackName);
   }
   return result;
+}
+
+function provenanceIdsFor(value = {}) {
+  if (!value) return [];
+  if (typeof value === 'string') return [value];
+  if (typeof value !== 'object' || Array.isArray(value)) return [];
+  return [
+    value.id,
+    value.passageId,
+    value.source,
+    value.traceId,
+    value.ref,
+    value.provenanceId,
+    value.provenanceRef,
+  ].filter(Boolean).map(String);
+}
+
+function provenanceSetFromContext(caseContext = {}, passages = []) {
+  const configured = [
+    ...normalizeList(caseContext.retrievedProvenance),
+    ...normalizeList(caseContext.retrievedProvenanceRefs),
+    ...normalizeList(caseContext.retrievedPassages),
+    ...normalizeList(caseContext.operatorProvenance),
+    ...normalizeList(caseContext.operatorProvenanceRefs),
+    ...normalizeList(caseContext.provenanceRefs),
+  ].flatMap(provenanceIdsFor).filter(Boolean).map(String);
+
+  if (configured.length > 0) return new Set(configured);
+  return null;
+}
+
+function passageIdSet(passages = []) {
+  return new Set(normalizeList(passages)
+    .map((passage) => passage.passageId || passage.id)
+    .filter(Boolean)
+    .map(String));
+}
+
+function createQuarantineTracker() {
+  const reasons = new Set();
+  let quarantined = false;
+  let redacted = false;
+  return {
+    sanitize(value) {
+      const result = quarantineModelVisiblePayload(value);
+      quarantined = quarantined || result.quarantined;
+      redacted = redacted || result.redacted;
+      result.reasons.forEach((reason) => reasons.add(reason));
+      return result.value;
+    },
+    summary() {
+      return {
+        quarantined,
+        redacted,
+        reasons: [...reasons].sort(),
+      };
+    },
+  };
+}
+
+function modelAssistanceStatus(decision, quarantine) {
+  return {
+    mode: decision.mode,
+    reasons: decision.reasons,
+    requiredGuards: decision.requiredGuards,
+    policyGate: {
+      advisoryOnly: true,
+      authority: 'evidence_only',
+      evidenceOnly: true,
+      durableWriteAllowed: false,
+      promotionAllowed: false,
+    },
+    quarantine: quarantine.summary(),
+  };
+}
+
+function shouldRunModelAssistance({ config, modelAssistance, decision }) {
+  if (modelAssistance.enabled !== true) return false;
+  if (config) return decision.mode === 'model_assisted';
+  return true;
 }
 
 function findContradictions(facts = []) {
@@ -275,6 +433,10 @@ function buildRoleAudit(roleOutputs = {}) {
 }
 
 export function runMemoryExtractionSociety({
+  config,
+  caseContext = {},
+  budget = {},
+  risk = {},
   observations = [],
   modelAssistance = {},
   modelHooks = {},
@@ -288,6 +450,24 @@ export function runMemoryExtractionSociety({
   const roleTrace = [];
   const roleOutputs = {};
   const normalizedObservations = normalizeList(observations);
+  const decision = config
+    ? chooseMemoryExtractionMode({ config, caseContext, budget, risk })
+    : {
+      mode: modelAssistance.enabled === true ? 'model_assisted' : 'deterministic',
+      reasons: modelAssistance.enabled === true ? ['explicit_model_assistance_enabled'] : ['model_assisted_memory_disabled'],
+      requiredGuards: modelAssistance.enabled === true
+        ? [
+          'schema_validation',
+          'retrieved_provenance_required',
+          'model_visible_quarantine',
+          'evidence_only_authority',
+          'no_direct_memory_promotion',
+          'fallback_to_observation_provenance',
+        ]
+        : [],
+    };
+  const modelEnabled = shouldRunModelAssistance({ config, modelAssistance, decision });
+  const quarantine = createQuarantineTracker();
 
   normalizedObservations.forEach((observation, index) => {
     if (observation.text || observation.source || observation.passageId) {
@@ -307,8 +487,11 @@ export function runMemoryExtractionSociety({
       }
     }
   });
+  const callerSupportPassageIds = passageIdSet(passages);
+  const callerProvenanceIds = provenanceSetFromContext(caseContext, passages) || new Set();
+  const modelProvenanceIdCollisions = new Set();
 
-  if (modelAssistance.enabled === true) {
+  if (modelEnabled) {
     const context = {
       observations: normalizedObservations,
       passages: passages.map((passage) => ({ ...passage })),
@@ -324,9 +507,29 @@ export function runMemoryExtractionSociety({
       roleTrace,
       hookTrace,
     });
-    if (collectedPassages.length > 0) roleOutputs.passage_collector = collectedPassages;
-    collectedPassages
-      .forEach((passage, index) => upsertByIdentity(passages, normalizePassage(passage, index), (item) => item.passageId));
+    const guardedCollectedPassages = quarantine.sanitize(collectedPassages);
+    const acceptedCollectedPassages = [];
+    guardedCollectedPassages.forEach((passage, index) => {
+        const normalizedPassage = normalizePassage(passage, index);
+        const candidateIds = [
+          ...provenanceIdsFor(passage),
+          ...provenanceIdsFor(normalizedPassage),
+          String(normalizedPassage.passageId),
+        ].filter(Boolean);
+        const collisionIds = [...new Set(candidateIds.filter((candidateId) => (
+          callerSupportPassageIds.has(candidateId) || callerProvenanceIds.has(candidateId)
+        )))];
+        if (
+          config
+          && collisionIds.length > 0
+        ) {
+          collisionIds.forEach((collisionId) => modelProvenanceIdCollisions.add(collisionId));
+          return;
+        }
+        acceptedCollectedPassages.push(normalizedPassage);
+        upsertByIdentity(passages, normalizedPassage, (item) => item.passageId);
+      });
+    if (acceptedCollectedPassages.length > 0) roleOutputs.passage_collector = acceptedCollectedPassages;
 
     const schemaContext = { ...context, passages: passages.map((passage) => ({ ...passage })) };
     const proposedSchemas = callRole({
@@ -338,8 +541,9 @@ export function runMemoryExtractionSociety({
       roleTrace,
       hookTrace,
     });
-    if (proposedSchemas.length > 0) roleOutputs.schema_proposer = proposedSchemas;
-    proposedSchemas
+    const guardedProposedSchemas = quarantine.sanitize(proposedSchemas);
+    if (guardedProposedSchemas.length > 0) roleOutputs.schema_proposer = guardedProposedSchemas;
+    guardedProposedSchemas
       .map(normalizeSchema)
       .forEach((schema) => upsertByIdentity(schemas, schema, schemaKey));
 
@@ -357,12 +561,24 @@ export function runMemoryExtractionSociety({
       roleTrace,
       hookTrace,
     });
-    if (extractedFacts.length > 0) roleOutputs.fact_extractor = extractedFacts;
-    extractedFacts
+    const guardedExtractedFacts = quarantine.sanitize(extractedFacts);
+    const allowedProvenance = provenanceSetFromContext(caseContext, passages);
+    const requireProductionModelGuards = Boolean(config);
+    if (guardedExtractedFacts.length > 0) roleOutputs.fact_extractor = guardedExtractedFacts;
+    guardedExtractedFacts
       .map(normalizeFact)
       .forEach((fact) => {
         if (!fact) return;
-        const guard = factPassageSupport(fact, passages);
+        const guard = combineFactGuards(
+          factPassageSupport(fact, passages, {
+            allowedProvenance,
+            requireAllowedProvenance: requireProductionModelGuards,
+            callerSupportPassageIds,
+            requireCallerSupport: requireProductionModelGuards,
+            modelProvenanceIdCollisions,
+          }),
+          factSchemaSupport(fact, schemas, { requireSchema: requireProductionModelGuards }),
+        );
         if (guard.supported) {
           upsertByIdentity(facts, fact, fullFactKey);
           return;
@@ -371,7 +587,7 @@ export function runMemoryExtractionSociety({
       });
   }
 
-  const hookContradictions = modelAssistance.enabled === true
+  const hookContradictions = modelEnabled
     ? callRole({
       roleHandlers,
       role: 'contradiction_critic',
@@ -387,16 +603,17 @@ export function runMemoryExtractionSociety({
       hookTrace,
     })
     : [];
-  if (hookContradictions.length > 0) roleOutputs.contradiction_critic = hookContradictions;
+  const guardedHookContradictions = quarantine.sanitize(hookContradictions);
+  if (guardedHookContradictions.length > 0) roleOutputs.contradiction_critic = guardedHookContradictions;
 
-  if (modelAssistance.enabled === true) {
+  if (modelEnabled) {
     const settledContext = {
       observations: normalizedObservations,
       passages,
       schemas,
       facts,
       rejectedFacts,
-      contradictions: [...findContradictions(facts), ...hookContradictions],
+      contradictions: [...findContradictions(facts), ...guardedHookContradictions],
     };
     for (const role of ['merge_planner', 'graph_constructor', 'retriever', 'evaluator']) {
       const output = callRole({
@@ -406,11 +623,12 @@ export function runMemoryExtractionSociety({
         roleTrace,
         hookTrace,
       });
-      if (output.length > 0) roleOutputs[role] = output;
+      const guardedOutput = quarantine.sanitize(output);
+      if (guardedOutput.length > 0) roleOutputs[role] = guardedOutput;
     }
   }
 
-  const contradictions = [...findContradictions(facts), ...hookContradictions];
+  const contradictions = [...findContradictions(facts), ...guardedHookContradictions];
   const mergePlan = normalizeMergePlan({ outputs: roleOutputs.merge_planner, facts });
   const graphPlan = normalizeGraphPlan({ outputs: roleOutputs.graph_constructor, facts });
   const retrievalPlan = normalizeRetrievalPlan({ outputs: roleOutputs.retriever, passages, facts });
@@ -441,6 +659,7 @@ export function runMemoryExtractionSociety({
     roleTrace: [...new Set(roleTrace)].sort(),
     roleAudit: buildRoleAudit(roleOutputs),
     roleOutputs,
+    modelAssistance: modelAssistanceStatus(decision, quarantine),
     mergePlan,
     graphPlan,
     retrievalPlan,

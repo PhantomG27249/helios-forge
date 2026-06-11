@@ -1,9 +1,15 @@
 import { recordAdaptiveSearchOutcome } from '../bes/adaptiveSearchScheduler.js';
 import { runLocalMetaHarness } from '../meta/localMetaHarness.js';
+import { modelRouterRewardsFromSwarmResult } from '../model/modelRouterRewards.js';
 import { scheduleAttempts } from './attemptScheduler.js';
-import { loadDefaultAgentProfiles, selectAgentProfileForAttempt } from './agentProfiles.js';
+import {
+  applyAgentProfileModelOverrides,
+  loadDefaultAgentProfiles,
+  selectAgentProfileForAttempt,
+} from './agentProfiles.js';
 import { chooseChampion } from './championSelector.js';
 import { allocateEvolutionSwarmBudgets } from './evolutionBudgetAllocator.js';
+import { resolveAttemptModelRoute, summarizeModelCouncil } from './modelCouncil.js';
 import { runModelDrivenAttempt } from './modelDrivenWorker.js';
 import { runPiNativeAttempt } from './piNativeWorker.js';
 import { recombineApprovedOutputs } from './recombiner.js';
@@ -147,6 +153,64 @@ function adaptiveSearchSchedulerSummary(scheduler) {
   }));
 }
 
+function routerEnabled(modelRouter = null) {
+  return modelRouter?.enabled === true && typeof modelRouter?.policy?.selectArm === 'function';
+}
+
+function modelRouterDecisionKey({ role, taskType, attempt = {} } = {}) {
+  return [
+    role || attempt.profile?.role || 'implementer',
+    taskType || 'general',
+    attempt.planning?.action?.arm || attempt.strategy || 'attempt',
+  ].join(':');
+}
+
+function modelRouterArms({ council, attempt = {}, role } = {}) {
+  const arms = Object.values(council?.roleRoutes || {})
+    .map((route) => ({
+      armId: route.modelProfile,
+      role: route.role,
+      modelProfile: route.modelProfile,
+      endpointProfile: route.endpointProfile,
+      endpoint: route.endpoint,
+      authority: 'evidence_only',
+      canPromote: false,
+    }))
+    .filter((arm) => arm.modelProfile);
+  const fallback = resolveAttemptModelRoute({ council, attempt, role });
+  if (fallback?.modelProfile && !arms.some((arm) => arm.armId === fallback.modelProfile)) {
+    arms.push({
+      armId: fallback.modelProfile,
+      role: fallback.role || role,
+      modelProfile: fallback.modelProfile,
+      endpointProfile: fallback.endpointProfile,
+      endpoint: fallback.endpoint,
+      authority: 'evidence_only',
+      canPromote: false,
+    });
+  }
+  return arms;
+}
+
+function routeFromRouterDecision({ decision = null, council, attempt = {}, role } = {}) {
+  if (!decision?.modelProfile && !decision?.armId) return null;
+  const matchingRoute = Object.values(council?.roleRoutes || {}).find((route) => (
+    route.modelProfile === decision.modelProfile
+    || route.modelProfile === decision.armId
+    || route.endpointProfile === decision.endpointProfile
+  ));
+  return {
+    role: decision.role || role || matchingRoute?.role || attempt.profile?.role || 'implementer',
+    modelProfile: decision.modelProfile || decision.armId,
+    endpointProfile: decision.endpointProfile || matchingRoute?.endpointProfile,
+    endpoint: matchingRoute?.endpoint ? { ...matchingRoute.endpoint } : undefined,
+    routerActionId: decision.actionId,
+    routerArmId: decision.armId,
+    authority: 'evidence_only',
+    canPromote: false,
+  };
+}
+
 function failureAttemptRecord({
   scheduledAttempt,
   role,
@@ -199,6 +263,7 @@ async function runScheduledAttempt({
   modelExecutor,
   provider,
   modelProfileName,
+  modelRoute,
   piNativeEnabled = false,
   piWorkerFactory,
   piBridgeContext,
@@ -246,6 +311,7 @@ async function runScheduledAttempt({
         context,
         budget,
         profileName: worker.profileName,
+        modelRoute,
         modelGateway,
         provider: modelExecutor || modelProvider || provider,
         requestId,
@@ -371,6 +437,9 @@ export async function orchestrateSwarm({
   modelExecutor,
   provider,
   modelProfileName,
+  modelCouncil,
+  modelRouter,
+  taskContext,
   piWorkerFactory,
   piBridgeContext,
   capabilitiesManifest,
@@ -402,7 +471,12 @@ export async function orchestrateSwarm({
       await emitEvent(event);
     }
   };
-  const profiles = agentProfiles || loadDefaultAgentProfiles();
+  const profiles = modelCouncil?.enabled
+    ? applyAgentProfileModelOverrides({
+      profiles: agentProfiles || loadDefaultAgentProfiles(),
+      roleRoutes: modelCouncil.roleRoutes,
+    })
+    : (agentProfiles || loadDefaultAgentProfiles());
   const scheduledBaseAttempts = scheduleAttempts({
     taskId,
     taskType,
@@ -425,7 +499,7 @@ export async function orchestrateSwarm({
       goalTree: (evolutionPlanner || planner?.evolutionPlanner)?.bidirectionalBes?.goalTree,
     }),
   }));
-  const scheduledAttempts = evolutionBudget?.enabled
+  const budgetedAttempts = evolutionBudget?.enabled
     ? allocateEvolutionSwarmBudgets({
       attempts: profiledAttempts,
       budgetState: evolutionBudget.budgetState || budget,
@@ -433,6 +507,48 @@ export async function orchestrateSwarm({
       visualBudget: evolutionBudget.visualBudget || {},
     })
     : profiledAttempts;
+  const modelRouterDecisions = [];
+  const scheduledAttempts = [];
+  for (const attempt of budgetedAttempts) {
+    const role = attempt.profile?.role || 'implementer';
+    let modelRoute = resolveAttemptModelRoute({
+      council: modelCouncil,
+      attempt,
+      role,
+    });
+    if (routerEnabled(modelRouter)) {
+      const key = modelRouterDecisionKey({ role, taskType, attempt });
+      const decision = modelRouter.policy.selectArm({
+        key,
+        role,
+        arms: modelRouterArms({ council: modelCouncil, attempt, role }),
+        taskContext: taskContext || { ...task, taskType },
+      });
+      if (decision) {
+        const normalizedDecision = {
+          ...decision,
+          authority: 'evidence_only',
+          canPromote: false,
+          key: decision.key || key,
+          role: decision.role || role,
+        };
+        modelRouterDecisions.push(normalizedDecision);
+        await publishAttemptEvent({
+          ...normalizedDecision,
+          type: 'model_router.arm_selected',
+          taskId,
+          attemptId: attempt.attemptId,
+        });
+        modelRoute = routeFromRouterDecision({
+          decision: normalizedDecision,
+          council: modelCouncil,
+          attempt,
+          role,
+        }) || modelRoute;
+      }
+    }
+    scheduledAttempts.push(modelRoute ? { ...attempt, modelRoute } : attempt);
+  }
   const concurrency = swarmExecution?.concurrency || 1;
   const attempts = await runSwarmAttemptsBounded({
     attempts: scheduledAttempts,
@@ -466,7 +582,16 @@ export async function orchestrateSwarm({
             requestId,
             protocol: piNativeEnabled ? 'a2a' : undefined,
           },
-          model: hasModelWorker ? { requestId, profileName: modelProfileName || scheduledAttempt.profile?.modelProfile || 'critic_low_temp' } : undefined,
+          model: hasModelWorker
+            ? {
+              requestId,
+              profileName: scheduledAttempt.modelRoute?.modelProfile
+                || modelProfileName
+                || scheduledAttempt.profile?.modelProfile
+                || 'critic_low_temp',
+              route: scheduledAttempt.modelRoute,
+            }
+            : undefined,
           status: 'running',
           summary: `${scheduledAttempt.attemptId} running ${scheduledAttempt.strategy}`,
         });
@@ -523,7 +648,8 @@ export async function orchestrateSwarm({
       modelProvider,
       modelExecutor,
       provider,
-      modelProfileName: modelProfileName || scheduledAttempt.profile?.modelProfile,
+      modelProfileName: scheduledAttempt.modelRoute?.modelProfile || modelProfileName || scheduledAttempt.profile?.modelProfile,
+      modelRoute: scheduledAttempt.modelRoute,
       piNativeEnabled,
       piWorkerFactory,
       piBridgeContext,
@@ -579,6 +705,54 @@ export async function orchestrateSwarm({
   }));
   const recombination = recombineApprovedOutputs({ taskId, reviews });
   const champion = chooseChampion(attempts);
+  const modelCouncilReport = summarizeModelCouncil({ council: modelCouncil, attempts, champion, reviews });
+  if (modelCouncil?.enabled) {
+    await publishAttemptEvent({
+      type: 'model_council.report_created',
+      taskId,
+      authority: 'evidence_only',
+      canPromote: false,
+      modelDiversity: modelCouncilReport.modelDiversity,
+      coverage: modelCouncilReport.coverage,
+      disagreement: modelCouncilReport.disagreement,
+      championSupport: modelCouncilReport.championSupport,
+    });
+  }
+  const modelRouterRewards = [];
+  if (routerEnabled(modelRouter)) {
+    const rewards = modelRouterRewardsFromSwarmResult({
+      result: {
+        taskId,
+        taskType,
+        attempts,
+        modelCouncil: modelCouncilReport,
+      },
+      weights: modelRouter.rewardWeights,
+    });
+    for (const reward of rewards) {
+      if (!reward.armId) continue;
+      const rewardAttemptId = reward.evidence?.attemptId
+        || attempts.find((candidate) => (
+          candidate.model?.route?.modelProfile === reward.evidence?.modelProfile
+          || candidate.model?.profileName === reward.evidence?.modelProfile
+        ))?.attemptId
+        || null;
+      modelRouter.state?.recordReward?.(reward);
+      modelRouterRewards.push(reward);
+      await publishAttemptEvent({
+        type: 'model_router.reward_recorded',
+        taskId,
+        attemptId: rewardAttemptId,
+        authority: 'evidence_only',
+        canPromote: false,
+        key: reward.key,
+        armId: reward.armId,
+        reward: reward.reward,
+        evidence: reward.evidence,
+        reasons: reward.reasons,
+      });
+    }
+  }
   let adaptiveSearchOutcome = null;
   if (adaptiveSearchAction?.actionId && planner?.adaptiveSearch?.scheduler) {
     adaptiveSearchOutcome = recordAdaptiveSearchOutcome({
@@ -612,6 +786,15 @@ export async function orchestrateSwarm({
     reviews,
     recombination,
     champion,
+    modelCouncil: modelCouncilReport,
+    modelRouter: routerEnabled(modelRouter)
+      ? {
+        authority: 'evidence_only',
+        canPromote: false,
+        decisions: modelRouterDecisions,
+        rewards: modelRouterRewards,
+      }
+      : null,
     oversoul: oversoulContext
       ? {
         authority: 'advisory',

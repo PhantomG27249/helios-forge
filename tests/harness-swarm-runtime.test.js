@@ -462,6 +462,162 @@ test('swarm orchestrator calls a supplied model executor for independent attempt
   assert.equal(result.champion.attemptId, 'attempt_2');
 });
 
+test('swarm orchestrator routes model-driven attempts through role-specific council profiles', async () => {
+  const modelCalls = [];
+  const events = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_model_council_routes', goal: 'Run role-specialized model workers.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 2,
+    planner: {
+      enabled: true,
+      strategy: 'tooltree',
+      task: 'route council attempts',
+      rootState: { key: 'root' },
+      budget: { maxIterations: 2, maxDepth: 1, exploration: 0 },
+      expandNode: ({ state }) => (state.key === 'root'
+        ? [
+          { action: { strategy: 'minimal_patch' }, state: { key: 'patch' } },
+          { action: { strategy: 'risk_review' }, state: { key: 'risk' } },
+        ]
+        : []),
+      evaluateNode: ({ state }) => (state.key === 'patch' ? 0.8 : 0.7),
+    },
+    modelCouncil: {
+      enabled: true,
+      authority: 'evidence_only',
+      canPromote: false,
+      roleRoutes: {
+        implementer: {
+          role: 'implementer',
+          modelProfile: 'implementer_model',
+          endpointProfile: 'fast',
+          endpoint: { baseUrl: 'http://fast.test/v1', modelId: 'fast-model' },
+          authority: 'evidence_only',
+          canPromote: false,
+        },
+        'risk-auditor': {
+          role: 'risk-auditor',
+          modelProfile: 'reviewer_model',
+          endpointProfile: 'critic',
+          endpoint: { baseUrl: 'http://critic.test/v1', modelId: 'critic-model' },
+          authority: 'evidence_only',
+          canPromote: false,
+        },
+      },
+    },
+    modelExecutor: async (input) => {
+      modelCalls.push(input);
+      return {
+        callId: `call_${input.attempt.attemptId}`,
+        profile: { name: input.profileName, model: `${input.profileName}_id` },
+        structured: {
+          summary: `Model completed ${input.attempt.strategy}.`,
+          patch: `diff --git a/${input.attempt.attemptId} b/${input.attempt.attemptId}`,
+          verifierEvidence: [`verified ${input.attempt.attemptId}`],
+          score: input.profileName === 'implementer_model' ? 80 : 70,
+        },
+      };
+    },
+    onAttemptEvent: (event) => events.push(event),
+  });
+
+  assert.deepEqual(modelCalls.map((call) => call.profileName), [
+    'implementer_model',
+    'reviewer_model',
+  ]);
+  assert.deepEqual(result.attempts.map((attempt) => attempt.model.route.modelProfile), [
+    'implementer_model',
+    'reviewer_model',
+  ]);
+  assert.deepEqual(result.attempts.map((attempt) => attempt.model.route.endpointProfile), ['fast', 'critic']);
+  assert.equal(result.modelCouncil.authority, 'evidence_only');
+  assert.equal(result.modelCouncil.canPromote, false);
+  assert.equal(result.modelCouncil.modelDiversity.uniqueModelProfiles, 2);
+  assert.equal(events.some((event) => event.type === 'model_council.report_created'), true);
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === 'swarm.subagent_started')
+      .map((event) => event.model.profileName),
+    ['implementer_model', 'reviewer_model'],
+  );
+});
+
+test('swarm orchestrator records adaptive model router decisions and rewards as evidence only', async () => {
+  const events = [];
+  const rewards = [];
+  const decisions = [];
+  const result = await orchestrateSwarm({
+    task: { taskId: 'task_model_router_rewards', goal: 'Route and reward model choices.' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    modelCouncil: {
+      enabled: true,
+      authority: 'evidence_only',
+      canPromote: false,
+      roleRoutes: {
+        implementer: {
+          role: 'implementer',
+          modelProfile: 'baseline_model',
+          endpointProfile: 'baseline',
+          endpoint: { baseUrl: 'http://baseline.test/v1', modelId: 'baseline-model' },
+          authority: 'evidence_only',
+          canPromote: false,
+        },
+      },
+    },
+    modelRouter: {
+      enabled: true,
+      rewardWeights: { verifier: 0.4, reviewer: 0.2, councilAgreement: 0.15, safety: 0.15, latency: 0.05, cost: 0.05 },
+      policy: {
+        selectArm({ key, role, arms }) {
+          const decision = {
+            type: 'model_router.arm_selected',
+            authority: 'evidence_only',
+            canPromote: false,
+            key,
+            actionId: `router_${role}`,
+            role,
+            armId: 'router_model',
+            modelProfile: 'router_model',
+            endpointProfile: 'router_endpoint',
+            posterior: { alpha: 1, beta: 1, observations: 0 },
+            alternatives: arms.map((arm) => ({ armId: arm.armId, sampledValue: 0.5, observations: 0 })),
+          };
+          decisions.push(decision);
+          return decision;
+        },
+      },
+      state: {
+        recordReward(reward) {
+          rewards.push(reward);
+        },
+      },
+    },
+    modelExecutor: async (input) => ({
+      callId: `call_${input.attempt.attemptId}`,
+      profile: { name: input.profileName, model: `${input.profileName}_id` },
+      structured: {
+        summary: `Router selected ${input.profileName}.`,
+        verifierEvidence: [`verified ${input.profileName}`],
+        score: 88,
+      },
+    }),
+    onAttemptEvent: (event) => events.push(event),
+  });
+
+  assert.equal(decisions.length, 1);
+  assert.equal(rewards.length, 1);
+  assert.equal(rewards[0].armId, 'router_model');
+  assert.equal(events.findIndex((event) => event.type === 'model_router.arm_selected') < events.findIndex((event) => event.type === 'swarm.subagent_started'), true);
+  assert.equal(events.some((event) => event.type === 'model_router.reward_recorded'), true);
+  assert.equal(result.attempts[0].model.route.modelProfile, 'router_model');
+  assert.equal(result.modelRouter.authority, 'evidence_only');
+  assert.equal(result.modelRouter.canPromote, false);
+  assert.deepEqual(result.modelRouter.decisions.map((decision) => decision.armId), ['router_model']);
+  assert.deepEqual(result.modelRouter.rewards.map((reward) => reward.armId), ['router_model']);
+});
+
 test('swarm orchestrator preserves invalid model-driven evolution contracts', async () => {
   const result = await orchestrateSwarm({
     task: { taskId: 'task_model_contract_failure', goal: 'Reject local model approval.' },

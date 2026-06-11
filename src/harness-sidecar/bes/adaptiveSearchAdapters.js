@@ -1,3 +1,84 @@
+export function deriveModelChoiceArmsFromRouterHardCases({ hardCases = [] } = {}) {
+  const arms = [];
+  const seen = new Set();
+  for (const hardCase of asArray(hardCases)) {
+    const failureModes = asArray(hardCase.failureModes);
+    const role = hardCase.role || 'unknown';
+    const bestModel = hardCase.bestModel || hardCase.evidence?.bestModel;
+    const selectedModel = hardCase.selectedModel || hardCase.evidence?.selectedModel;
+    const addArm = (arm) => {
+      if (seen.has(arm.armId)) return;
+      seen.add(arm.armId);
+      arms.push({
+        ...arm,
+        authority: 'evidence_only',
+        canPromote: false,
+        sourceCaseIds: [hardCase.taskId || hardCase.caseId || hardCase.id].filter(Boolean),
+      });
+    };
+
+    if (
+      (failureModes.includes('model_router_wrong_model') ||
+        failureModes.includes('model_router_best_single_regression') ||
+        failureModes.includes('model_router_under_explored_arm')) &&
+      bestModel
+    ) {
+      addArm({
+        action: 'explore_model_choice',
+        armId: `explore_${safeArmPart(role)}_${safeArmPart(bestModel)}`,
+        role,
+        modelProfile: bestModel,
+        failureModes,
+      });
+    }
+
+    if (failureModes.includes('model_router_safety_regression') && selectedModel) {
+      addArm({
+        action: 'quarantine_model_choice',
+        armId: `quarantine_${safeArmPart(role)}_${safeArmPart(selectedModel)}`,
+        role,
+        modelProfile: selectedModel,
+        failureModes,
+      });
+    }
+  }
+  return arms;
+}
+
+export function buildAdaptiveSearchContextForModelRouter(input = {}) {
+  const hardCases = asArray(input.hardCases ?? input.cases ?? input.coreset?.items);
+  const modelChoiceArms = deriveModelChoiceArmsFromRouterHardCases({ hardCases });
+  return {
+    subsystem: 'model_router',
+    taskId: input.taskId || input.task?.taskId || 'model_router_context',
+    evidence: hardCases.map((hardCase) => ({
+      kind: 'model_router_hard_case',
+      id: hardCase.taskId || hardCase.caseId || hardCase.id,
+      failureModes: asArray(hardCase.failureModes),
+      authority: 'evidence_only',
+      canPromote: false,
+    })),
+    evidenceCount: hardCases.length,
+    budget: normalizeBudget(input),
+    signals: {
+      routerFailureCount: hardCases.length,
+      modelChoiceArmCount: modelChoiceArms.length,
+      safetyRegressionCount: hardCases
+        .filter((hardCase) => asArray(hardCase.failureModes).includes('model_router_safety_regression'))
+        .length,
+    },
+    modelChoiceArms,
+  };
+}
+
+export function normalizeAdaptiveSearchRewardForModelRouter(output = {}) {
+  const quality = output.selectedBestModel === true ? 0.45 : output.verifierPassed === true ? 0.32 : 0.08;
+  const safety = output.safetyBlocked === true || output.safetyRejected === true ? -0.25 : 0.2;
+  const latencyDelta = Number(output.latencyDelta);
+  const latency = Number.isFinite(latencyDelta) ? Math.max(-0.12, Math.min(0.12, -latencyDelta)) : 0;
+  return finalizeReward(quality + safety + latency + 0.18, output);
+}
+
 export function buildAdaptiveSearchContextForVerifier(input = {}) {
   const changedFiles = asArray(input.changedFiles);
   const verifierEvidence = asArray(input.verifierEvidence);
@@ -177,4 +258,11 @@ function clamp01(value) {
 
 function round(value) {
   return Math.round(value * 1000000) / 1000000;
+}
+
+function safeArmPart(value) {
+  return String(value || 'arm')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'arm';
 }

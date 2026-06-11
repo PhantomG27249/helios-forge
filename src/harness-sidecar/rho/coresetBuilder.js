@@ -1,3 +1,5 @@
+import { classifyModelRouterFailure } from './modelRouterHardCases.js';
+
 const DEFAULT_LIMIT = 8;
 const LOW_COMPLETION_THRESHOLD = 0.5;
 const EMBEDDING_DIVERSITY_WEIGHT = 3;
@@ -273,6 +275,11 @@ function scoreTrace(trace) {
   const compaction = scoreCompactionEvidence(trace);
   score += compaction.score;
   reasons.push(...compaction.reasons);
+  const modelRouter = classifyModelRouterFailure(trace);
+  if (modelRouter.failureModes.length > 0) {
+    score += modelRouter.score;
+    reasons.push(...modelRouter.failureModes);
+  }
 
   return { score, reasons };
 }
@@ -479,6 +486,7 @@ function traceLineage(trace = {}) {
 
 function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' }) {
   const embedding = resolveEmbedding(trace);
+  const modelRouter = classifyModelRouterFailure(trace);
   return {
     difficulty: {
       score: scored.score,
@@ -493,6 +501,14 @@ function replayMetadata({ trace, taskId, scored, diversityKey, source = 'trace' 
       embeddingDimension: embedding?.length ?? 0,
       embeddingSource: embedding ? 'inline' : 'none',
     },
+    modelRouter: {
+      failureModes: modelRouter.failureModes,
+      reasons: modelRouter.reasons,
+      selectedModel: modelRouter.selectedModel,
+      bestModel: modelRouter.bestModel,
+      authority: 'evidence_only',
+      canPromote: false,
+    },
   };
 }
 
@@ -506,7 +522,7 @@ function compareRankedItems(a, b) {
   return a.taskId.localeCompare(b.taskId);
 }
 
-function normalizeEmbedding(value) {
+export function normalizeEmbedding(value) {
   if (!Array.isArray(value) || value.length === 0) {
     return null;
   }
@@ -577,7 +593,7 @@ function fallbackEmbeddingText(source = {}, id = '') {
   return fields.map(stableString).filter(Boolean).join(' ');
 }
 
-function deterministicFallbackEmbedding(source, id, dimensions) {
+export function deterministicFallbackEmbedding(source, id, dimensions) {
   const safeDimensions = Math.max(0, Math.floor(Number(dimensions) || 0));
   const text = fallbackEmbeddingText(source, id);
   if (safeDimensions === 0 || text.length === 0) {

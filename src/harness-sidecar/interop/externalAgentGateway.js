@@ -1,5 +1,6 @@
 import { getTrustRank, normalizeAgentCard, normalizeAgentCards } from './agentCards.js';
 import { buildGatewayRequest } from './agentRouter.js';
+import { normalizeA2AModelRoute } from './a2aSwarmEnvelope.js';
 import { verifyDelegatedCapabilityToken } from './delegatedCapabilityTokens.js';
 
 function normalizeList(values = []) {
@@ -64,6 +65,7 @@ function endpointDescriptor(agent = {}) {
     toolPermissions: agent.toolPermissions,
     available: agent.available,
     metadata: agent.metadata,
+    modelCapabilities: agent.modelCapabilities,
   });
 }
 
@@ -86,6 +88,7 @@ function loadIssuerSecret(store) {
 function markExternalA2aContextUntrusted(envelope = {}) {
   const a2a = envelope.task?.context?.a2a;
   if (!a2a || typeof a2a !== 'object' || Array.isArray(a2a)) return envelope;
+  const modelRoute = normalizeA2AModelRoute(a2a.modelRoute);
   return {
     ...envelope,
     task: {
@@ -94,6 +97,7 @@ function markExternalA2aContextUntrusted(envelope = {}) {
         ...envelope.task.context,
         a2a: {
           ...a2a,
+          ...(modelRoute ? { modelRoute } : {}),
           trust: {
             ...(a2a.trust || {}),
             external: true,
@@ -103,6 +107,12 @@ function markExternalA2aContextUntrusted(envelope = {}) {
       },
     },
   };
+}
+
+function routeEvidenceFromTask(task = {}) {
+  const a2a = task.context?.a2a;
+  if (!a2a || typeof a2a !== 'object' || Array.isArray(a2a)) return null;
+  return normalizeA2AModelRoute(a2a.modelRoute);
 }
 
 function mutationTrustFailure({
@@ -260,13 +270,24 @@ export class ExternalAgentGateway {
 
   buildEnvelope({ agentId, task = {}, grantedCapabilities } = {}) {
     const agent = this.getAgent(agentId);
-    const envelope = markExternalA2aContextUntrusted(buildGatewayRequest({
+    const envelope = buildGatewayRequest({
       agent,
       task,
       grantedCapabilities,
-    }));
+    });
+    const modelRoute = routeEvidenceFromTask(task);
+    if (modelRoute) {
+      envelope.task.context = {
+        ...(envelope.task.context || {}),
+        a2a: {
+          ...(envelope.task.context?.a2a || {}),
+          modelRoute,
+        },
+      };
+    }
+    const untrustedEnvelope = markExternalA2aContextUntrusted(envelope);
     return {
-      ...envelope,
+      ...untrustedEnvelope,
       mode: isMutationTask(task) ? 'mutation' : 'read',
     };
   }

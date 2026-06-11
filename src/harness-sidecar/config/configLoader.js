@@ -22,15 +22,107 @@ export const DEFAULT_HARNESS_CONFIG = {
     swarm: false,
     modelDrivenSwarm: false,
     piNativeSwarm: false,
+    multiModelSwarm: false,
+    adaptiveModelRouter: false,
     deepResearch: false,
     experiments: false,
     visualArtifacts: false,
     adaptiveSearch: false,
   },
+  modelCouncil: {
+    enabled: false,
+    mode: 'advisory',
+    diversityRequired: 2,
+    disagreementThreshold: 0.35,
+    roles: {},
+    endpointProfiles: {},
+  },
+  modelRouter: {
+    enabled: false,
+    mode: 'advisory',
+    strategy: 'thompson_sampling',
+    minEvidencePerArm: 5,
+    explorationFloor: 0.05,
+    maxArmsPerDecision: 8,
+    rewardWeights: {
+      verifier: 0.4,
+      reviewer: 0.2,
+      councilAgreement: 0.15,
+      safety: 0.15,
+      latency: 0.05,
+      cost: 0.05,
+    },
+    persistence: {
+      enabled: false,
+      path: '.harness/model-router-state.json',
+    },
+  },
   adaptiveSearch: {
     mode: 'advisory',
     maxActionsPerTask: 8,
     allowProfileSwitching: true,
+  },
+  productionCapabilities: {
+    modelAssistedMemory: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    modelBackedRhoEmbeddings: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    productionA2aTransport: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    productionA2aQueues: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    visualSwarmCell: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    visualReplaySuites: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    modelAssistedBesJudgment: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    councilDebate: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    ensembleCalibration: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    endpointCapacityRecommendations: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    operatorDashboards: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    productionAutonomyPolicy: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
   },
 };
 

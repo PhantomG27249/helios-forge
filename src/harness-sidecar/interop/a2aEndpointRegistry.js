@@ -17,6 +17,12 @@ function normalizeList(values = []) {
   return normalized;
 }
 
+function normalizePositiveInteger(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return undefined;
+  return Math.floor(number);
+}
+
 function recordsFromState(records) {
   if (Array.isArray(records)) return records;
   if (records && typeof records === 'object') return Object.values(records);
@@ -37,6 +43,38 @@ function sanitizeEndpoint(endpoint = {}) {
     Object.entries(endpoint)
       .filter(([key]) => !/socket|server|listener|connection|handle/i.test(key)),
   ));
+}
+
+function compactObject(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => (
+      item !== undefined
+      && !(Array.isArray(item) && item.length === 0)
+      && !(item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 0)
+    )),
+  );
+}
+
+function normalizeTier(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function normalizeModelCapabilities(modelCapabilities = {}) {
+  if (!modelCapabilities || typeof modelCapabilities !== 'object' || Array.isArray(modelCapabilities)) {
+    return {};
+  }
+  return compactObject({
+    profiles: normalizeList(modelCapabilities.profiles),
+    supportsVision: modelCapabilities.supportsVision === undefined
+      ? undefined
+      : Boolean(modelCapabilities.supportsVision),
+    maxContextTokens: normalizePositiveInteger(modelCapabilities.maxContextTokens),
+    costTier: normalizeTier(modelCapabilities.costTier),
+    latencyTier: normalizeTier(modelCapabilities.latencyTier),
+    preferredRoles: normalizeList(modelCapabilities.preferredRoles),
+    unavailableProfiles: normalizeList(modelCapabilities.unavailableProfiles),
+  });
 }
 
 function isContractSecretKey(key) {
@@ -97,6 +135,7 @@ function normalizeEndpointRecord(record = {}) {
     restartPersistent: record.restartPersistent !== false,
     lineageRoot: record.lineageRoot ? String(record.lineageRoot).trim() : card.id,
     contract: normalizeContract(record.contract || record.endpointContract),
+    modelCapabilities: normalizeModelCapabilities(record.modelCapabilities),
     metadata: redactSecrets({
       ...(card.metadata || {}),
       ...(record.metadata || {}),
@@ -120,6 +159,7 @@ function endpointView(record) {
     restartPersistent: record.restartPersistent,
     available: record.available,
     contract: record.contract,
+    modelCapabilities: record.modelCapabilities,
     metadata: record.metadata,
   });
 }
@@ -196,12 +236,116 @@ function sanitizeNegotiationTerms(terms = {}) {
   )));
 }
 
+function sanitizeModelCapabilityFilter(modelCapability = {}) {
+  if (!modelCapability || typeof modelCapability !== 'object' || Array.isArray(modelCapability)) return {};
+  return compactObject({
+    profiles: normalizeList(
+      modelCapability.profiles
+      || modelCapability.preferredProfiles
+      || modelCapability.profile,
+    ),
+    excludedProfiles: normalizeList(modelCapability.excludedProfiles),
+    supportsVision: modelCapability.supportsVision === undefined
+      ? undefined
+      : Boolean(modelCapability.supportsVision),
+    minContextTokens: normalizePositiveInteger(modelCapability.minContextTokens),
+    costTier: normalizeTier(modelCapability.costTier),
+    latencyTier: normalizeTier(modelCapability.latencyTier),
+  });
+}
+
+function endpointMatchesModelCapability(endpoint, modelCapability = {}) {
+  const filter = sanitizeModelCapabilityFilter(modelCapability);
+  if (Object.keys(filter).length === 0) return true;
+  const capabilities = endpoint.modelCapabilities || {};
+  const unavailable = new Set(normalizeList(capabilities.unavailableProfiles));
+  const profiles = normalizeList(capabilities.profiles)
+    .filter((profile) => !unavailable.has(profile));
+  const excluded = new Set(normalizeList(filter.excludedProfiles));
+  const eligibleProfiles = profiles.filter((profile) => !excluded.has(profile));
+  if (filter.profiles?.length && !filter.profiles.some((profile) => eligibleProfiles.includes(profile))) {
+    return false;
+  }
+  if (filter.supportsVision === true && capabilities.supportsVision !== true) return false;
+  if (
+    filter.supportsVision === false
+    && capabilities.supportsVision !== undefined
+    && capabilities.supportsVision !== false
+  ) {
+    return false;
+  }
+  if (filter.minContextTokens && Number(capabilities.maxContextTokens || 0) < filter.minContextTokens) {
+    return false;
+  }
+  if (filter.costTier && capabilities.costTier !== filter.costTier) return false;
+  if (filter.latencyTier && capabilities.latencyTier !== filter.latencyTier) return false;
+  return true;
+}
+
+function endpointMatchesRole(endpoint, role) {
+  const normalizedRole = String(role || '').trim();
+  if (!normalizedRole) return true;
+  return normalizeList(endpoint.modelCapabilities?.preferredRoles).includes(normalizedRole);
+}
+
+function normalizeModelPreferenceRequiredCapabilities(requiredCapabilities = {}) {
+  if (!requiredCapabilities || typeof requiredCapabilities !== 'object' || Array.isArray(requiredCapabilities)) {
+    return {};
+  }
+  return compactObject({
+    minContextTokens: normalizePositiveInteger(requiredCapabilities.minContextTokens),
+    maxContextTokens: normalizePositiveInteger(requiredCapabilities.maxContextTokens),
+    supportsVision: requiredCapabilities.supportsVision === undefined
+      ? undefined
+      : Boolean(requiredCapabilities.supportsVision),
+    costTier: normalizeTier(requiredCapabilities.costTier),
+    latencyTier: normalizeTier(requiredCapabilities.latencyTier),
+    profiles: normalizeList(requiredCapabilities.profiles),
+    capabilities: normalizeList(requiredCapabilities.capabilities),
+  });
+}
+
+function normalizeModelPreference({ modelPreference = {}, task = {} } = {}) {
+  const source = modelPreference && typeof modelPreference === 'object' && !Array.isArray(modelPreference)
+    ? modelPreference
+    : {};
+  if (Object.keys(source).length === 0) return undefined;
+  return compactObject(sanitizeExternalPayload({
+    role: source.role ? String(source.role).trim() : undefined,
+    taskType: source.taskType || task.taskType || task.type
+      ? String(source.taskType || task.taskType || task.type).trim()
+      : undefined,
+    preferredProfiles: normalizeList(source.preferredProfiles || source.profiles),
+    excludedProfiles: normalizeList(source.excludedProfiles),
+    requiredCapabilities: normalizeModelPreferenceRequiredCapabilities(source.requiredCapabilities),
+    authority: 'evidence_only',
+    canPromote: false,
+  }));
+}
+
+function normalizeModelNegotiation(modelNegotiation = {}) {
+  if (!modelNegotiation || typeof modelNegotiation !== 'object' || Array.isArray(modelNegotiation)) {
+    return undefined;
+  }
+  if (Object.keys(modelNegotiation).length === 0) return undefined;
+  return compactObject(sanitizeExternalPayload(redactSecrets({
+    acceptedProfile: modelNegotiation.acceptedProfile
+      ? String(modelNegotiation.acceptedProfile).trim()
+      : undefined,
+    fallbackProfiles: normalizeList(modelNegotiation.fallbackProfiles),
+    reasons: normalizeList(modelNegotiation.reasons),
+    authority: 'evidence_only',
+    canPromote: false,
+  })));
+}
+
 export function buildA2ANegotiationResponseEnvelope({
   from,
   to,
   accepted = false,
   acceptedCapabilities = [],
   terms = {},
+  modelNegotiation,
   requestEnvelope = {},
 } = {}) {
   const durable = requestEnvelope.durable || {};
@@ -221,6 +365,8 @@ export function buildA2ANegotiationResponseEnvelope({
     endpointId: String(from || ''),
   };
   const claimedTrustLevel = String(terms.claimedTrustLevel || 'public').trim().toLowerCase();
+
+  const normalizedModelNegotiation = normalizeModelNegotiation(modelNegotiation || terms.modelNegotiation);
 
   return redactSecrets({
     protocol: 'a2a',
@@ -250,6 +396,7 @@ export function buildA2ANegotiationResponseEnvelope({
         canMutateWorkspace: false,
         requiresVerifierEvidence: true,
       },
+      ...(normalizedModelNegotiation ? { modelNegotiation: normalizedModelNegotiation } : {}),
     },
   });
 }
@@ -303,14 +450,20 @@ export class A2AEndpointRegistry {
     capabilities = [],
     minTrustLevel = 'public',
     requireStreaming = false,
+    role,
+    modelCapability,
+    modelPreference,
   } = {}) {
     const requiredCapabilities = new Set(normalizeList(capabilities));
     const minTrustRank = getTrustRank(minTrustLevel);
+    const capabilityFilter = modelCapability || modelPreference;
     return [...this.endpoints.values()]
       .filter((endpoint) => endpoint.available !== false)
       .filter((endpoint) => endpoint.trustRank >= minTrustRank)
       .filter((endpoint) => !requireStreaming || endpoint.supportsStreaming)
       .filter((endpoint) => [...requiredCapabilities].every((capability) => endpoint.capabilities.includes(capability)))
+      .filter((endpoint) => endpointMatchesRole(endpoint, role || modelPreference?.role))
+      .filter((endpoint) => endpointMatchesModelCapability(endpoint, capabilityFilter))
       .sort((left, right) => (
         right.trustRank - left.trustRank
         || left.id.localeCompare(right.id)
@@ -336,6 +489,7 @@ export class A2AEndpointRegistry {
     parentMessageId,
     rootMessageId,
     lineage = [],
+    modelPreference,
   } = {}) {
     const endpoint = this.get(toAgentId);
     const requested = normalizeList(requestedCapabilities || task.requiredCapabilities);
@@ -350,6 +504,10 @@ export class A2AEndpointRegistry {
     const rootId = rootMessageId || parentMessageId || messageId;
     const lineageHops = normalizeLineage(lineage);
     const mutation = isMutationTask({ ...task, requiredCapabilities: requested });
+    const normalizedModelPreference = normalizeModelPreference({
+      modelPreference: modelPreference || task.modelPreference,
+      task,
+    });
 
     const currentHop = {
       messageId,
@@ -362,7 +520,7 @@ export class A2AEndpointRegistry {
       endpointId: endpoint.endpointId,
     };
 
-    return redactSecrets({
+    const envelope = redactSecrets({
       protocol: 'a2a',
       version: '0.1',
       from,
@@ -398,7 +556,10 @@ export class A2AEndpointRegistry {
             requiresVerifierEvidence: true,
           },
         },
+        ...(normalizedModelPreference ? { modelPreference: normalizedModelPreference } : {}),
       },
     });
+    if (normalizedModelPreference) envelope.message.modelPreference = normalizedModelPreference;
+    return envelope;
   }
 }

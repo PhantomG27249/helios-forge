@@ -18,6 +18,7 @@ import { createApprovalResumeStore, executeApprovedApplyAction } from './core/ap
 import { resumeTaskFromTrace } from './core/taskResume.js';
 import { listTraces, readTrace, replayTrace } from './core/traceReader.js';
 import { TraceWriter } from './core/traceWriter.js';
+import { runModelCouncilPassKEval, summarizePassKUplift } from './evals/modelCouncilPassK.js';
 import { proposeExperiment } from './experiments/experimentManager.js';
 import { compareMetrics } from './experiments/metricComparer.js';
 import { archiveChampion, createChampionArchive, selectBestChampion } from './bes/championArchive.js';
@@ -83,12 +84,14 @@ import { indexWorkspace } from './rag/workspaceIndexer.js';
 import { ModelGateway } from './model/modelGateway.js';
 import { getModelProfile } from './model/modelProfiles.js';
 import { createOpenAICompatibleProvider } from './model/openaiCompatibleProvider.js';
+import { createRoutingModelProvider } from './model/routingModelProvider.js';
 import { createVllmHealthController } from './model/vllmHealthController.js';
 import { buildPiBridgeState } from './pi/piBridgeState.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { getAgentProfile } from './swarm/agentProfiles.js';
 import { proposeChampionApply } from './swarm/championApply.js';
 import { chooseChampion } from './swarm/championSelector.js';
+import { buildModelCouncilRuntime } from './swarm/modelCouncil.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { runSwarmPolicyBesLane } from './swarm/evolutionSwarmPlanner.js';
 import { summarizeSwarmOutcome } from './swarm/swarmOutcomeRecorder.js';
@@ -596,15 +599,94 @@ export function createHarnessSidecar({
         });
       }
 
-      const provider = modelProviderFactory({
-        baseUrl,
-        apiKey: process.env.HELIOS_SWARM_MODEL_API_KEY || harnessConfig?.models?.swarmApiKey || 'dummy',
-      });
       const configuredModelOverride = {
         model: modelId,
         baseUrl,
         supportsVision,
       };
+      const modelCouncil = buildModelCouncilRuntime({
+        harnessConfig,
+        fallbackModel: {
+          profileName,
+          baseUrl,
+          modelId,
+          supportsVision,
+        },
+      });
+      const profileOverrides = {
+        [profileName]: configuredModelOverride,
+        [vlmProfileName]: configuredModelOverride,
+        ...(modelCouncil.profileOverrides || {}),
+      };
+      const councilRoutes = Object.fromEntries(
+        Object.values(modelCouncil.roleRoutes || {})
+          .filter((route) => route.modelProfile && route.endpoint?.baseUrl && route.endpoint?.modelId)
+          .flatMap((route) => {
+            const providerRoute = {
+              baseUrl: route.endpoint.baseUrl,
+              modelId: route.endpoint.modelId,
+              apiKeyEnv: profileOverrides[route.modelProfile]?.apiKeyEnv,
+            };
+            return [
+              [route.modelProfile, providerRoute],
+              route.endpointProfile ? [route.endpointProfile, providerRoute] : null,
+            ].filter(Boolean);
+          }),
+      );
+      const uniqueBaseUrls = new Set([
+        baseUrl,
+        ...Object.values(councilRoutes).map((route) => route.baseUrl),
+      ].filter(Boolean));
+
+      const defaultProvider = modelProviderFactory({
+        baseUrl,
+        modelId,
+        apiKey: process.env.HELIOS_SWARM_MODEL_API_KEY || harnessConfig?.models?.swarmApiKey || 'dummy',
+      });
+      const provider = uniqueBaseUrls.size > 1
+        ? createRoutingModelProvider({
+          routes: councilRoutes,
+          defaultProvider,
+          providerFactory: modelProviderFactory,
+        })
+        : defaultProvider;
+
+      await emitEvent({
+        type: 'model_council.enabled',
+        taskId: task.taskId,
+        enabled: modelCouncil.enabled,
+        authority: modelCouncil.authority,
+        roleCount: Object.keys(modelCouncil.roleRoutes || {}).length,
+        endpointProfileCount: Object.keys(modelCouncil.endpointProfiles || {}).length,
+      });
+      if (modelCouncil.enabled) {
+        const endpointBaseUrls = new Set(
+          Object.values(modelCouncil.roleRoutes || {})
+            .map((route) => route.endpoint?.baseUrl)
+            .filter(Boolean),
+        );
+        modelCouncil.health = {
+          maxConcurrency: maxSwarmConcurrencyForConfig(harnessConfig),
+          recommendedConcurrency: adaptiveConcurrency,
+          endpoints: Object.values(modelCouncil.roleRoutes || {})
+            .filter((route) => route.endpoint?.baseUrl)
+            .map((route) => ({
+              role: route.role,
+              endpointProfile: route.endpointProfile,
+              baseUrl: route.endpoint.baseUrl,
+              healthUrl: route.endpoint.baseUrl === baseUrl ? vllmHealth?.healthUrl : undefined,
+              healthy: route.endpoint.baseUrl === baseUrl ? vllmHealth?.healthy : undefined,
+              recommendedConcurrency: route.endpoint.baseUrl === baseUrl ? adaptiveConcurrency : undefined,
+            })),
+        };
+        await emitEvent({
+          type: 'model_council.health_updated',
+          taskId: task.taskId,
+          endpointCount: endpointBaseUrls.size,
+          healthyEndpointCount: vllmHealth?.healthy && endpointBaseUrls.has(baseUrl) ? 1 : 0,
+          recommendedConcurrency: adaptiveConcurrency,
+        });
+      }
 
       return {
         profileName,
@@ -615,13 +697,11 @@ export function createHarnessSidecar({
         adaptiveConcurrency,
         maxConcurrency: maxSwarmConcurrencyForConfig(harnessConfig),
         vllmHealth,
+        modelCouncil,
         gateway: new ModelGateway({
           provider,
           emitEvent,
-          profileOverrides: {
-            [profileName]: configuredModelOverride,
-            [vlmProfileName]: configuredModelOverride,
-          },
+          profileOverrides,
         }),
       };
     }
@@ -766,6 +846,7 @@ export function createHarnessSidecar({
       mode: task.mode,
       enabledSubsystems,
       modelDrivenSwarm: Boolean(runtimeSwarmModel),
+      multiModelSwarm: runtimeSwarmModel?.modelCouncil?.enabled === true,
       piNativeSwarm: piNativeSwarmEnabled,
       swarmWorkerMode: resolvedSwarmWorkerMode,
       configuredSwarmWorkerMode: swarmWorkerMode,
@@ -794,7 +875,16 @@ export function createHarnessSidecar({
       return laneResult;
     }
 
-    const strategies = seedAttemptStrategies({ taskType: 'coding_bugfix', maxAttempts: 4 });
+    const strategyProfileHints = {
+      test_first: 'test-specialist',
+      reviewer_first: 'risk-auditor',
+      retrieval_first: 'researcher',
+    };
+    const strategies = seedAttemptStrategies({ taskType: 'coding_bugfix', maxAttempts: 4 })
+      .map((strategy) => ({
+        ...strategy,
+        profileId: strategyProfileHints[strategy.name],
+      }));
     await emitEvent({
       type: 'bes.strategies_seeded',
       taskId: task.taskId,
@@ -1845,6 +1935,7 @@ export function createHarnessSidecar({
           return strategies.map((strategy, index) => ({
             action: {
               strategy: strategy.name,
+              profileId: strategy.profileId,
               budgetWeight: strategy.budgetWeight,
               rankHint: index + 1,
             },
@@ -1876,7 +1967,15 @@ export function createHarnessSidecar({
         workerMode: resolvedSwarmWorkerMode,
         concurrency: selectedSwarmConcurrency,
       },
-      piBridgeContext: piModelConcurrency ? { modelConcurrency: piModelConcurrency } : undefined,
+      piBridgeContext: (piModelConcurrency || runtimeSwarmModel?.modelCouncil?.bridgeHints)
+        ? {
+          ...(piModelConcurrency ? { modelConcurrency: piModelConcurrency } : {}),
+          ...(runtimeSwarmModel?.modelCouncil?.bridgeHints
+            ? { modelCouncil: runtimeSwarmModel.modelCouncil.bridgeHints }
+            : {}),
+        }
+        : undefined,
+      modelCouncil: runtimeSwarmModel?.modelCouncil,
       featureFlags: {
         localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,
         localMemoryGraph: harnessConfig?.features?.localMemoryGraph !== false,
@@ -2766,6 +2865,37 @@ export function createHarnessSidecar({
     });
   }
 
+  async function prepareModelCouncilPassKEval(body = {}) {
+    const report = await runModelCouncilPassKEval({
+      cases: Array.isArray(body.cases) ? body.cases : undefined,
+      k: body.k,
+      minCases: body.minCases,
+      upliftThreshold: body.upliftThreshold,
+    });
+    const summary = summarizePassKUplift(report);
+    await emitEvent({
+      type: 'model_council.passk_eval_completed',
+      taskId: body.taskId || body.context?.taskId || null,
+      command: body.command || 'harness_model_council_passk_eval_prepare',
+      evalId: summary.evalId,
+      caseCount: summary.caseCount,
+      k: summary.k,
+      bestSinglePassAtK: summary.bestSinglePassAtK,
+      repeatedSamplingPassAtK: summary.repeatedSamplingPassAtK,
+      staticCouncilPassAtK: summary.staticCouncilPassAtK,
+      adaptiveCouncilPassAtK: summary.adaptiveCouncilPassAtK,
+      uplift: summary.uplift,
+      proven: summary.proven,
+      authority: 'evidence_only',
+      canPromote: false,
+    });
+    return {
+      type: 'harness_model_council_passk_eval',
+      command: 'harness_model_council_passk_eval_prepare',
+      data: report,
+    };
+  }
+
   async function listSkillCandidateSummaries() {
     const candidates = await listSkillCandidates({ workspaceRoot: resolvedWorkspaceRoot });
     return {
@@ -2899,6 +3029,20 @@ export function createHarnessSidecar({
         try {
           const body = await readJsonBody(req);
           const result = await prepareAdaptiveSearchReplay(body);
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/v1/model-council/passk-eval/prepare') {
+        try {
+          const body = await readJsonBody(req);
+          const result = await prepareModelCouncilPassKEval({
+            ...body,
+            command: body.command || 'harness_model_council_passk_eval_prepare',
+          });
           sendJson(res, 200, result);
         } catch (error) {
           sendBadRequest(res, error);

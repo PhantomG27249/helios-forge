@@ -32,9 +32,18 @@ export class ModelGateway {
 
   async call({ taskId, purpose, profileName, messages, structuredOutput = false, visionInputs = [], tools = [] }) {
     const callId = makeModelCallId();
+    const override = this.profileOverrides[profileName] || {};
+    let baseProfile = {};
+    try {
+      baseProfile = getModelProfile(profileName);
+    } catch (error) {
+      if (!override || Object.keys(override).length === 0) throw error;
+      baseProfile = { name: profileName, supportsVision: false, supportsTools: true };
+    }
     const profile = {
-      ...getModelProfile(profileName),
-      ...(this.profileOverrides[profileName] || {}),
+      ...baseProfile,
+      ...override,
+      name: override.name || baseProfile.name || profileName,
     };
     if (visionInputs.length > 0 && !profile.supportsVision) {
       throw new Error(`Model profile does not support vision inputs: ${profileName}`);

@@ -187,6 +187,12 @@ export function getHarnessVariantRoot(workspaceRoot) {
   return assertInsideRoot(resolvedWorkspaceRoot, variantRoot);
 }
 
+export function assertHarnessVariantDirectory({ workspaceRoot, variantRoot } = {}) {
+  const resolvedWorkspaceRoot = assertWorkspaceRoot(workspaceRoot);
+  if (!variantRoot) throw new Error('variantRoot is required');
+  return assertInsideRoot(getHarnessVariantRoot(resolvedWorkspaceRoot), path.resolve(variantRoot));
+}
+
 export async function createHarnessVariantWorkspace({
   workspaceRoot,
   cycleId,
@@ -269,6 +275,7 @@ export async function createHarnessVariantWorkspace({
       config: { path: 'config.json' },
       trace: { path: 'trace-manifest.json', files: traceFiles },
       metrics: { path: 'metric-manifest.json', files: metricFiles },
+      replay: { files: [] },
     },
   };
   await writeJsonArtifact(files.manifest, manifest);

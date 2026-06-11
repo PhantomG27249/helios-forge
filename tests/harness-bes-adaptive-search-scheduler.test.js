@@ -28,6 +28,36 @@ test('first adaptive search selection prefers going wider when no evidence exist
   assert.equal(action.trace.scores.find((score) => score.arm === 'go_wider').reason.includes('no_evidence'), true);
 });
 
+test('adaptive search can attach evidence-only model-choice metadata', () => {
+  const scheduler = createAdaptiveSearchScheduler({
+    rng: () => 0.2,
+    modelArms: [
+      { armId: 'fast', role: 'implementer', modelProfile: 'fast_model', endpointProfile: 'local_fast' },
+      { armId: 'critic', role: 'reviewer', modelProfile: 'critic_low_temp', endpointProfile: 'local_critic' },
+    ],
+  });
+
+  const action = selectAdaptiveSearchAction({
+    scheduler,
+    context: {
+      taskId: 'task-model-choice-scheduler',
+      taskType: 'code',
+      allowModelChoice: true,
+      evidence: [],
+      budget: { pressure: 0.1 },
+    },
+  });
+
+  assert.equal(action.arm, 'go_wider');
+  assert.equal(action.modelChoice.actionId, 'model_choice_1');
+  assert.equal(action.modelChoice.armId, 'fast');
+  assert.equal(action.modelChoice.modelProfile, 'fast_model');
+  assert.equal(action.modelChoice.endpointProfile, 'local_fast');
+  assert.equal(action.modelChoice.authority, 'evidence_only');
+  assert.equal(action.modelChoice.canPromote, false);
+  assert.deepEqual(action.trace.modelChoice, action.modelChoice);
+});
+
 test('strong reward shifts the next adaptive search selection toward going deeper', () => {
   const scheduler = createAdaptiveSearchScheduler({ rng: () => 0.1 });
   const first = selectAdaptiveSearchAction({

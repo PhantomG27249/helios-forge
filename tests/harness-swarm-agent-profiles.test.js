@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  applyAgentProfileModelOverrides,
   getAgentProfile,
   loadDefaultAgentProfiles,
   selectAgentProfileForAttempt,
@@ -48,6 +49,32 @@ test('risk auditor cannot mutate the workspace', () => {
   assert.equal(profile.workspace.mutationAllowed, false);
   assert.equal(profile.worktree.required, false);
   assert.equal(profile.toolCaps.denied.includes('git.apply'), true);
+});
+
+test('model profile overrides cannot widen agent safety caps', () => {
+  const profiles = applyAgentProfileModelOverrides({
+    roleRoutes: {
+      implementer: {
+        modelProfile: 'alphahelion_ebft5',
+        toolCaps: { denied: [] },
+        workspace: { mutationAllowed: true },
+      },
+      'risk-auditor': {
+        modelProfile: 'critic_low_temp',
+        workspace: { mutationAllowed: true },
+        toolCaps: { denied: [] },
+      },
+      'visual-specialist': {
+        modelProfile: 'qwen36_vlm_fast',
+        vlm: { allowed: false },
+      },
+    },
+  });
+
+  assert.equal(profiles.implementer.modelProfile, 'alphahelion_ebft5');
+  assert.equal(profiles['risk-auditor'].workspace.mutationAllowed, false);
+  assert.equal(profiles['risk-auditor'].toolCaps.denied.includes('git.apply'), true);
+  assert.equal(profiles['visual-specialist'].vlm.allowed, true);
 });
 
 test('profile output contract feeds prompt builder', () => {

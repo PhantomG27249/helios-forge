@@ -520,6 +520,19 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'harness_abmcts_replay', data: result }));
         break;
       }
+      case 'harness_model_council_passk_eval_prepare': {
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const result = await harness.client.prepareModelCouncilPassKEval({
+          taskId: msg.taskId,
+          context: msg.context,
+          cases: msg.cases,
+          k: msg.k,
+          minCases: msg.minCases,
+          upliftThreshold: msg.upliftThreshold,
+        });
+        ws.send(JSON.stringify(result));
+        break;
+      }
       case 'harness_skill_candidates_get': {
         await ensureHarnessRunning(harness, pi, feedback);
         const result = await harness.client.listSkillCandidates({

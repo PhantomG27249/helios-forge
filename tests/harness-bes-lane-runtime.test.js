@@ -167,6 +167,50 @@ test('normalizes lane evidence sources and required evidence summary', () => {
   assert.equal(evidence.hasRequiredEvidence, true);
 });
 
+test('preserves sanitized model-router evidence in BES lane envelopes', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'code',
+    taskId: 'task-model-router-evidence',
+    candidates: [
+      {
+        candidateId: 'candidate_model_router',
+        status: 'shadow_only',
+        modelRouter: {
+          authority: 'evidence_only',
+          canPromote: true,
+          decisionIds: ['model_choice_1'],
+          rewardUpdateIds: ['reward_1'],
+          posterior: {
+            key: 'reviewer:code:model_choice',
+            arms: {
+              critic: { alpha: 6, beta: 2, observations: 7 },
+            },
+          },
+          passKEvalRefs: ['passk_eval_1'],
+          prompt: 'must-not-cross',
+          rawOutput: 'never-return-this',
+          headers: { Authorization: 'Bearer raw-secret-value' },
+          credentials: { apiKey: 'raw-secret-value' },
+        },
+      },
+    ],
+    evaluator: () => ({ score: 0.81, reasons: ['router evidence reviewed'] }),
+  });
+
+  const candidate = result.candidates[0];
+  assert.equal(candidate.evidence.sources.includes('model_router'), true);
+  assert.equal(candidate.modelRouter.authority, 'evidence_only');
+  assert.equal(candidate.modelRouter.canPromote, false);
+  assert.deepEqual(candidate.modelRouter.decisionIds, ['model_choice_1']);
+  assert.equal(candidate.modelRouter.posterior.arms.critic.observations, 7);
+
+  const serialized = JSON.stringify(candidate.modelRouter);
+  assert.equal(serialized.includes('must-not-cross'), false);
+  assert.equal(serialized.includes('never-return-this'), false);
+  assert.equal(serialized.includes('raw-secret-value'), false);
+  assert.equal(serialized.includes('Authorization'), false);
+});
+
 test('visual lane evidence is first-class and carries artifact-backed memory nodes', async () => {
   const visualEvidence = {
     nodes: [

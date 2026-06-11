@@ -111,6 +111,34 @@ export function loadDefaultAgentProfiles() {
   });
 }
 
+export function applyAgentProfileModelOverrides({
+  profiles = loadDefaultAgentProfiles(),
+  roleRoutes = {},
+} = {}) {
+  const sourceProfiles = profiles && typeof profiles === 'object'
+    ? profiles
+    : loadDefaultAgentProfiles();
+  const routes = roleRoutes && typeof roleRoutes === 'object'
+    ? roleRoutes
+    : {};
+
+  return Object.freeze(Object.fromEntries(
+    Object.entries(sourceProfiles).map(([profileId, profileRecord]) => {
+      const modelProfile = typeof routes?.[profileId]?.modelProfile === 'string'
+        ? routes[profileId].modelProfile.trim()
+        : '';
+      if (!modelProfile) return [profileId, profileRecord];
+      return [
+        profileId,
+        Object.freeze({
+          ...profileRecord,
+          modelProfile,
+        }),
+      ];
+    }),
+  ));
+}
+
 export function getAgentProfile({ profiles = loadDefaultAgentProfiles(), profileId } = {}) {
   const profileRecord = profiles?.[profileId] || loadDefaultAgentProfiles()[profileId];
   if (!profileRecord) {

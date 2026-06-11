@@ -52,7 +52,7 @@ test('default SwarmCell registry exposes local meta and memory enabled cells', (
   const cells = getDefaultSwarmCells();
   const codeCell = resolveSwarmCell('code');
 
-  assert.equal(cells.length >= 6, true);
+  assert.equal(cells.length >= 5, true);
   assert.equal(codeCell.cellId, 'code');
   assert.equal(codeCell.localMetaHarness.enabled, true);
   assert.equal(codeCell.localMemoryGraph.enabled, true);

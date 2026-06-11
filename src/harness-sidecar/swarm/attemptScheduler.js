@@ -7,11 +7,20 @@ function isToolTreePlannerEnabled(planner = {}) {
   return planner?.enabled === true && planner.strategy === 'tooltree';
 }
 
+function profileHintForStrategy(strategyName) {
+  return {
+    test_first: 'test-specialist',
+    reviewer_first: 'risk-auditor',
+    retrieval_first: 'researcher',
+  }[strategyName];
+}
+
 function fallbackAttempts({ taskId, taskType, maxAttempts }) {
   return seedAttemptStrategies({ taskType, maxAttempts }).map((strategy, index) => ({
     attemptId: `attempt_${index + 1}`,
     taskId,
     strategy: strategy.name,
+    profileId: strategy.profileId || profileHintForStrategy(strategy.name),
     budgetWeight: strategy.budgetWeight,
     status: 'pending',
     verifierPassed: false,
@@ -38,6 +47,8 @@ function scheduledToolTreeAttempts({ taskId, taskType, maxAttempts, planner }) {
     attemptId: `attempt_${index + 1}`,
     taskId,
     strategy: strategyForPlan(plan, index),
+    profileId: plan.action?.profileId,
+    specialization: plan.action?.specialization,
     budgetWeight: Math.max(0.1, 1 - (index * 0.1)),
     status: 'pending',
     verifierPassed: false,
@@ -88,6 +99,11 @@ function buildAdaptiveSearchContext({ config, taskId, taskType, maxAttempts }) {
     taskId,
     taskType,
     maxAttempts,
+    allowModelChoice: config.allowModelChoice === true,
+    modelChoiceMode: config.modelChoiceMode || 'thompson_mcts',
+    modelArms: config.modelArms || config.routerArms || config.context?.modelArms || [],
+    routerPolicy: config.routerPolicy || config.context?.routerPolicy,
+    priorEvidence: config.priorEvidence || config.context?.priorEvidence,
     ...(config.context || {}),
     budget: {
       remainingActions: maxAttempts,
@@ -103,6 +119,7 @@ function annotateAdaptiveSearchAttempts({ attempts, action }) {
     adaptiveSearch: {
       actionId: action.actionId,
       arm: action.arm,
+      ...(action.modelChoice ? { modelChoice: action.modelChoice } : {}),
       advisory: action.advisory,
     },
     planning: {

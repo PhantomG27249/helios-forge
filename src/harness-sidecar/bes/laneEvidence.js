@@ -69,6 +69,52 @@ function externalPolicyEvidenceId(evidence) {
   return evidence.policyDecisionId ?? evidence.decisionId ?? evidence.id ?? evidence.reviewId ?? null;
 }
 
+function stringList(values = []) {
+  return uniqueSorted(asArray(values).map((value) => {
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+    return null;
+  }));
+}
+
+function sanitizePosteriorArm(arm = {}) {
+  return {
+    alpha: Number.isFinite(Number(arm.alpha)) ? Number(arm.alpha) : undefined,
+    beta: Number.isFinite(Number(arm.beta)) ? Number(arm.beta) : undefined,
+    observations: Number.isFinite(Number(arm.observations)) ? Number(arm.observations) : undefined,
+  };
+}
+
+function sanitizePosterior(posterior = {}) {
+  if (!posterior || typeof posterior !== 'object') return null;
+  const arms = posterior.arms && typeof posterior.arms === 'object'
+    ? Object.fromEntries(Object.entries(posterior.arms).map(([armId, arm]) => [
+      String(armId),
+      sanitizePosteriorArm(arm),
+    ]))
+    : undefined;
+  return {
+    ...(posterior.key ? { key: String(posterior.key) } : {}),
+    ...(arms && Object.keys(arms).length > 0 ? { arms } : {}),
+  };
+}
+
+export function sanitizeModelRouterEvidence(modelRouter) {
+  if (!modelRouter || typeof modelRouter !== 'object') return null;
+  const posterior = sanitizePosterior(modelRouter.posterior ?? modelRouter.posteriorSummary);
+  const sanitized = {
+    authority: 'evidence_only',
+    canPromote: false,
+    decisionIds: stringList(modelRouter.decisionIds ?? modelRouter.decisionId),
+    rewardUpdateIds: stringList(modelRouter.rewardUpdateIds ?? modelRouter.rewardUpdateId),
+    passKEvalRefs: stringList(modelRouter.passKEvalRefs ?? modelRouter.passKEvalRef),
+    ...(posterior ? { posterior } : {}),
+  };
+  if (modelRouter.selectedArmId || modelRouter.armId) sanitized.selectedArmId = String(modelRouter.selectedArmId ?? modelRouter.armId);
+  if (modelRouter.modelProfile) sanitized.modelProfile = String(modelRouter.modelProfile);
+  if (modelRouter.endpointProfile) sanitized.endpointProfile = String(modelRouter.endpointProfile);
+  return sanitized;
+}
+
 export function normalizeLaneEvidence({
   domain,
   rho,
@@ -83,6 +129,7 @@ export function normalizeLaneEvidence({
   a2a,
   memoryGraph,
   externalPolicyEvidence,
+  modelRouter,
   soulRefs,
   evolutionLevelRefs,
   extraSources = [],
@@ -104,8 +151,10 @@ export function normalizeLaneEvidence({
   if (isPresent(a2a)) sources.add('a2a_lineage');
   if (isPresent(memoryGraph)) sources.add('memory_graph');
   if (isPresent(externalPolicyEvidence)) sources.add('external_policy_evidence');
+  if (isPresent(modelRouter)) sources.add('model_router');
   if (normalizedSoulRefs.length > 0) sources.add('soul_refs');
   if (normalizedEvolutionLevelRefs.length > 0) sources.add('evolution_level_refs');
+  const sanitizedModelRouter = sanitizeModelRouterEvidence(modelRouter);
 
   const normalizedSources = [...sources].sort((left, right) => left.localeCompare(right));
   const evidenceOnlySources = new Set(['evolution_level_refs', 'soul_refs']);
@@ -125,6 +174,9 @@ export function normalizeLaneEvidence({
       championArchiveIds: uniqueSorted(championRecords(championArchive).map(objectId)),
       frontierRecordIds: uniqueSorted(frontierRecords(frontier).map(recordId)),
       externalPolicyEvidenceId: externalPolicyEvidenceId(externalPolicyEvidence),
+      modelRouterDecisionIds: sanitizedModelRouter?.decisionIds || [],
+      modelRouterRewardUpdateIds: sanitizedModelRouter?.rewardUpdateIds || [],
+      modelRouterPassKEvalRefs: sanitizedModelRouter?.passKEvalRefs || [],
       soulRefCount: normalizedSoulRefs.length,
       evolutionLevelRefCount: normalizedEvolutionLevelRefs.length,
     },

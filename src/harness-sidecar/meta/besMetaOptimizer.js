@@ -13,6 +13,7 @@ import {
 import { scoreSubgoals } from '../bes/subgoalScorer.js';
 import { seedAttemptStrategies } from '../bes/strategySeeder.js';
 import { createVerifierGenome, mutateVerifierGenome, validateVerifierGenome } from './verifierGenome.js';
+import { proposeModelRoutingPolicies } from './modelRoutingPolicyEvolution.js';
 
 const DEFAULT_TARGETS = new Set([
   'prompt_policy',
@@ -20,6 +21,7 @@ const DEFAULT_TARGETS = new Set([
   'tool_policy',
   'runtime_policy',
   'verifier_policy',
+  'model_routing_policy',
 ]);
 
 const VERIFIER_MUTATION_POLICIES = Object.freeze([
@@ -134,6 +136,18 @@ function buildSubgoals({ target, failureModes, coreset }) {
     description: `Address ${failureMode}`,
     failureMode,
   }));
+  const routerFailureModes = failureModes
+    .filter((failureMode) => String(failureMode).startsWith('model_router_'))
+    .sort();
+
+  if (routerFailureModes.length > 0) {
+    subgoals.push({
+      id: 'improve_model_router',
+      description: 'Improve model selection for router hard cases',
+      failureModes: routerFailureModes,
+      target: 'model_routing_policy',
+    });
+  }
 
   subgoals.push({
     id: `tune_${safeIdPart(target)}`,
@@ -450,6 +464,33 @@ export class BesMetaOptimizer {
           verifierGenomes,
           mutationTypes: verifierGenomes.map((genome) => genome.mutation.type),
         },
+        },
+      });
+    }
+
+    if (normalizedTarget === 'model_routing_policy') {
+      const subgoals = buildSubgoals({ target: normalizedTarget, failureModes, coreset });
+      const candidates = proposeModelRoutingPolicies({
+        coreset,
+        baselinePolicy: {},
+        maxCandidates: this.maxCandidates,
+      }).map((candidate) => ({
+        ...candidate,
+        candidateRun,
+      }));
+
+      return withAdaptiveSearchResult({
+        adaptiveSearch,
+        action: adaptiveAction,
+        result: {
+          candidates,
+          coreset,
+          bes: {
+            subgoals,
+            routerFailureModes: failureModes
+              .filter((failureMode) => String(failureMode).startsWith('model_router_'))
+              .sort(),
+          },
         },
       });
     }
