@@ -62,6 +62,68 @@ export const DEFAULT_HARNESS_CONFIG = {
     maxActionsPerTask: 8,
     allowProfileSwitching: true,
   },
+  productionCapabilities: {
+    modelAssistedMemory: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    modelBackedRhoEmbeddings: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    productionA2aTransport: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    productionA2aQueues: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    visualSwarmCell: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    visualReplaySuites: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    modelAssistedBesJudgment: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    councilDebate: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    ensembleCalibration: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    endpointCapacityRecommendations: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    operatorDashboards: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    productionAutonomyPolicy: {
+      enabled: false,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+  },
 };
 
 function parseScalar(value) {
