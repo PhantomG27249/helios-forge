@@ -192,6 +192,17 @@ test('session sidebar uses safe data attributes for Pi session ids', async () =>
   assert.doesNotMatch(renderPiSessions, /id: 'pi_' \+ s\.path/);
 });
 
+test('chat rendering does not keep blank assistant messages for empty or failed responses', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+  const css = await readFile('public/app.css', 'utf8');
+
+  assert.match(appJs, /function assistantMessageHasRenderableContent\(msg\)/);
+  assert.match(appJs, /function renderAssistantError\(contentEl, msg\)/);
+  assert.match(appJs, /lastAssistant\.remove\(\)/);
+  assert.match(appJs, /activeStream\.el\.remove\(\)/);
+  assert.match(css, /\.msg-error\s*\{/);
+});
+
 test('capabilities UI exposes package templates and slash commands', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');

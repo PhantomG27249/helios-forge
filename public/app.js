@@ -2860,6 +2860,13 @@ function handleMessageUpdate(msg) {
 
 function finalizeStream() {
   if (!activeStream) return;
+  if (!activeStream.text && !savedThinkingBlocks.length && activeStream.el) {
+    activeStream.el.remove();
+    activeStream = null;
+    savedThinkingBlocks = [];
+    scroll();
+    return;
+  }
   activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + (activeStream.text ? renderMD(activeStream.text) : '');
   renderMath(activeStream.contentEl);
   highlightCode();
@@ -2871,6 +2878,17 @@ function finalizeStream() {
 // ═══════════════════════════════════════════════════════════
 // History Rendering
 // ═══════════════════════════════════════════════════════════
+function assistantMessageHasRenderableContent(msg) {
+  return Array.isArray(msg.content) && msg.content.some(c =>
+    ['text', 'thinking', 'toolCall'].includes(c?.type) && String(c.text || c.thinking || c.name || '').trim()
+  );
+}
+
+function renderAssistantError(contentEl, msg) {
+  const reason = String(msg.errorMessage || msg.error || msg.stopReason || 'Assistant response failed.').trim();
+  contentEl.innerHTML = `<div class="msg-error">${esc(reason)}</div>`;
+}
+
 function renderHistory(messages) {
   let lastAssistant = null;
 
@@ -2887,6 +2905,15 @@ function renderHistory(messages) {
     } else if (msg.role === 'assistant') {
       lastAssistant = createAssistantMsg();
       const contentEl = lastAssistant.querySelector('.msg-content');
+      if (!assistantMessageHasRenderableContent(msg)) {
+        if (msg.errorMessage || msg.error || msg.stopReason === 'error') {
+          renderAssistantError(contentEl, msg);
+        } else {
+          lastAssistant.remove();
+          lastAssistant = null;
+        }
+        return;
+      }
       
       // Render thinking blocks
       const thinkingBlocks = (msg.content || []).filter(c => c.type === 'thinking');

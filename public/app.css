@@ -557,6 +557,14 @@ body {
 .msg-content p:last-child { margin-bottom: 0; }
 .msg-content strong { font-weight: 600; color: var(--text-primary); }
 
+.msg-error {
+  color: var(--error);
+  background: rgba(212, 106, 106, 0.08);
+  border: 1px solid rgba(212, 106, 106, 0.22);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
 .msg-content code {
   background: var(--code-bg);
   padding: 2px 6px;
