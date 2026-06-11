@@ -16,7 +16,7 @@ Current state after the latest implementation pass:
 
 - **Architecture maturity:** high. The docs now describe the right shape: swarm of swarms, harnesses of harnesses, Memory Graph RAG, A2A lineage, RHO/BES/adaptive search, trust kernel.
 - **Primitive maturity:** high for a deterministic local harness. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, durable local A2A queues, governance loops, capability-goal status, and trust gates.
-- **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, benchmark/frontier history, executable variant workspaces, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, capability-goal rows, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
+- **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, benchmark/frontier history, executable variant workspaces, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, capability-goal rows, role-specialized model routing, learned adaptive model-router state, AB-MCTS model-choice actions, model diversity telemetry, evidence-only council aggregation, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
 - **Recursive soul evolution levels:** implemented as an evidence-only lineage spine across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness. This is metadata/status plumbing only; nested execution remains future work.
 
 Approximate level:
@@ -35,6 +35,8 @@ These pieces already exist in the current codebase and should be reused rather t
 | Area | Current anchors | Status |
 | --- | --- | --- |
 | Swarm and SwarmCell loop | `src/harness-sidecar/swarm/swarmCellContracts.js`, `swarmCellRuntime.js`, `swarmOrchestrator.js`, `evolutionSwarmPlanner.js`, `evolutionBudgetAllocator.js` | Implemented deterministic proposal loop |
+| Multi-model swarm council | `src/harness-sidecar/swarm/modelCouncil.js`, `src/harness-sidecar/model/modelEndpointProfiles.js`, `src/harness-sidecar/swarm/swarmOrchestrator.js`, `src/harness-sidecar/server.js` | Implemented gated role-specialized model routing, model diversity telemetry, and evidence-only agreement/disagreement aggregation; cannot self-promote changes |
+| Adaptive model router uplift | `src/harness-sidecar/model/modelRouterState.js`, `modelRouterPolicy.js`, `modelRouterRewards.js`, `src/harness-sidecar/bes/modelChoiceMcts.js`, `src/harness-sidecar/rho/modelRouterHardCases.js`, `src/harness-sidecar/meta/modelRoutingPolicyEvolution.js`, `src/harness-sidecar/evals/modelCouncilPassK.js` | Implemented disabled-by-default Thompson-sampling posterior state, bounded reward attribution, AB-MCTS model-choice node expansion, RHO router hard-case selection, meta-harness model-routing policy candidates, A2A model-capability negotiation, and deterministic pass@k eval reporting; evidence-only and cannot self-promote |
 | Local meta-harness | `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, `localCandidateArchive.js`, `localPromotionBlocker.js` | Implemented local evidence/proposal loop |
 | Global harness experiments | `src/harness-sidecar/meta/harnessRunStore.js`, `harnessExperimentRunner.js`, `harnessVariantWorkspace.js`, `harnessFrontier.js`, `longitudinalFrontier.js`, `promotionLoop.js`, `promotionPolicy.js` | Implemented run records, executable isolated variant workspaces, source/config/trace/metric artifacts, proposer context, replay evidence, and longitudinal frontier comparison |
 | Memory Graph RAG | `src/harness-sidecar/memory/*`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` | Strong deterministic skeleton with guarded eight-role extraction/adjudication outputs, role audit, merge/graph/retrieval/eval plans, migrations, decay/consolidation, and eval metrics |
@@ -148,7 +150,17 @@ Current BES primitives are strong and now include adaptive budget allocation, fu
 - deeper runtime use of adaptive search decisions after selecting explore/refine/replay/stop/evidence actions;
 - learned or model-assisted subgoal/verifier judgment where deterministic tests are too weak.
 
-### 5. Multimodal And VLM As First-Class System Senses
+### 5. Multi-Model Council Intelligence
+
+Current swarm execution can route roles to configured model profiles/endpoints, preserve model diversity telemetry, emit evidence-only council reports, sample learned router arms with Thompson-style posterior state, record bounded verifier/reviewer/cost/latency/safety rewards, expand AB-MCTS over model choice, mine router-specific RHO hard cases, propose shadow model-routing policy candidates, negotiate A2A model capabilities, and run deterministic pass@k reports over best-single, repeated, static-council, and adaptive-council variants. The council and router remain advisory and cannot self-promote changes. Remaining work:
+
+- model-judged debate that produces bounded critique evidence without granting debate winners apply authority;
+- production-sized pass@k uplift on real held-out tasks;
+- benchmark-calibrated ensemble weights over large stable suites instead of deterministic local fixtures;
+- persistent production dashboards for router posterior/reward/frontier health;
+- automatic model procurement/scaling for capacity, endpoint health, and specialist availability under operator policy.
+
+### 6. Multimodal And VLM As First-Class System Senses
 
 This is now a first-class signal in the local organism, with production-scale expansion still ahead.
 
@@ -169,7 +181,7 @@ Success criterion:
 Visual evidence is retrieved, replayed, evolved, and trusted through the same lane envelope as text/code/tool evidence.
 ```
 
-### 6. Durable A2A Network Behavior
+### 7. Durable A2A Network Behavior
 
 Current A2A is now a durable local interop substrate, not only scaffolding. Implemented locally:
 
@@ -187,7 +199,7 @@ Remaining work:
 - independent subagent-to-subagent negotiation;
 - A2A lineage surviving real multi-hop agent -> SwarmCell -> swarm -> local harness -> global harness network flows.
 
-### 7. Benchmarked Long-Running Improvement
+### 8. Benchmarked Long-Running Improvement
 
 An organism-like system needs continuity. Remaining work:
 
@@ -199,7 +211,7 @@ An organism-like system needs continuity. Remaining work:
 - budget-aware improvement accounting;
 - dashboards for memory health, visual health, trust health, swarm health, RHO health, and frontier drift.
 
-### 8. Governance And Autonomy Tuning
+### 9. Governance And Autonomy Tuning
 
 The trust kernel should stay non-self-modifying. Remaining work:
 
@@ -221,6 +233,8 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 - [x] Memory Graph RAG context is available to every lane.
 - [x] Multimodal evidence is represented in memory, replay, A2A-compatible envelopes, and trust gates.
 - [x] A2A envelopes preserve lineage and trust metadata across nested swarms.
+- [x] Multi-model swarm council routes specialist roles, records model diversity, and aggregates evidence-only agreement/disagreement without self-promotion authority.
+- [x] Adaptive model router records Thompson-sampling posterior state, model-choice AB-MCTS evidence, RHO/meta router hard cases, A2A model negotiation, and pass@k uplift reports without promotion authority.
 - [x] Harness policies/configs are candidates in a harness-of-harnesses loop.
 - [x] Adaptive search can allocate budget across text, tool, swarm, visual, replay, and verifier actions.
 - [x] Global frontier records represent longitudinal quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
@@ -238,7 +252,7 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 4. Scale RHO replay across held-out multimodal and text/code/tool tasks. **Candidate-family deterministic pass landed; production suites remain.**
 5. Add concrete harness-of-harnesses candidate schemas. **Run lineage artifacts, isolated variant workspaces, source/config/trace/metric artifacts, and proposer context landed; autonomous full source-tree search remains.**
 6. Add durable A2A lineage/reference metadata before full peer transport. **Local durability, endpoint registry, negotiation envelopes, root-constrained durable store, stable secret/store adapters, and visual hashes landed; network transport remains.**
-7. Build long-running benchmark/frontier loops. **Governance/job primitives, longitudinal frontier representation, capability-goal rows, and strict promotion evidence landed; production dashboards and repeated held-out cycles remain.**
+7. Build long-running benchmark/frontier loops. **Governance/job primitives, longitudinal frontier representation, capability-goal rows, adaptive model-router pass@k evals, and strict promotion evidence landed; production dashboards and repeated held-out cycles remain.**
 8. Tune autonomy levels and governance. **First pass landed; production policy tables remain.**
 
 ## North Star

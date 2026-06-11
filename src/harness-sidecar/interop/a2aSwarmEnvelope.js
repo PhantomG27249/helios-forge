@@ -9,6 +9,28 @@ function safeObject(value = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function compactObject(value = {}) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined && item !== ''),
+  );
+}
+
+export function normalizeA2AModelRoute(modelRoute = {}) {
+  const route = safeObject(modelRoute);
+  if (Object.keys(route).length === 0) return null;
+  return redactSecrets(compactObject({
+    source: route.source ? String(route.source).trim() : 'a2a_negotiation',
+    peerId: route.peerId ? String(route.peerId).trim() : undefined,
+    role: route.role ? String(route.role).trim() : undefined,
+    modelProfile: route.modelProfile ? String(route.modelProfile).trim() : undefined,
+    endpointProfile: route.endpointProfile ? String(route.endpointProfile).trim() : undefined,
+    external: true,
+    verified: false,
+    authority: 'evidence_only',
+    canPromote: false,
+  }));
+}
+
 function scopedContext(context = {}) {
   const allowedKeys = [
     'allowedFiles',
@@ -26,6 +48,7 @@ function scopedContext(context = {}) {
     'lineage',
     'trust',
     'requiredVerification',
+    'a2a',
   ];
   const scoped = {};
   for (const key of allowedKeys) {
@@ -33,6 +56,10 @@ function scopedContext(context = {}) {
   }
   scoped.allowedFiles = normalizedList(scoped.allowedFiles || scoped.assignedFiles);
   if (scoped.assignedFiles) scoped.assignedFiles = normalizedList(scoped.assignedFiles);
+  if (scoped.a2a) {
+    const modelRoute = normalizeA2AModelRoute(safeObject(scoped.a2a).modelRoute);
+    scoped.a2a = modelRoute ? { modelRoute } : {};
+  }
   return redactSecrets(scoped);
 }
 
@@ -81,6 +108,7 @@ export function buildSwarmA2AEnvelope({
   to,
   durable,
   lineage = [],
+  modelRoute,
 } = {}) {
   const safeTask = safeObject(task);
   const safeAttempt = safeObject(attempt);
@@ -90,6 +118,7 @@ export function buildSwarmA2AEnvelope({
   const taskId = safeTask.taskId || safeTask.id || 'task_swarm';
   const attemptId = safeAttempt.attemptId || safeAttempt.id || 'attempt_1';
   const durableContext = durableEnvelopeContext({ durable, lineage });
+  const normalizedModelRoute = normalizeA2AModelRoute(modelRoute || safeAttempt.modelRoute || safeContext.a2a?.modelRoute);
   return redactSecrets({
     protocol: 'a2a',
     version: '0.1',
@@ -109,6 +138,7 @@ export function buildSwarmA2AEnvelope({
       strategy: safeAttempt.strategy || null,
       planning: safeObject(safeAttempt.planning),
       context: scopedContext(safeContext),
+      ...(normalizedModelRoute ? { a2a: { modelRoute: normalizedModelRoute } } : {}),
       budget: safeBudget,
       outputContract: {
         ...safeOutputContract,

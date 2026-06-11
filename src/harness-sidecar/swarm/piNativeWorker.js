@@ -161,6 +161,43 @@ function compactModelConcurrencyHints(hints = {}) {
   return Object.keys(compacted).length ? compacted : undefined;
 }
 
+function compactModelCouncilRoute(route = {}) {
+  if (!route || typeof route !== 'object' || Array.isArray(route)) return null;
+  const modelProfile = boundedText(route.modelProfile || route.profileName || '', 96);
+  if (!modelProfile) return null;
+  return {
+    modelProfile,
+    endpointProfile: boundedText(route.endpointProfile || '', 96) || undefined,
+    authority: 'evidence_only',
+    canPromote: false,
+  };
+}
+
+function compactModelCouncilHints(hints = {}) {
+  if (!hints || typeof hints !== 'object' || Array.isArray(hints)) return undefined;
+  const routes = hints.roleRoutes && typeof hints.roleRoutes === 'object' && !Array.isArray(hints.roleRoutes)
+    ? hints.roleRoutes
+    : {};
+  const roleRoutes = Object.fromEntries(
+    Object.entries(routes)
+      .map(([role, route]) => [boundedText(role, 96), compactModelCouncilRoute(route)])
+      .filter(([role, route]) => role && route)
+      .slice(0, 12),
+  );
+  const diversityRequired = Number(hints.diversityRequired);
+  const result = {
+    enabled: hints.enabled === true,
+    mode: boundedText(hints.mode || 'advisory', 48) || 'advisory',
+    authority: 'evidence_only',
+    canPromote: false,
+    diversityRequired: Number.isFinite(diversityRequired)
+      ? Math.max(1, Math.floor(diversityRequired))
+      : undefined,
+    roleRoutes,
+  };
+  return result.enabled || Object.keys(roleRoutes).length ? result : undefined;
+}
+
 function normalizeBridgeContext({
   piBridgeContext,
   capabilitiesManifest,
@@ -187,6 +224,7 @@ function normalizeBridgeContext({
     taskCorrelationId: boundedText(taskCorrelationId, 128) || undefined,
     sidecarCallbackHints: compactCallbackHints(safeObject(bridge.sidecarCallbackHints || bridge.callbacks)),
     modelConcurrency: compactModelConcurrencyHints(bridge.modelConcurrency || bridge.vllmConcurrency),
+    modelCouncil: compactModelCouncilHints(bridge.modelCouncil),
     capabilitiesManifest: compactCapabilitiesManifest(capabilitiesManifest || bridge.capabilitiesManifest),
     mutationOptimization: {
       heliosDeterministicCandidates: asArray(
@@ -266,6 +304,21 @@ function bridgePromptLines(bridgeContext = {}) {
         hints.concurrency ? `concurrency=${hints.concurrency}` : null,
         hints.maxConcurrency ? `max=${hints.maxConcurrency}` : null,
         hints.source ? `source=${hints.source}` : null,
+      ].filter(Boolean).join(' '),
+    );
+  }
+  if (bridgeContext.modelCouncil?.enabled) {
+    const council = bridgeContext.modelCouncil;
+    const routeLabels = Object.entries(council.roleRoutes || {})
+      .map(([role, route]) => `${role}=${route.modelProfile}`)
+      .slice(0, 6)
+      .join(', ');
+    lines.push(
+      [
+        'Model council hints:',
+        `authority=${council.authority}`,
+        `mode=${council.mode}`,
+        routeLabels ? `routes=${routeLabels}` : null,
       ].filter(Boolean).join(' '),
     );
   }

@@ -72,6 +72,7 @@ let harnessState = {
     },
   },
   capabilityGoals: null,
+  passK: null,
 };
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -657,6 +658,10 @@ function handleMessage(msg) {
     handleHarnessAdaptiveSearchStatus(msg.data || msg);
     return;
   }
+  if (msg.type === 'harness_model_council_passk_eval') {
+    handleHarnessModelCouncilPassKEval(msg.data || msg);
+    return;
+  }
   if (msg.type === 'harness_skill_candidates') {
     handleHarnessSkillCandidates(msg.data || msg);
     return;
@@ -764,6 +769,13 @@ function handleHarnessEvent(event) {
 
   for (const artifact of event.artifacts || []) {
     harnessState.artifacts.set(artifact.artifactId, artifact);
+  }
+
+  if (event.type === 'model_council.enabled') {
+    event.summary = event.summary || `model council ${event.enabled ? 'enabled' : 'disabled'} (${event.roleCount || 0} roles)`;
+  }
+  if (event.type === 'model_council.report_created') {
+    event.summary = event.summary || `model council report: ${event.modelDiversity?.uniqueModelProfiles || 0} model profiles`;
   }
 
   updateHarnessSubagent(event);
@@ -1128,7 +1140,10 @@ function renderSwarmAttemptCard(agent) {
   const scoreText = Number.isFinite(agent.score) ? `score ${formatScore(agent.score)}` : '';
   const verifyText = agent.verifierPassed === true ? 'verified' : agent.verifierPassed === false ? 'needs review' : '';
   const handoffText = Number.isFinite(agent.handoffQuality) ? `handoff ${formatScore(agent.handoffQuality)}` : '';
-  const meta = [workerLabel(agent.worker), scoreText, verifyText, handoffText].filter(Boolean).join(' | ');
+  const modelText = agent.model?.profileName
+    ? `model ${agent.model.profileName}${agent.model?.route?.endpointProfile ? `/${agent.model.route.endpointProfile}` : ''}`
+    : '';
+  const meta = [workerLabel(agent.worker), modelText, scoreText, verifyText, handoffText].filter(Boolean).join(' | ');
   return `
     <button class="harness-swarm-attempt-card ${isActive ? 'active' : ''}" type="button" data-swarm-attempt-id="${escAttr(agent.attemptId || '')}">
       <span class="harness-swarm-attempt-top">
@@ -1177,6 +1192,8 @@ function renderHarnessSwarmInspector(selected, timeline, selectedEvent) {
   const worker = workerLabel(selected.worker) || 'worker pending';
   const metadata = [
     ['worker', worker],
+    ['model', selected.model?.profileName || 'n/a'],
+    ['endpoint', selected.model?.route?.endpointProfile || 'n/a'],
     ['status', selected.status || 'unknown'],
     ['score', Number.isFinite(selected.score) ? formatScore(selected.score) : 'n/a'],
     ['handoff', Number.isFinite(selected.handoffQuality?.score) ? formatScore(selected.handoffQuality.score) : compactText(selected.handoffQuality?.status, 'n/a')],
@@ -1413,7 +1430,52 @@ function handleHarnessAdaptiveSearchStatus(payload) {
   renderHarnessAdaptiveSearch();
 }
 
+function passKMetric(report, group, name) {
+  return report?.[group]?.[name]?.passAtK
+    ?? report?.[`${name}PassAtK`]
+    ?? report?.passK?.[`${name}PassAtK`]
+    ?? null;
+}
+
+function normalizePassKReport(payload = {}) {
+  const report = payload.data || payload.report || payload.passK || payload;
+  const uplift = report.uplift || payload.uplift || {};
+  return {
+    evalId: report.evalId || payload.evalId || null,
+    bestSinglePassAtK: passKMetric(report, 'baselines', 'bestSingle'),
+    repeatedSamplingPassAtK: passKMetric(report, 'baselines', 'repeatedSampling'),
+    staticCouncilPassAtK: passKMetric(report, 'variants', 'staticCouncil'),
+    adaptiveCouncilPassAtK: passKMetric(report, 'variants', 'adaptiveCouncil'),
+    uplift,
+    proven: Boolean(report.proven ?? payload.proven),
+    authority: report.authority || payload.authority || 'evidence_only',
+    canPromote: report.canPromote === true || payload.canPromote === true,
+  };
+}
+
+function handleHarnessModelCouncilPassKEval(payload = {}) {
+  const passK = normalizePassKReport(payload);
+  harnessState.passK = passK;
+  harnessAdaptiveLoaded = true;
+  harnessAdaptiveStatus = {
+    ...(harnessAdaptiveStatus || {}),
+    passK,
+    selectedArm: 'adaptive-council',
+    mode: 'pass@k',
+    advisory: true,
+    enabled: true,
+    recentReward: passK.uplift?.adaptiveVsBestSingle?.delta,
+    latestEventType: 'harness_model_council_passk_eval',
+  };
+  renderHarnessAdaptiveSearch();
+}
+
 function updateHarnessAdaptiveSearch(event) {
+  if (event?.type === 'model_council.passk_eval_completed') {
+    handleHarnessModelCouncilPassKEval(event);
+    event.summary = formatPassKSummary(harnessState.passK);
+    return;
+  }
   if (!event?.type || !/adaptive[_-]?search|ab[_-]?mcts|arm[_-]?selected/i.test(event.type)) return;
   const nextStatus = event.status || event.adaptiveSearch || event.details || event;
   harnessAdaptiveLoaded = true;
@@ -1436,14 +1498,41 @@ function formatAdaptiveBalance(balance) {
   return String(balance);
 }
 
+function formatPassKValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : 'n/a';
+}
+
+function formatPassKBalance(passK = {}) {
+  return [
+    `best-single:${formatPassKValue(passK.bestSinglePassAtK)}`,
+    `repeated:${formatPassKValue(passK.repeatedSamplingPassAtK)}`,
+    `static-council:${formatPassKValue(passK.staticCouncilPassAtK)}`,
+    `adaptive-council:${formatPassKValue(passK.adaptiveCouncilPassAtK)}`,
+  ].join(' | ');
+}
+
+function formatPassKSummary(passK = {}) {
+  const adaptiveDelta = passK.uplift?.adaptiveVsBestSingle?.delta;
+  const staticDelta = passK.uplift?.staticVsBestSingle?.delta;
+  return [
+    `pass@k ${passK.proven ? 'proven' : 'not proven'}`,
+    formatPassKBalance(passK),
+    `adaptive vs best:${formatPassKValue(adaptiveDelta)}`,
+    `static vs best:${formatPassKValue(staticDelta)}`,
+    passK.authority || 'evidence_only',
+  ].filter(Boolean).join(' | ');
+}
+
 function renderHarnessAdaptiveSearch() {
   const status = harnessAdaptiveStatus || {};
-  const selectedArm = status.selectedArm || status.selected_arm || status.arm || status.currentArm || 'n/a';
+  const passK = status.passK || harnessState.passK;
+  const selectedArm = passK ? 'adaptive-council' : status.selectedArm || status.selected_arm || status.arm || status.currentArm || 'n/a';
   const enabled = status.enabled === undefined ? 'unknown' : status.enabled ? 'enabled' : 'disabled';
   const advisory = status.advisory === undefined ? '' : status.advisory ? 'advisory' : 'enforcing';
-  const modeParts = [status.mode || status.policyMode || 'unknown', advisory, enabled].filter(Boolean);
-  const recentReward = status.recentReward ?? status.reward ?? status.latestReward ?? status.lastReward;
-  const balance = status.armBalance || status.arm_balance || status.balance || status.arms;
+  const modeParts = [passK ? 'pass@k' : status.mode || status.policyMode || 'unknown', advisory, enabled].filter(Boolean);
+  const recentReward = passK?.uplift?.adaptiveVsBestSingle?.delta ?? status.recentReward ?? status.reward ?? status.latestReward ?? status.lastReward;
+  const balance = passK ? formatPassKBalance(passK) : status.armBalance || status.arm_balance || status.balance || status.arms;
 
   if (harnessAdaptiveSelectedArm) harnessAdaptiveSelectedArm.textContent = compactText(selectedArm, 'n/a');
   if (harnessAdaptiveMode) harnessAdaptiveMode.textContent = modeParts.join(' | ');
@@ -1451,9 +1540,16 @@ function renderHarnessAdaptiveSearch() {
   if (harnessAdaptiveArmBalance) harnessAdaptiveArmBalance.textContent = formatAdaptiveBalance(balance);
   if (harnessAdaptiveNote) {
     harnessAdaptiveNote.textContent = harnessAdaptiveLoaded
-      ? compactText(status.reason || status.summary || status.latestEventType, 'Adaptive-search status is current.')
+      ? compactText(passK ? formatPassKSummary(passK) : status.reason || status.summary || status.latestEventType, 'Adaptive-search status is current.')
       : 'Waiting for adaptive-search status.';
   }
+}
+
+function requestHarnessModelCouncilPassKEval() {
+  send({
+    type: 'harness_model_council_passk_eval_prepare',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
+  });
 }
 
 function requestHarnessSkillCandidates() {

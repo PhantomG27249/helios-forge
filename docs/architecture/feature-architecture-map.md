@@ -98,7 +98,8 @@ flowchart TD
 | MemGraphRAG-style global memory | Maintains schema/fact/passage layers, guarded extraction/adjudication hooks, pending-to-active fact promotion, provenance-backed conflict support, graph bridging, runtime snapshots, eval metrics, task-startup retrieval signals, and memory-aware retrieval. | `src/harness-sidecar/memory/globalMemoryLayers.js`, `memoryGraphConstructor.js`, `memoryConflictAdjudicator.js`, `memoryGraphRuntime.js`, `memoryEvals.js`, `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`, `hierarchicalMemoryRetriever.js` |
 | Deep Research v2 | Builds research briefs, discovers/ingests sources, extracts claims, checks citations/contradictions, writes reports and handoff artifacts. | `src/harness-sidecar/research/*` |
 | Experiments | Proposes experiments, queues approved runs, tracks runs, compares metrics, gates noisy deltas, writes decisions and reports. | `src/harness-sidecar/experiments/*` |
-| AB-MCTS adaptive search | Allocates online budget between going wider, going deeper, switching worker/profile, gathering evidence, and stopping/promoting across text, tool, swarm, visual, replay, and verifier action types. It is advisory by default and replayable from traces. | `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, `adaptiveSearchApi.js` |
+| AB-MCTS adaptive search | Allocates online budget between going wider, going deeper, switching worker/profile, model choice, gathering evidence, and stopping/promoting across text, tool, swarm, visual, replay, and verifier action types. It is advisory by default and replayable from traces. | `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, `adaptiveSearchApi.js`, `modelChoiceMcts.js` |
+| Adaptive model router | Keeps disabled-by-default Thompson-sampling posterior state by role/task/node, converts verifier/reviewer/council/cost/latency/safety outcomes into bounded rewards, feeds model-choice AB-MCTS, RHO hard cases, meta-harness policy candidates, A2A model negotiation, and pass@k uplift reports. It is evidence-only and cannot self-promote. | `src/harness-sidecar/model/modelRouterState.js`, `modelRouterPolicy.js`, `modelRouterRewards.js`, `src/harness-sidecar/bes/modelChoiceMcts.js`, `src/harness-sidecar/rho/modelRouterHardCases.js`, `src/harness-sidecar/meta/modelRoutingPolicyEvolution.js`, `src/harness-sidecar/evals/modelCouncilPassK.js` |
 | Bidirectional BES and population evolution | Builds backward goal trees, scores dense goal satisfaction, alternates forward candidates with backward refinement, recombines partial progress, and runs Shinka-style population/island/archive evolution. | `src/harness-sidecar/bes/*` |
 | Shared BES lane runtime | Wraps policy, memory, research, skill, swarm, tool, budget, visual, compaction, MCP-trust, and harness candidates in common evidence-only envelopes with lineage, dense subgoals, optional RHO replay, A2A refs, memory graph context, visual evidence, and promotion-blocking summaries. Emits `bes_lane.started`, `bes_lane.completed`, `bes_lane.blocked`, and status snapshots in live runtime paths. | `src/harness-sidecar/bes/laneRuntime.js`, `laneEvidence.js`, `src/harness-sidecar/meta/*PolicyEvolution.js`, `src/harness-sidecar/skills/skillEvolution.js`, `src/harness-sidecar/swarm/evolutionSwarmPlanner.js`, `src/harness-sidecar/server.js` |
 | RHO coreset | Selects high-signal traces, verifier cases, MemGraphRAG construction failures, and swarm hard cases for optimization with deterministic difficulty, embedding-aware/DPP-style diversity metadata, held-out variants, and lineage references. | `src/harness-sidecar/rho/coresetBuilder.js` |
@@ -434,6 +435,8 @@ Most advanced behavior is present in code but gated so local testing can stay co
 | Feature | Enabled by |
 | --- | --- |
 | Model-driven swarm | `.harness/config.yaml` `features.modelDrivenSwarm: true` or `HELIOS_SWARM_MODEL_DRIVEN=1` |
+| Multi-model swarm council | `features.multiModelSwarm: true` plus `modelCouncil.enabled: true`; routes swarm roles to configured model profiles/endpoints, emits evidence-only agreement/disagreement reports, and cannot self-promote changes |
+| Adaptive model router | `features.adaptiveModelRouter: true` plus `modelRouter.enabled: true`; samples model arms with Thompson-style posterior state, emits `model_router.arm_selected` / `model_router.reward_recorded`, supports AB-MCTS model-choice metadata, and remains evidence-only |
 | Autonomous tool loop | `.harness/config.yaml` `features.autonomousToolLoop: true` or `HELIOS_AUTONOMOUS_TOOL_LOOP=1` |
 | Worktree swarm | `.harness/config.yaml` `features.worktreeSwarm: true` or `HELIOS_SWARM_WORKTREE=1` |
 | Safe apply | `.harness/config.yaml` `features.safeApply: true` or `HELIOS_SAFE_APPLY=1` |
@@ -487,6 +490,8 @@ Important controls:
 - A2A JSON durable stores can be constrained to allowed roots and reject symlink/junction parent escapes before inbox/outbox state is loaded or saved.
 - Verifier evolution proposes candidates and archives evidence; it does not directly promote or apply without human approval.
 - AB-MCTS can recommend `stop_or_promote`, but it cannot promote or apply; promotion remains a policy plus approval decision.
+- Multi-model swarm council reports are evidence-only. Agreement, disagreement, model diversity, and role coverage can inform review, but the council cannot self-promote changes or bypass verifier, promotion-policy, safe-apply, or approval gates.
+- Adaptive model-router decisions, rewards, model-choice AB-MCTS nodes, A2A model negotiation, and pass@k reports are evidence-only. They can choose or explain attempts, but they cannot apply, promote, or weaken verifier/approval gates.
 - Self-authored skills cannot write to global Codex, Claude, Pi, or home skill folders. Approved candidates install only into workspace-local `.harness/packages`.
 
 ## Operator Reading Map
@@ -499,6 +504,7 @@ Start here for common questions:
 - "How does visual verification work?" Read `src/harness-sidecar/vlm/visualVerifier.js`.
 - "How does verifier evolution work?" Read `src/harness-sidecar/meta/verifierEvolutionLoop.js`.
 - "How does adaptive search allocate runtime effort?" Read `src/harness-sidecar/bes/adaptiveSearchScheduler.js`, `adaptiveSearchAdapters.js`, and `adaptiveSearchApi.js`.
+- "How does adaptive model routing learn and get evaluated?" Read `src/harness-sidecar/model/modelRouterPolicy.js`, `modelRouterRewards.js`, `src/harness-sidecar/bes/modelChoiceMcts.js`, `src/harness-sidecar/rho/modelRouterHardCases.js`, `src/harness-sidecar/meta/modelRoutingPolicyEvolution.js`, and `src/harness-sidecar/evals/modelCouncilPassK.js`.
 - "How does memory-guided graph construction work?" Read `src/harness-sidecar/memory/globalMemoryLayers.js` and `src/harness-sidecar/rag/memoryAwareGraphRetriever.js`.
 - "How do local/global memory loops work?" Read `src/harness-sidecar/memory/localMemoryGraph.js`, `swarmCellMemoryGraph.js`, `memoryGraphRuntime.js`, and `src/harness-sidecar/rag/hierarchicalMemoryRetriever.js`.
 - "How does local meta feedback work?" Read `src/harness-sidecar/meta/localMetaHarness.js`, `localEvolutionLoop.js`, and `localPromotionBlocker.js`.
@@ -528,6 +534,7 @@ These are known follow-up areas rather than blockers for local testing:
 - Autonomous full source-tree harness variants, richer proposer policies over raw prior traces and candidate source, and larger repeated benchmark cycles over production-sized suites.
 - Operator dashboards that persist and visualize longitudinal frontier trends, rollback drills, budget-aware improvement accounting, and trust-risk deltas.
 - Production model-assisted extraction society roles, embedding providers, visual judges, and self-preference judges under explicit policy gates.
+- Production-sized adaptive model-router pass@k suites, calibrated ensemble weights, and persistent router dashboards beyond the deterministic local eval/reporting path.
 - Broader MCP quarantine coverage for future model-visible fields beyond current returned-content scanning.
 - Rename or clarify code-impact events that use context-pack paths as seed files, so they are not mistaken for actual diff changed files.
 - Continue hardening Pi-native swarm mode so independent Pi Agent worker sessions can act as `pi_native_subagent` attempts while preserving sidecar-owned tracing, review, RHO/BES feedback, and approval-gated apply.

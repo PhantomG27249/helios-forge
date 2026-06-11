@@ -1,3 +1,5 @@
+import { planModelChoiceMcts } from './modelChoiceMcts.js';
+
 const DEFAULT_ARMS = [
   {
     arm: 'go_wider',
@@ -47,7 +49,7 @@ const DEFAULT_POLICY = {
   highBudgetPressure: 0.9,
 };
 
-export function createAdaptiveSearchScheduler({ arms, rng, policy } = {}) {
+export function createAdaptiveSearchScheduler({ arms, rng, policy, modelArms } = {}) {
   const configuredPolicy = { ...DEFAULT_POLICY, ...(policy || {}) };
   const armEntries = normalizeArms(arms);
   const actionTypeEntries = normalizeActionTypes();
@@ -86,6 +88,8 @@ export function createAdaptiveSearchScheduler({ arms, rng, policy } = {}) {
     actions: {},
     history: [],
     nextActionNumber: 1,
+    nextModelChoiceNumber: 1,
+    modelArms: normalizeModelArms(modelArms),
   };
 
   Object.defineProperty(scheduler, 'rng', {
@@ -129,6 +133,12 @@ export function selectAdaptiveSearchAction({ scheduler, context } = {}) {
     actionId,
     arm: selectedScore.arm,
     actionType: selectedActionTypeScore?.actionType || null,
+    modelChoice: selectModelChoice({
+      scheduler,
+      actionId,
+      actionArm: selectedScore.arm,
+      context: normalizedContext,
+    }),
     advisory: scheduler.policy.mode !== 'enabled',
     contextId: normalizedContext.taskId,
     trace: {
@@ -147,11 +157,15 @@ export function selectAdaptiveSearchAction({ scheduler, context } = {}) {
       actionTypeExhausted,
     },
   };
+  if (action.modelChoice) {
+    action.trace.modelChoice = action.modelChoice;
+  }
 
   scheduler.actions[actionId] = {
     actionId,
     arm: action.arm,
     actionType: action.actionType,
+    modelChoice: action.modelChoice,
     context: action.trace.context,
     selectedAt: scheduler.history.length + 1,
   };
@@ -279,6 +293,67 @@ function normalizeContext(context = {}) {
     confidence: clamp01(context.confidence ?? context.bestCandidate?.confidence ?? 0),
     hasContradictions: Boolean(context.signals?.hasContradictions || context.contradictions?.length),
     signals: context.signals || {},
+    allowModelChoice: context.allowModelChoice === true,
+    modelChoiceMode: context.modelChoiceMode || 'thompson_mcts',
+    modelArms: normalizeModelArms(context.modelArms),
+    routerPolicy: context.routerPolicy,
+    priorEvidence: context.priorEvidence,
+  };
+}
+
+function normalizeModelArms(modelArms = []) {
+  return asArray(modelArms)
+    .filter((arm) => arm && typeof arm === 'object')
+    .map((arm, index) => {
+      const fallback = `model_arm_${index + 1}`;
+      const armId = String(arm.armId ?? arm.id ?? arm.modelProfile ?? fallback).trim() || fallback;
+      return {
+        armId,
+        role: arm.role || 'implementer',
+        modelProfile: arm.modelProfile || armId,
+        endpointProfile: arm.endpointProfile || null,
+        posterior: arm.posterior && typeof arm.posterior === 'object'
+          ? {
+            alpha: Number.isFinite(Number(arm.posterior.alpha)) ? Number(arm.posterior.alpha) : 1,
+            beta: Number.isFinite(Number(arm.posterior.beta)) ? Number(arm.posterior.beta) : 1,
+            observations: Number.isFinite(Number(arm.posterior.observations))
+              ? Number(arm.posterior.observations)
+              : 0,
+          }
+          : null,
+      };
+    });
+}
+
+function selectModelChoice({ scheduler, actionId, actionArm, context }) {
+  if (context.allowModelChoice !== true) return null;
+  const modelArms = context.modelArms.length ? context.modelArms : scheduler.modelArms;
+  if (!modelArms.length) return null;
+
+  const plan = planModelChoiceMcts({
+    task: { taskId: context.taskId, type: context.taskType },
+    actionArms: [actionArm],
+    modelArms,
+    routerPolicy: context.routerPolicy,
+    priorEvidence: context.priorEvidence,
+    iterations: Math.max(1, Math.min(8, modelArms.length * 2)),
+    rng: scheduler.rng,
+  });
+  const selected = plan.selectedNode || {};
+  const fallback = modelArms[0];
+  const actionNumber = scheduler.nextModelChoiceNumber++;
+
+  return {
+    actionId: selected.actionId || `model_choice_${actionNumber}`,
+    parentActionId: actionId,
+    armId: selected.armId || fallback.armId,
+    role: selected.role || fallback.role || 'implementer',
+    modelProfile: selected.modelProfile || fallback.modelProfile,
+    endpointProfile: selected.endpointProfile ?? fallback.endpointProfile ?? null,
+    authority: 'evidence_only',
+    canPromote: false,
+    mode: context.modelChoiceMode,
+    posterior: selected.routerPosterior || fallback.posterior || null,
   };
 }
 
@@ -415,6 +490,11 @@ function assertScheduler(scheduler) {
   if (!scheduler || typeof scheduler !== 'object' || !scheduler.arms) {
     throw new Error('Adaptive search scheduler is required');
   }
+}
+
+function asArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function clamp01(value) {

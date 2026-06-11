@@ -123,6 +123,23 @@ test('harness panel exposes AB-MCTS adaptive search, skill review, and replay su
   assert.match(css, /\.harness-abmcts-decision/);
 });
 
+test('harness adaptive status surface displays model council pass@k uplift', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+  const serverJs = await readFile('src/server.js', 'utf8');
+
+  assert.match(appJs, /harness_model_council_passk_eval_prepare/);
+  assert.match(appJs, /harness_model_council_passk_eval/);
+  assert.match(appJs, /model_council\.passk_eval_completed/);
+  assert.match(appJs, /passK/);
+  assert.match(appJs, /best-single/);
+  assert.match(appJs, /repeated/);
+  assert.match(appJs, /static-council/);
+  assert.match(appJs, /adaptive-council/);
+  assert.match(appJs, /adaptive vs best/);
+  assert.match(serverJs, /case 'harness_model_council_passk_eval_prepare'/);
+  assert.match(serverJs, /prepareModelCouncilPassKEval/);
+});
+
 test('harness tools live in a persistent left side panel outside the chat feed', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const css = await readFile('public/app.css', 'utf8');
@@ -227,6 +244,16 @@ test('harness panel exposes live subagent activity', async () => {
   assert.match(appJs, /thinkingSummary/);
   assert.match(appJs, /compactHandoff/);
   assert.match(appJs, /renderHarnessSubagents/);
+});
+
+test('harness swarm visibility exposes model council route metadata', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(appJs, /model_council\.enabled/);
+  assert.match(appJs, /model_council\.report_created/);
+  assert.match(appJs, /agent\.model\?\.profileName/);
+  assert.match(appJs, /agent\.model\?\.route\?\.endpointProfile/);
+  assert.match(appJs, /selected\.model\?\.route\?\.endpointProfile/);
 });
 
 test('harness panel exposes hierarchical local meta and memory feedback', async () => {

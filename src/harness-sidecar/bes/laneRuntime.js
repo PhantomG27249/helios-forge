@@ -1,7 +1,7 @@
 import { verifyDenseSubgoals } from './denseSubgoalVerifier.js';
 import { recordLineage } from './globalLineageTracker.js';
 import { getBesLaneContract } from './laneContracts.js';
-import { normalizeLaneEvidence, summarizeLanePromotion } from './laneEvidence.js';
+import { normalizeLaneEvidence, sanitizeModelRouterEvidence, summarizeLanePromotion } from './laneEvidence.js';
 import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
 import { normalizeSoulRefs } from '../souls/soulEvidence.js';
 
@@ -360,6 +360,7 @@ export async function runBesLaneRuntime({
     const candidateChampionArchive = candidate.championArchive ?? championArchive;
     const candidateFrontier = candidate.frontier ?? frontier;
     const candidateExternalPolicyEvidence = candidate.externalPolicyEvidence ?? externalPolicyEvidence;
+    const modelRouter = sanitizeModelRouterEvidence(candidate.modelRouter ?? candidate.adaptiveSearch?.modelChoice);
     const soulRefs = normalizeSoulRefs(soulMetadataFrom(candidate));
     const evolutionLevelRefs = normalizeEvolutionLevelRefs(evolutionLevelMetadataFrom(candidate));
     const championFrontierBridge = buildChampionFrontierBridge({
@@ -381,6 +382,7 @@ export async function runBesLaneRuntime({
       frontier: candidateFrontier,
       verifierGenome: candidate.verifierGenome ?? verifierGenome,
       externalPolicyEvidence: candidateExternalPolicyEvidence,
+      modelRouter,
       a2a,
       memoryGraph,
       soulRefs,
@@ -418,6 +420,7 @@ export async function runBesLaneRuntime({
       ...(visualEvidence ? { visualEvidence } : {}),
       ...(memoryGraph ? { memoryGraph } : {}),
       ...(candidateExternalPolicyEvidence ? { externalPolicyEvidence: candidateExternalPolicyEvidence } : {}),
+      ...(modelRouter ? { modelRouter } : {}),
       ...(soulRefs ? { soulRefs } : {}),
       ...(evolutionLevelRefs ? { evolutionLevelRefs } : {}),
       promotion,

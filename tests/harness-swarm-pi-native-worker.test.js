@@ -440,6 +440,70 @@ test('Pi-native workers receive vLLM concurrency hints through bridge context', 
   assert.equal(bridgeContext.modelConcurrency.source, 'vllm_health');
 });
 
+test('Pi-native workers receive bounded model council hints through bridge context', async () => {
+  let bridgeContext;
+  await orchestrateSwarm({
+    task: { taskId: 'task_pi_council_bridge', task: 'Run Pi-native worker with council hints' },
+    taskType: 'coding_bugfix',
+    maxAttempts: 1,
+    context: { allowedFiles: ['src/harness-sidecar/swarm/piNativeWorker.js'] },
+    budget: { maxOutputChars: 1000 },
+    swarmExecution: { piNative: true, concurrency: 5 },
+    piBridgeContext: {
+      modelConcurrency: { concurrency: 5, source: 'vllm_health' },
+      modelCouncil: {
+        enabled: true,
+        mode: 'advisory',
+        authority: 'evidence_only',
+        canPromote: true,
+        diversityRequired: 2,
+        roleRoutes: {
+          implementer: {
+            modelProfile: 'alphahelion_ebft5',
+            endpointProfile: 'fast',
+            apiKey: 'must-not-cross',
+          },
+          reviewer: {
+            modelProfile: 'critic_low_temp',
+            endpointProfile: 'critic',
+          },
+        },
+      },
+    },
+    piWorkerFactory: async ({ piBridgeContext: receivedBridgeContext }) => ({
+      start: async () => {},
+      sendCommand: async () => {
+        bridgeContext = receivedBridgeContext;
+        return {
+          success: true,
+          data: {
+            summary: 'Pi-native worker received council hints.',
+            verifierEvidence: ['focused verifier passed'],
+            compactHandoff: {
+              summary: 'Pi-native worker received council hints.',
+              filesInspected: ['src/harness-sidecar/swarm/piNativeWorker.js'],
+              filesChanged: [],
+              testsRun: ['node --test tests/harness-swarm-pi-native-worker.test.js'],
+              nextAction: 'Review bridge hints.',
+              sourcePointers: ['piNativeWorker.js:normalizeBridgeContext'],
+              risks: ['fake_worker_only'],
+            },
+          },
+        };
+      },
+      stop: async () => {},
+    }),
+  });
+
+  assert.equal(bridgeContext.modelCouncil.enabled, true);
+  assert.equal(bridgeContext.modelCouncil.authority, 'evidence_only');
+  assert.equal(bridgeContext.modelCouncil.canPromote, false);
+  assert.equal(bridgeContext.modelCouncil.diversityRequired, 2);
+  assert.equal(bridgeContext.modelCouncil.roleRoutes.implementer.modelProfile, 'alphahelion_ebft5');
+  assert.equal(bridgeContext.modelCouncil.roleRoutes.implementer.endpointProfile, 'fast');
+  assert.equal(JSON.stringify(bridgeContext.modelCouncil).includes('must-not-cross'), false);
+});
+
 test('swarm orchestrator uses selected profile output contract for Pi-native attempts', async () => {
   let requiredFields = [];
   const result = await orchestrateSwarm({

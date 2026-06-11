@@ -99,11 +99,12 @@ function frontierGapEntries(bidirectionalBes = {}) {
   });
 }
 
-function normalizeAttempt({ entry, taskId, taskType, index, source }) {
+function normalizeAttempt({ entry, taskId, taskType, index, source, fallbackAttempt = {} }) {
   const candidateId = entryId(entry, `${source}_${index + 1}`);
   const goalScore = goalScoreForEntry(entry);
   const score = scoreValue(entry);
   const budgetWeight = clampBudgetWeight(entry.budgetWeight ?? score);
+  const adaptiveSearch = entry.adaptiveSearch || fallbackAttempt.adaptiveSearch || null;
 
   return {
     attemptId: `attempt_${index + 1}`,
@@ -114,11 +115,15 @@ function normalizeAttempt({ entry, taskId, taskType, index, source }) {
     status: 'pending',
     verifierPassed: false,
     score: 0,
+    profileId: entry.profileId || entry.genome?.strategy?.profileId || fallbackAttempt.profileId,
     lineage: entry.lineage || null,
     goalScore,
     islandId: entry.islandId || entry.island || 'island_unassigned',
-    specialization: hasVisualSignal({ entry, taskType }) ? 'visual-specialist' : (entry.specialization || 'implementer'),
+    specialization: hasVisualSignal({ entry, taskType })
+      ? 'visual-specialist'
+      : (entry.specialization || fallbackAttempt.specialization || 'implementer'),
     novelty: entry.novelty,
+    ...(adaptiveSearch ? { adaptiveSearch } : {}),
     planning: {
       strategy: source,
       rank: index + 1,
@@ -163,6 +168,7 @@ function seededFallback({ taskId, taskType, maxAttempts }) {
     attemptId: `attempt_${index + 1}`,
     taskId,
     strategy: strategy.name,
+    profileId: strategy.profileId,
     budgetWeight: strategy.budgetWeight,
     status: 'pending',
     verifierPassed: false,
@@ -205,6 +211,7 @@ export function planEvolutionSwarmAttempts({
     taskType,
     index,
     source,
+    fallbackAttempt: fallbackAttempts[index] || {},
   }));
 }
 

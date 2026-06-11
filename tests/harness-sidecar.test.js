@@ -480,6 +480,167 @@ test('full runtime adapts swarm concurrency from vLLM health probes', async () =
   );
 });
 
+test('full runtime wires multi-model council routes and evidence events', async () => {
+  const modelCalls = [];
+  const modelProviderFactory = (factoryConfig = {}) => async (callInput) => {
+    modelCalls.push({
+      baseUrl: factoryConfig.baseUrl,
+      modelId: factoryConfig.modelId,
+      profileName: callInput.profile.name,
+      model: callInput.profile.model,
+      endpointProfile: callInput.profile.modelCouncilEndpointProfile,
+    });
+    return {
+      text: JSON.stringify({
+        summary: `Model worker completed with ${callInput.profile.name}.`,
+        verifierEvidence: ['dry-run verifier evidence'],
+        score: callInput.profile.name === 'implementer_model' ? 82 : 76,
+      }),
+      usage: { inputTokens: 80, outputTokens: 20 },
+    };
+  };
+
+  await withSidecar(
+    async ({ sidecar }) => {
+      const events = [];
+      const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+      const response = await fetch(`${sidecar.url}/v1/tasks`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workspaceId: 'local',
+          task: 'exercise multi model council',
+          mode: 'full',
+          budget: { maxToolCalls: 20, maxWallMinutes: 15 },
+        }),
+      });
+      const body = await response.json();
+
+      assert.equal(response.status, 202);
+      const enabledEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'model_council.enabled',
+      );
+      assert.equal(enabledEvent.enabled, true);
+      assert.equal(enabledEvent.authority, 'evidence_only');
+      assert.equal(enabledEvent.roleCount, 2);
+      assert.equal(enabledEvent.endpointProfileCount, 2);
+
+      const healthEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'model_council.health_updated',
+      );
+      assert.equal(healthEvent.endpointCount, 2);
+      assert.equal(healthEvent.recommendedConcurrency >= 1, true);
+
+      const runtimeEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'harness_runtime.enabled',
+      );
+      assert.equal(runtimeEvent.multiModelSwarm, true);
+
+      const reportEvent = await waitForEvent(
+        events,
+        (event) => event.taskId === body.taskId && event.type === 'model_council.report_created',
+        8000,
+      );
+      assert.equal(reportEvent.authority, 'evidence_only');
+      assert.equal(reportEvent.canPromote, false);
+      assert.equal(reportEvent.modelDiversity.uniqueModelProfiles >= 2, true);
+
+      const startedEvents = events.filter((event) => event.type === 'swarm.subagent_started');
+      assert.equal(startedEvents.some((event) => event.model?.route?.endpointProfile === 'fast'), true);
+      assert.equal(startedEvents.some((event) => event.model?.route?.endpointProfile === 'test'), true);
+      assert.equal(new Set(modelCalls.map((call) => call.profileName)).has('implementer_model'), true);
+      assert.equal(new Set(modelCalls.map((call) => call.profileName)).has('tester_model'), true);
+      assert.equal(modelCalls.some((call) => call.baseUrl === 'http://fast.test/v1'), true);
+      assert.equal(modelCalls.some((call) => call.baseUrl === 'http://test.test/v1'), true);
+
+      unsubscribe();
+    },
+    {
+      sidecarOptions: {
+        modelProviderFactory,
+        vllmHealthFetch: async () => ({ ok: true, status: 200 }),
+      },
+      beforeStart: async ({ workspaceRoot }) => {
+        const harnessDir = path.join(workspaceRoot, '.harness');
+        await mkdir(harnessDir, { recursive: true });
+        await writeFile(
+          path.join(harnessDir, 'config.yaml'),
+          [
+            'features:',
+            '  modelDrivenSwarm: true',
+            '  multiModelSwarm: true',
+            'models:',
+            '  swarmBaseUrl: http://fallback.test/v1',
+            '  swarmModelId: fallback-model',
+            'modelCouncil:',
+            '  enabled: true',
+            '  roles:',
+            '    implementer:',
+            '      modelProfile: implementer_model',
+            '      endpointProfile: fast',
+            '    test-specialist:',
+            '      modelProfile: tester_model',
+            '      endpointProfile: test',
+            '  endpointProfiles:',
+            '    fast:',
+            '      baseUrl: http://fast.test/v1',
+            '      modelId: fast-model',
+            '    test:',
+            '      baseUrl: http://test.test/v1',
+            '      modelId: test-model',
+            '',
+          ].join('\n'),
+        );
+      },
+    },
+  );
+});
+
+test('sidecar prepares deterministic model council pass@k eval and emits evidence event', async () => {
+  await withSidecar(async ({ sidecar }) => {
+    const events = [];
+    const unsubscribe = sidecar.onEvent((event) => events.push(event));
+
+    const response = await fetch(`${sidecar.url}/v1/model-council/passk-eval/prepare`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        command: 'harness_model_council_passk_eval_prepare',
+        taskId: 'task-passk',
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.type, 'harness_model_council_passk_eval');
+    assert.equal(body.data.baselines.bestSingle.passAtK, 0.6);
+    assert.equal(body.data.baselines.repeatedSampling.passAtK, 0.6);
+    assert.equal(body.data.variants.staticCouncil.passAtK, 0.7);
+    assert.equal(body.data.variants.adaptiveCouncil.passAtK, 0.8);
+    assert.equal(body.data.uplift.adaptiveVsBestSingle.delta, 0.2);
+    assert.equal(body.data.proven, true);
+    assert.equal(body.data.authority, 'evidence_only');
+    assert.equal(body.data.canPromote, false);
+
+    const completedEvent = events.find((event) => event.type === 'model_council.passk_eval_completed');
+    assert.equal(Boolean(completedEvent), true);
+    assert.equal(completedEvent.taskId, 'task-passk');
+    assert.equal(completedEvent.bestSinglePassAtK, 0.6);
+    assert.equal(completedEvent.repeatedSamplingPassAtK, 0.6);
+    assert.equal(completedEvent.staticCouncilPassAtK, 0.7);
+    assert.equal(completedEvent.adaptiveCouncilPassAtK, 0.8);
+    assert.equal(completedEvent.uplift.adaptiveVsBestSingle.delta, 0.2);
+    assert.equal(completedEvent.proven, true);
+    assert.equal(completedEvent.authority, 'evidence_only');
+
+    unsubscribe();
+  });
+});
+
 test('task startup launches enabled MCP capabilities through injected runtime', async () => {
   await withSidecar(
     async ({ sidecar }) => {

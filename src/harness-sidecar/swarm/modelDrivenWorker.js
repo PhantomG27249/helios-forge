@@ -49,10 +49,14 @@ function extractModelPayload(response) {
 }
 
 function assertNoToolCalls(output) {
+  const hasToolCallPayload = (value) => {
+    if (Array.isArray(value)) return value.length > 0;
+    return value !== undefined && value !== null;
+  };
   if (
-    output.toolCalls !== undefined
-    || output.tool_calls !== undefined
-    || output.toolCall !== undefined
+    hasToolCallPayload(output.toolCalls)
+    || hasToolCallPayload(output.tool_calls)
+    || hasToolCallPayload(output.toolCall)
     || (output.tool !== undefined && output.args !== undefined)
   ) {
     throw new Error('Model worker does not execute tool calls');
@@ -65,7 +69,31 @@ function normalizeScore(score) {
   return Number.isFinite(normalized) ? normalized : 0;
 }
 
-function modelMetadata(response, profileName, requestId) {
+function safeModelRoute(route = null) {
+  if (!route) return undefined;
+  const metadata = {
+    role: route.role,
+    modelProfile: route.modelProfile,
+    endpointProfile: route.endpointProfile,
+    authority: 'evidence_only',
+    canPromote: false,
+  };
+  if (route.endpoint) {
+    metadata.endpoint = {
+      baseUrl: route.endpoint.baseUrl,
+      modelId: route.endpoint.modelId,
+    };
+    if (typeof route.endpoint.supportsVision === 'boolean') {
+      metadata.endpoint.supportsVision = route.endpoint.supportsVision;
+    }
+    if (typeof route.endpoint.healthEnabled === 'boolean') {
+      metadata.endpoint.healthEnabled = route.endpoint.healthEnabled;
+    }
+  }
+  return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined));
+}
+
+function modelMetadata(response, profileName, requestId, modelRoute) {
   const profile = response?.profile || {};
   const metadata = {
     callId: response?.callId || null,
@@ -74,6 +102,8 @@ function modelMetadata(response, profileName, requestId) {
     usage: response?.usage || null,
   };
   if (requestId) metadata.requestId = response?.requestId || requestId;
+  const route = safeModelRoute(modelRoute);
+  if (route) metadata.route = route;
   return metadata;
 }
 
@@ -83,6 +113,7 @@ export function normalizeModelWorkerOutput({
   role = 'implementer',
   profileName,
   requestId,
+  modelRoute,
 } = {}) {
   if (response && typeof response === 'object' && !Array.isArray(response)) {
     assertNoToolCalls(response);
@@ -138,7 +169,7 @@ export function normalizeModelWorkerOutput({
       reasons: swarmCellContract.reasons,
       valid: swarmCellContract.valid,
     },
-    model: modelMetadata(response, profileName, requestId),
+    model: modelMetadata(response, profileName, requestId, modelRoute),
   };
 }
 
@@ -191,6 +222,7 @@ export async function runModelDrivenAttempt({
   context = {},
   budget = {},
   profileName = 'critic_low_temp',
+  modelRoute,
   modelGateway,
   provider,
   requestId,
@@ -208,6 +240,7 @@ export async function runModelDrivenAttempt({
     taskId: task.taskId,
     purpose: 'swarm_model_worker',
     profileName,
+    modelRoute,
     task,
     attempt,
     role,
@@ -220,7 +253,7 @@ export async function runModelDrivenAttempt({
   };
 
   const response = await callInjectedModel({ modelGateway, provider, callInput });
-  return normalizeModelWorkerOutput({ response, attempt, role, profileName, requestId });
+  return normalizeModelWorkerOutput({ response, attempt, role, profileName, requestId, modelRoute });
 }
 
 export const runModelDrivenWorker = runModelDrivenAttempt;

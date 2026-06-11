@@ -267,3 +267,40 @@ test('BES meta optimizer preserves disabled adaptive search behavior and routes 
   assert.equal(enabled.candidates.every((candidate) => candidate.status === 'approval_required'), true);
   assert.equal(scheduler.history.map((event) => event.type).includes('ab_mcts.outcome_recorded'), true);
 });
+
+test('BES meta optimizer turns router hard cases into model-routing subgoals and candidates', () => {
+  const optimizer = new BesMetaOptimizer({
+    now: () => new Date('2026-06-11T12:00:00.000Z'),
+    idPrefix: 'router_meta',
+    maxCandidates: 2,
+  });
+
+  const result = optimizer.propose({
+    traceSummary: { failureModes: [] },
+    target: 'model_routing_policy',
+    coreset: {
+      items: [
+        {
+          taskId: 'router-hard',
+          role: 'implementer',
+          taskType: 'code',
+          selectedModel: 'fast',
+          bestModel: 'deep',
+          failureModes: ['model_router_wrong_model', 'model_router_best_single_regression'],
+          target: 'model_routing_policy',
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.bes.subgoals.some((subgoal) => subgoal.id === 'improve_model_router'), true);
+  const routerSubgoal = result.bes.subgoals.find((subgoal) => subgoal.id === 'improve_model_router');
+  assert.equal(routerSubgoal.target, 'model_routing_policy');
+  assert.deepEqual(routerSubgoal.failureModes, [
+    'model_router_best_single_regression',
+    'model_router_wrong_model',
+  ]);
+  assert.equal(result.candidates.every((candidate) => candidate.target === 'model_routing_policy'), true);
+  assert.equal(result.candidates.every((candidate) => candidate.evidence?.authority === 'evidence_only'), true);
+  assert.equal(result.candidates.every((candidate) => candidate.evidence?.canPromote === false), true);
+});
