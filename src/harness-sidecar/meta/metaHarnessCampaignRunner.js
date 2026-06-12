@@ -76,6 +76,26 @@ function publicVariantResult(value) {
     .map(([key, child]) => [key, publicVariantResult(child)]));
 }
 
+function redactPathValue(value, paths = []) {
+  if (typeof value !== 'string') return value;
+  return paths.reduce((text, unsafePath) => {
+    if (!unsafePath) return text;
+    return text
+      .split(String(unsafePath)).join('[redacted-path]')
+      .split(String(unsafePath).replace(/\\/g, '\\\\')).join('[redacted-path]');
+  }, value);
+}
+
+function publicVariantResultForEvaluator(value, paths = []) {
+  if (Array.isArray(value)) return value.map((item) => publicVariantResultForEvaluator(item, paths));
+  if (typeof value === 'string') return redactPathValue(value, paths);
+  if (!value || typeof value !== 'object') return value;
+  const hiddenKeys = new Set(['variantRoot', 'variantDir', 'sourceTreeDir', 'runDir', 'cwd']);
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !hiddenKeys.has(key))
+    .map(([key, child]) => [key, publicVariantResultForEvaluator(child, paths)]));
+}
+
 function normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant }) {
   if (variantRunner) return variantRunner;
   if (typeof sourceTree?.commandRunner === 'function') {
@@ -340,11 +360,19 @@ export async function runMetaHarnessCampaign({
       variant,
       artifacts: variantResult.artifacts,
     });
+    const evaluatorUnsafePaths = [
+      workspaceRoot,
+      variant.variantDir,
+      variant.variantRoot,
+    ].filter(Boolean);
     const evaluation = await invokeEvaluator(evaluator, {
       ...cycleArgs,
       variant: publicVariant(variant),
-      variantResult: publicVariantResult(variantResult),
-      replayReport: replayReportFrom({ evaluation: variantResult, variantResult }) || artifactReplayReport,
+      variantResult: publicVariantResultForEvaluator(variantResult, evaluatorUnsafePaths),
+      replayReport: publicVariantResultForEvaluator(
+        replayReportFrom({ evaluation: variantResult, variantResult }) || artifactReplayReport,
+        evaluatorUnsafePaths,
+      ),
     });
     const metrics = metricsFromEvaluation(evaluation);
     const replayReport = replayReportFrom({ evaluation, variantResult }) || artifactReplayReport;

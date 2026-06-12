@@ -49,6 +49,9 @@ test('blocks candidates that claim durable approval or application', async () =>
         status: 'approved',
         applied: true,
         durableApplyApproved: true,
+        promotionAllowed: true,
+        canPromote: true,
+        promotionAuthority: true,
         promotion: { allowed: true },
       },
     ],
@@ -60,6 +63,12 @@ test('blocks candidates that claim durable approval or application', async () =>
   assert.ok(candidate.promotion.blockedReasons.includes('candidate_claims_approval'));
   assert.ok(candidate.promotion.blockedReasons.includes('candidate_claims_applied'));
   assert.ok(candidate.promotion.blockedReasons.includes('candidate_claims_promotion'));
+  assert.equal(candidate.status, 'shadow_only');
+  assert.equal(candidate.applied, false);
+  assert.equal(candidate.durableApplyApproved, false);
+  assert.equal(candidate.promotionAllowed, false);
+  assert.equal(candidate.canPromote, false);
+  assert.equal(candidate.promotionAuthority, false);
 });
 
 test('preserves A2A and memory graph references without granting promotion authority', async () => {

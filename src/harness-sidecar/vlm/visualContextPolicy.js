@@ -68,8 +68,9 @@ export function decideMultimodalBudgetPolicy({
   const required = taskRequiresVlm(task);
   const supportsVision = endpointSupportsVision(endpoint);
   const cost = visualCost(items);
+  const visualBudget = budget.remainingVisionTokens ?? budget.remainingVisualTokens ?? budget.vlmRemainingTokens;
   const remainingTokens = finiteNumber(
-    budget.remainingTokens ?? budget.remainingVisionTokens ?? budget.remainingVisualTokens ?? budget.vlmRemainingTokens,
+    visualBudget ?? budget.remainingTokens,
     Number.POSITIVE_INFINITY,
   );
   const adaptiveEvidence = adaptiveSearchEvidence(adaptiveAction);

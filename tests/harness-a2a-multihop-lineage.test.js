@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   appendA2aLineageHop,
   compactA2aLineageForDashboard,
+  normalizeA2aLineage,
 } from '../src/harness-sidecar/interop/a2aMultiHopLineage.js';
 import { buildSwarmA2AEnvelope } from '../src/harness-sidecar/interop/a2aSwarmEnvelope.js';
 
@@ -53,6 +54,16 @@ test('A2A lineage rejects cycles and normalizes external verification escalation
       lineage,
       hop: { messageId: 'msg-child', parentMessageId: 'msg-child', from: 'swarm', to: 'agent' },
     }),
+    /cycle/i,
+  );
+});
+
+test('A2A lineage rejects forward parent cycles during full normalization', () => {
+  assert.throws(
+    () => normalizeA2aLineage([
+      { messageId: 'msg-a', parentMessageId: 'msg-b' },
+      { messageId: 'msg-b', parentMessageId: 'msg-a' },
+    ]),
     /cycle/i,
   );
 });

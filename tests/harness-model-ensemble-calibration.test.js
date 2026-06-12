@@ -52,3 +52,28 @@ test('ensemble calibration records minimum count and regression evidence', () =>
   assert.equal(result.evidenceOnly, true);
   assert.equal(result.recommendedForPromotion, false);
 });
+
+test('ensemble calibration redacts secret-shaped identifiers and router defaults', () => {
+  const result = calibrateModelEnsemble({
+    calibrationId: 'cal-sk-router-secret',
+    suiteId: 'suite-prod?api_key=sk-suite',
+    outcomes: [
+      { caseId: 'case-1', modelProfile: 'sk-model-secret', solved: true },
+      { caseId: 'case-2', endpointProfile: 'https://router.example.test/model?token=secret', solved: false },
+    ],
+    routerDefaults: {
+      defaultModel: 'sk-model-secret',
+      baseUrl: 'https://router.example.test/v1?token=secret',
+      apiKey: 'sk-router-secret',
+      weights: { 'sk-model-secret': 1 },
+    },
+  });
+
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('sk-router-secret'), false);
+  assert.equal(serialized.includes('sk-suite'), false);
+  assert.equal(serialized.includes('sk-model-secret'), false);
+  assert.equal(serialized.includes('token=secret'), false);
+  assert.equal(result.evidenceOnly, true);
+  assert.equal(result.recommendedForPromotion, false);
+});

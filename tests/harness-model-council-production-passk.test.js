@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { runModelCouncilPassKEval } from '../src/harness-sidecar/evals/modelCouncilPassK.js';
+import {
+  runModelCouncilPassKEval,
+  summarizePassKUplift,
+} from '../src/harness-sidecar/evals/modelCouncilPassK.js';
 
 function suiteCases(count = 12) {
   return Array.from({ length: count }, (_, index) => ({
@@ -80,4 +83,29 @@ test('production pass@k records minimum case and ensemble regressions as evidenc
   assert.equal(report.regressions.some((item) => item.reason === 'calibrated_below_static_council'), true);
   assert.equal(report.canPromote, false);
   assert.equal(report.recommendedForPromotion, false);
+});
+
+test('production pass@k is not proven when calibrated ensemble regresses at scale', async () => {
+  const report = await runModelCouncilPassKEval({
+    suiteId: 'suite-regression',
+    cases: suiteCases(12),
+    k: 1,
+    minCases: 10,
+    variants: {
+      bestSingle: solvesFirst(8),
+      repeatedSampling: solvesFirst(8),
+      staticCouncil: solvesFirst(10),
+      adaptiveCouncil: solvesFirst(10),
+      calibratedEnsemble: solvesFirst(7),
+    },
+  });
+  const summary = summarizePassKUplift(report);
+
+  assert.equal(report.confidence.minCasesMet, true);
+  assert.equal(report.confidence.upliftThresholdMet, true);
+  assert.equal(report.regressions.some((item) => item.reason === 'calibrated_below_static_council'), true);
+  assert.equal(report.proven, false);
+  assert.equal(summary.calibratedEnsemblePassAtK, report.variants.calibratedEnsemble.passAtK);
+  assert.deepEqual(summary.calibratedEnsembleConfidenceInterval, report.confidenceIntervals.calibratedEnsemble);
+  assert.equal(summary.regressionCount, 1);
 });

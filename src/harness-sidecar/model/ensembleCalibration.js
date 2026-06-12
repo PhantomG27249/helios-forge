@@ -1,3 +1,5 @@
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
+
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -27,10 +29,43 @@ function modelProfileOf(outcome = {}) {
   return String(outcome.modelProfile || outcome.model || outcome.endpointProfile || 'model').trim() || 'model';
 }
 
+function sanitizeEvidenceString(value, fallback = 'redacted') {
+  const text = String(value ?? '').trim() || fallback;
+  const quarantined = quarantineModelVisiblePayload(text, { maxStringLength: 256 });
+  return String(quarantined.value || fallback)
+    .replace(/sk-[A-Za-z0-9_-]+/g, '[redacted]')
+    .replace(/([?&](?:api[_-]?key|token|secret)=)[^&#\s]+/gi, '$1[redacted]')
+    .replace(/\b(api[_-]?key|token|secret|credential|authorization)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]');
+}
+
+function sanitizeProfileKey(value) {
+  return sanitizeEvidenceString(value, 'model')
+    .replace(/[^A-Za-z0-9_.:-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'model';
+}
+
+function sanitizeRouterDefaults(value, seen = new WeakSet()) {
+  if (Array.isArray(value)) return value.map((item) => sanitizeRouterDefaults(item, seen));
+  if (!value || typeof value !== 'object') {
+    return typeof value === 'string' ? sanitizeEvidenceString(value) : value;
+  }
+  if (seen.has(value)) return '[redacted-cycle]';
+  seen.add(value);
+
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => {
+    const safeKey = sanitizeProfileKey(key);
+    if (/api[_-]?key|token|secret|credential|authorization/i.test(key)) {
+      return [safeKey, '[redacted]'];
+    }
+    return [safeKey, sanitizeRouterDefaults(child, seen)];
+  }));
+}
+
 function groupedOutcomes(outcomes = []) {
   const groups = new Map();
   for (const outcome of asArray(outcomes)) {
-    const modelProfile = modelProfileOf(outcome);
+    const modelProfile = sanitizeProfileKey(modelProfileOf(outcome));
     if (!groups.has(modelProfile)) groups.set(modelProfile, []);
     groups.get(modelProfile).push(outcome);
   }
@@ -72,7 +107,8 @@ export function calibrateModelEnsemble({
       round(totalRate > 0 ? rate / totalRate : 1 / Math.max(1, groups.size)),
     ]));
 
-  for (const [modelProfile, baselineWeight] of Object.entries(baselineWeights || {})) {
+  for (const [rawModelProfile, baselineWeight] of Object.entries(baselineWeights || {})) {
+    const modelProfile = sanitizeProfileKey(rawModelProfile);
     if (Number(baselineWeight) > 0 && round(modelWeights[modelProfile] || 0) < round(baselineWeight)) {
       regressions.push({
         modelProfile,
@@ -84,12 +120,12 @@ export function calibrateModelEnsemble({
   }
 
   return {
-    calibrationId: calibrationId || `ensemble-calibration-${suiteId || 'suite'}`,
-    suiteId: suiteId || null,
+    calibrationId: sanitizeProfileKey(calibrationId || `ensemble-calibration-${suiteId || 'suite'}`),
+    suiteId: suiteId ? sanitizeEvidenceString(suiteId) : null,
     modelWeights,
     confidenceIntervals,
     regressions,
-    routerDefaultsSnapshot: routerDefaults ? JSON.parse(JSON.stringify(routerDefaults)) : undefined,
+    routerDefaultsSnapshot: routerDefaults ? sanitizeRouterDefaults(routerDefaults) : undefined,
     evidenceOnly: true,
     recommendedForPromotion: false,
   };

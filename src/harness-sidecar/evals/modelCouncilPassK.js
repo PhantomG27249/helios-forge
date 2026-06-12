@@ -187,6 +187,7 @@ export function summarizePassKUplift(report = {}) {
   const repeatedSampling = report.baselines?.repeatedSampling || {};
   const staticCouncil = report.variants?.staticCouncil || {};
   const adaptiveCouncil = report.variants?.adaptiveCouncil || {};
+  const calibratedEnsemble = report.variants?.calibratedEnsemble || {};
   return {
     evalId: report.evalId,
     caseCount: report.caseCount || 0,
@@ -195,10 +196,16 @@ export function summarizePassKUplift(report = {}) {
     repeatedSamplingPassAtK: repeatedSampling.passAtK ?? 0,
     staticCouncilPassAtK: staticCouncil.passAtK ?? 0,
     adaptiveCouncilPassAtK: adaptiveCouncil.passAtK ?? 0,
+    calibratedEnsemblePassAtK: calibratedEnsemble.passAtK ?? 0,
+    calibratedEnsembleConfidenceInterval: report.confidenceIntervals?.calibratedEnsemble || { lower: 0, upper: 0 },
+    regressions: Array.isArray(report.regressions) ? report.regressions : [],
+    regressionCount: Array.isArray(report.regressions) ? report.regressions.length : 0,
     uplift: report.uplift || {
       staticVsBestSingle: upliftDelta(bestSingle, staticCouncil),
       adaptiveVsBestSingle: upliftDelta(bestSingle, adaptiveCouncil),
       adaptiveVsStatic: upliftDelta(staticCouncil, adaptiveCouncil),
+      calibratedVsBestSingle: upliftDelta(bestSingle, calibratedEnsemble),
+      calibratedVsStatic: upliftDelta(staticCouncil, calibratedEnsemble),
     },
     proven: Boolean(report.proven),
     authority: 'evidence_only',
@@ -274,7 +281,7 @@ export async function runModelCouncilPassKEval({
     confidence,
     confidenceIntervals,
     regressions,
-    proven: confidence.minCasesMet && confidence.upliftThresholdMet,
+    proven: confidence.minCasesMet && confidence.upliftThresholdMet && regressions.length === 0,
     authority: 'evidence_only',
     canPromote: false,
     recommendedForPromotion: false,

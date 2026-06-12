@@ -58,6 +58,19 @@ test('multimodal budget policy blocks VLM when visual budget is exhausted', () =
   assert.equal(decision.reasons.includes('vision_budget_exhausted'), true);
 });
 
+test('multimodal budget policy treats exhausted vision budget as authoritative over general tokens', () => {
+  const decision = decideMultimodalBudgetPolicy({
+    task: { taskId: 'visual-specific-budget', vlmRequired: true },
+    endpoint: { supportsVision: true },
+    visualItems: [visualItem],
+    budget: { remainingTokens: 5000, remainingVisionTokens: 0 },
+  });
+
+  assert.equal(decision.mode, 'text_only');
+  assert.equal(decision.budgetCost, 0);
+  assert.deepEqual(decision.reasons, ['vision_budget_exhausted']);
+});
+
 test('multimodal budget policy treats explicit supportsVision false as authoritative', () => {
   const decision = decideMultimodalBudgetPolicy({
     task: { taskId: 'visual-capability', vlmRequired: true },

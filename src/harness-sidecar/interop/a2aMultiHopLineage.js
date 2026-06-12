@@ -55,15 +55,51 @@ function normalizeHop({ lineage, hop }) {
   });
 }
 
+function validateLineageGraph(lineage = []) {
+  const ids = new Set();
+  for (const hop of lineage) {
+    if (ids.has(hop.messageId)) {
+      throw new Error(`A2A lineage cycle detected for messageId: ${hop.messageId}`);
+    }
+    ids.add(hop.messageId);
+  }
+
+  const parentById = new Map();
+  for (const hop of lineage) {
+    if (!hop.parentMessageId) continue;
+    if (hop.parentMessageId === hop.messageId) {
+      throw new Error(`A2A lineage cycle detected for parentMessageId: ${hop.messageId}`);
+    }
+    if (!ids.has(hop.parentMessageId)) {
+      throw new Error(`A2A lineage parent is not in lineage: ${hop.parentMessageId}`);
+    }
+    parentById.set(hop.messageId, hop.parentMessageId);
+  }
+
+  for (const hop of lineage) {
+    const seen = new Set([hop.messageId]);
+    let cursor = parentById.get(hop.messageId);
+    while (cursor) {
+      if (seen.has(cursor)) {
+        throw new Error(`A2A lineage cycle detected for messageId: ${cursor}`);
+      }
+      seen.add(cursor);
+      cursor = parentById.get(cursor);
+    }
+  }
+
+  return lineage;
+}
+
 export function appendA2aLineageHop({ lineage = [], hop } = {}) {
-  return [
-    ...asArray(lineage).map((entry) => normalizeHop({ lineage: [], hop: entry })),
+  return validateLineageGraph([
+    ...normalizeA2aLineage(lineage),
     normalizeHop({ lineage, hop }),
-  ];
+  ]);
 }
 
 export function compactA2aLineageForDashboard(lineage = []) {
-  const hops = asArray(lineage).map((hop) => normalizeHop({ lineage: [], hop }));
+  const hops = normalizeA2aLineage(lineage);
   return redactSecrets({
     hopCount: hops.length,
     messageIds: hops.map((hop) => hop.messageId),
@@ -88,5 +124,5 @@ export function normalizeA2aLineage(lineage = []) {
   for (const hop of asArray(lineage)) {
     normalized.push(normalizeHop({ lineage: normalized, hop }));
   }
-  return normalized;
+  return validateLineageGraph(normalized);
 }

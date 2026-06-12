@@ -1,4 +1,5 @@
 import { getTrustRank, normalizeAgentCard, redactSecrets } from './agentCards.js';
+import { normalizeA2aLineage } from './a2aMultiHopLineage.js';
 
 function cloneSerializable(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -165,8 +166,8 @@ function endpointView(record) {
 }
 
 function normalizeLineage(lineage = []) {
-  return recordsFromState(lineage)
-    .filter((hop) => hop && typeof hop === 'object' && !Array.isArray(hop))
+  return normalizeA2aLineage(recordsFromState(lineage)
+    .filter((hop) => hop && typeof hop === 'object' && !Array.isArray(hop)))
     .map((hop) => redactSecrets({
       messageId: hop.messageId,
       parentMessageId: hop.parentMessageId,
@@ -176,6 +177,7 @@ function normalizeLineage(lineage = []) {
       taskId: hop.taskId,
       agentId: hop.agentId,
       endpointId: hop.endpointId,
+      trust: hop.trust,
     }));
 }
 

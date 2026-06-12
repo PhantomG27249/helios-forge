@@ -232,6 +232,28 @@ function normalizeTrajectoryEntry({ candidate, trajectory, lineage, lane }) {
   };
 }
 
+function scrubCandidateAuthorityClaims(candidate = {}) {
+  const safe = cloneJson(candidate, {});
+  const authorityKeys = [
+    'applied',
+    'approved',
+    'canApply',
+    'canMutateWorkspace',
+    'canPromote',
+    'directApplyAllowed',
+    'durableApplyApproved',
+    'promotionAllowed',
+    'promotionAuthority',
+    'verifierBypass',
+  ];
+  for (const key of authorityKeys) {
+    if (Object.hasOwn(safe, key)) safe[key] = false;
+  }
+  if (safe.authority && safe.authority !== 'evidence_only') safe.authority = 'evidence_only';
+  if (String(safe.status || '').toLowerCase() === 'approved') safe.status = 'shadow_only';
+  return safe;
+}
+
 export function summarizeBesLaneRuntimeResult(laneResult = {}) {
   const candidates = asArray(laneResult.candidates);
   const ranked = [...candidates].sort((left, right) => (
@@ -403,9 +425,11 @@ export async function runBesLaneRuntime({
     });
 
     const normalizedCandidate = {
-      ...cloneJson(candidate, {}),
+      ...scrubCandidateAuthorityClaims(candidate),
       candidateId,
-      status: candidate.status ?? 'shadow_only',
+      status: String(candidate.status || '').toLowerCase() === 'approved'
+        ? 'shadow_only'
+        : candidate.status ?? 'shadow_only',
       lane: contract.lane,
       contract,
       lineage,

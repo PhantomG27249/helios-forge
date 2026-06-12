@@ -250,6 +250,7 @@ test('meta-harness campaign strips proposer mutation and promotion claims from c
 test('meta-harness campaign hides active workspace roots from evaluators', async () => {
   await withWorkspace(async (workspaceRoot) => {
     let evaluatorInput = null;
+    let variantPath = null;
 
     await runMetaHarnessCampaign({
       campaign: {
@@ -258,7 +259,15 @@ test('meta-harness campaign hides active workspace roots from evaluators', async
         sourceTree: {
           entrypoint: 'runner.js',
           run: { command: 'node', args: ['runner.js'] },
-          commandRunner: async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }),
+          commandRunner: async ({ cwd }) => {
+            variantPath = cwd;
+            return {
+              exitCode: 0,
+              stdout: `cwd=${cwd}`,
+              stderr: `workspace=${workspaceRoot}`,
+              replayReport: { note: `variant=${cwd}` },
+            };
+          },
         },
       },
       maxCycles: 1,
@@ -275,6 +284,11 @@ test('meta-harness campaign hides active workspace roots from evaluators', async
     assert.equal(evaluatorInput.variant.variantDir, undefined);
     assert.equal(evaluatorInput.variantResult.prepared?.variantRoot, undefined);
     assert.equal(evaluatorInput.variantResult.prepared?.sourceTreeDir, undefined);
-    assert.equal(JSON.stringify(evaluatorInput).includes(workspaceRoot), false);
+    const evaluatorJson = JSON.stringify(evaluatorInput);
+    assert.equal(evaluatorJson.includes(workspaceRoot), false);
+    assert.equal(evaluatorJson.includes(variantPath), false);
+    assert.equal(evaluatorJson.includes(workspaceRoot.replace(/\\/g, '\\\\')), false);
+    assert.equal(evaluatorJson.includes(variantPath.replace(/\\/g, '\\\\')), false);
+    assert.equal(evaluatorJson.includes('[redacted-path]'), true);
   });
 });

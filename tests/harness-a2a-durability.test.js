@@ -886,6 +886,52 @@ test('A2A negotiation envelopes preserve multi-hop lineage while denying authori
   assert.equal(JSON.stringify(envelope).includes('plainsecret'), false);
 });
 
+test('A2A negotiation envelopes reject cyclic lineage and normalize prior hop trust', () => {
+  const registry = new A2AEndpointRegistry({
+    now: () => 8_000,
+    endpoints: [{
+      id: 'agent.negotiator',
+      name: 'Negotiator',
+      protocol: 'a2a',
+      endpoint: { url: 'https://negotiator.example.test/a2a' },
+      capabilities: ['repo.read'],
+      trustLevel: 'internal',
+    }],
+  });
+
+  assert.throws(
+    () => registry.buildNegotiationEnvelope({
+      from: 'agent.parent',
+      toAgentId: 'agent.negotiator',
+      lineage: [
+        { messageId: 'msg-a', parentMessageId: 'msg-b' },
+        { messageId: 'msg-b', parentMessageId: 'msg-a' },
+      ],
+      task: { id: 'task-cycle', requiredCapabilities: ['repo.read'] },
+    }),
+    /cycle/i,
+  );
+
+  const envelope = registry.buildNegotiationEnvelope({
+    from: 'agent.parent',
+    toAgentId: 'agent.negotiator',
+    lineage: [
+      {
+        messageId: 'msg-root',
+        from: 'helios.sidecar',
+        to: 'agent.parent',
+        trust: { external: true, verified: true, authority: 'admin', canPromote: true },
+      },
+    ],
+    task: { id: 'task-trust', requiredCapabilities: ['repo.read'] },
+  });
+
+  assert.equal(envelope.durable.lineage[0].trust.external, true);
+  assert.equal(envelope.durable.lineage[0].trust.verified, false);
+  assert.equal(envelope.durable.lineage[0].trust.authority, 'evidence_only');
+  assert.equal(envelope.durable.lineage[0].trust.canPromote, false);
+});
+
 test('A2A negotiation responses preserve subagent lineage and keep external claims unverified', () => {
   const response = buildA2ANegotiationResponseEnvelope({
     from: 'agent.child',
