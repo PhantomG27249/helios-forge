@@ -25,6 +25,7 @@ function visualCost(visualItems = []) {
 }
 
 function endpointSupportsVision(endpoint = {}) {
+  if (endpoint.supportsVision === false) return false;
   if (endpoint.supportsVision === true) return true;
   return asArray(endpoint.capabilities).map((capability) => String(capability).toLowerCase()).includes('image');
 }
@@ -68,7 +69,7 @@ export function decideMultimodalBudgetPolicy({
   const supportsVision = endpointSupportsVision(endpoint);
   const cost = visualCost(items);
   const remainingTokens = finiteNumber(
-    budget.remainingTokens ?? budget.remainingVisualTokens ?? budget.vlmRemainingTokens,
+    budget.remainingTokens ?? budget.remainingVisionTokens ?? budget.remainingVisualTokens ?? budget.vlmRemainingTokens,
     Number.POSITIVE_INFINITY,
   );
   const adaptiveEvidence = adaptiveSearchEvidence(adaptiveAction);

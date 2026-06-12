@@ -205,6 +205,38 @@ test('visual model runner can call an injected model gateway object', async () =
   assert.equal(result.observations[0].text, 'No visual regression found.');
 });
 
+test('visual model runner applies multimodal budget policy before model gateway calls', async () => {
+  const { workspaceRoot, artifactRoot, imagePath } = await makeWorkspaceImage();
+  const calls = [];
+
+  const result = await runVisualModelObservation({
+    taskId: 'task_gateway_budget',
+    prompt: 'Inspect with exhausted vision budget.',
+    imagePaths: [imagePath],
+    workspaceRoot,
+    artifactRoots: [artifactRoot],
+    budget: { remainingVisionTokens: 0 },
+    modelGateway: {
+      call: async (input) => {
+        calls.push(input);
+        return {
+          structured: {
+            observations: [{ text: 'Fell back to text-only budget.' }],
+            risks: [],
+            score: 0.5,
+            artifacts: [],
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].visionInputs.length, 0);
+  assert.equal(calls[0].messages[0].content.some((part) => part.type === 'image_url'), false);
+  assert.equal(result.observations[0].text, 'Fell back to text-only budget.');
+});
+
 test('visual model runner accepts custom VLM profiles supplied by gateway overrides', async () => {
   const { workspaceRoot, artifactRoot, imagePath } = await makeWorkspaceImage();
   const calls = [];

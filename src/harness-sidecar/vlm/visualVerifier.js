@@ -1,10 +1,12 @@
 import path from 'node:path';
 
 import { buildMultimodalRequest } from '../model/multimodalRequestBuilder.js';
+import { getModelProfile } from '../model/modelProfiles.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { readImageArtifact } from './imageIO.js';
 import { sanitizeBrowserEvidenceMetadata } from './browserPreviewCapture.js';
 import { captureProductionVisualArtifacts } from './productionArtifactCapture.js';
+import { decideMultimodalBudgetPolicy } from './visualContextPolicy.js';
 import { createVisualVerifierRubric } from './visualVerifierRubric.js';
 
 function asArray(value) {
@@ -220,7 +222,7 @@ async function loadImageInputs({ artifacts, workspaceRoot, artifactRoots }) {
   }));
 }
 
-function buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs }) {
+function buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs, budget = {} }) {
   const visualItems = imageInputs.map((image) => ({
     artifactId: image.artifactId,
     type: 'image_artifact',
@@ -231,12 +233,23 @@ function buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs 
       metadata: image.metadata,
     },
   }));
+  const profileName = 'qwen36_vlm_fast';
+  const multimodalBudgetPolicy = decideMultimodalBudgetPolicy({
+    task: { taskId, vlmRequired: true },
+    endpoint: getModelProfile(profileName),
+    visualItems,
+    budget,
+  });
   const request = buildMultimodalRequest({
-    profileName: 'qwen36_vlm_fast',
+    profileName,
     prompt: rubric.prompt,
     visualItems,
+    multimodalBudgetPolicy,
   });
   const imageByPath = new Map(imageInputs.map((image) => [image.path, image]));
+  const selectedImageInputs = request.visionInputs
+    .map((input) => imageByPath.get(input.path))
+    .filter(Boolean);
   const messages = request.messages.map((message) => ({
     ...message,
     content: message.content.map((part) => {
@@ -257,10 +270,10 @@ function buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs 
   return {
     taskId,
     purpose: 'visual_verifier',
-    profileName: 'qwen36_vlm_fast',
+    profileName,
     messages,
     structuredOutput: true,
-    visionInputs: imageInputs,
+    visionInputs: selectedImageInputs,
     artifacts: artifactMetadataItems,
     rubric: {
       rubricVersion: rubric.rubricVersion,
@@ -270,6 +283,7 @@ function buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs 
       confidenceThreshold: rubric.confidenceThreshold,
     },
     tokensEstimated: request.tokensEstimated,
+    multimodalBudgetPolicy,
   };
 }
 
@@ -293,6 +307,7 @@ export async function runVisualVerifier({
   vlmJudge,
   emitEvent = () => {},
   strictness = 'balanced',
+  budget = {},
 } = {}) {
   if (!taskId) {
     throw new Error('taskId is required');
@@ -373,7 +388,7 @@ export async function runVisualVerifier({
       ? await vlmJudge({ taskId, goal, expected: asArray(expected), rubric, artifacts: artifactMetadataItems, imageInputs })
       : await callModelGateway({
         modelGateway,
-        callInput: buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs }),
+        callInput: buildGatewayInput({ taskId, rubric, artifactMetadataItems, imageInputs, budget }),
       });
 
     const result = {

@@ -1,10 +1,28 @@
 import { buildMultimodalRequest } from '../model/multimodalRequestBuilder.js';
+import { getModelProfile } from '../model/modelProfiles.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { readImageArtifact } from './imageIO.js';
+import { decideMultimodalBudgetPolicy } from './visualContextPolicy.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function resolveEndpointProfile(profileName, profileOverride) {
+  try {
+    return {
+      ...getModelProfile(profileName),
+      ...(profileOverride || {}),
+    };
+  } catch (error) {
+    if (!profileOverride) throw error;
+    return {
+      name: profileName,
+      supportsVision: false,
+      ...profileOverride,
+    };
+  }
 }
 
 function parseModelPayload(response) {
@@ -167,6 +185,8 @@ export async function runVisualModelObservation({
   profileName = 'qwen36_vlm_fast',
   modelGateway,
   provider,
+  budget = {},
+  adaptiveAction,
 } = {}) {
   if (!prompt || typeof prompt !== 'string') {
     throw new Error('Visual model prompt is required');
@@ -185,16 +205,27 @@ export async function runVisualModelObservation({
       }),
     ),
   );
+  const profileOverride = modelGateway?.profileOverrides?.[profileName];
+  const endpoint = resolveEndpointProfile(profileName, profileOverride);
+  const visualItems = buildVisualItems(images);
+  const multimodalBudgetPolicy = decideMultimodalBudgetPolicy({
+    task: { taskId, vlmRequired: true },
+    endpoint,
+    visualItems,
+    budget,
+    adaptiveAction,
+  });
   const request = buildMultimodalRequest({
     profileName,
-    profileOverride: modelGateway?.profileOverrides?.[profileName],
+    profileOverride,
     prompt: [
       prompt,
       '',
       'Return one JSON object only with: observations array, optional ocrText string, risks array, score number 0..1, and artifacts array.',
       'Do not request tool calls. OCR text may be provided only if visible in the supplied image.',
     ].join('\n'),
-    visualItems: buildVisualItems(images),
+    visualItems,
+    multimodalBudgetPolicy,
   });
   const enrichedRequest = enrichRequestWithDataUrls({ request, images });
   const callInput = {

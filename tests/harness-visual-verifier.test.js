@@ -180,6 +180,46 @@ test('visual verifier sends modelGateway metadata and safe image data URLs only 
   });
 });
 
+test('visual verifier applies multimodal budget policy before model gateway calls', async () => {
+  await withWorkspace(async ({ workspaceRoot }) => {
+    const calls = [];
+    const result = await runVisualVerifier({
+      taskId: 'task_model_gateway_budget',
+      workspaceRoot,
+      goal: 'Verify the preview with exhausted vision budget.',
+      targetUrl: 'http://127.0.0.1:3000/',
+      budget: { remainingVisionTokens: 0 },
+      captureAdapter: {
+        screenshot: async ({ outputPath }) => {
+          await mkdir(path.dirname(outputPath), { recursive: true });
+          await writeFile(outputPath, PNG_1X1);
+          return { imagePath: outputPath, width: 64, height: 64 };
+        },
+      },
+      modelGateway: {
+        call: async (input) => {
+          calls.push(input);
+          return {
+            structured: {
+              score: 0.8,
+              confidence: 0.7,
+              findings: [],
+              passed: true,
+            },
+          };
+        },
+      },
+    });
+
+    assert.equal(result.passed, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].visionInputs.length, 0);
+    assert.equal(calls[0].messages[0].content.some((part) => part.type === 'image_url'), false);
+    assert.equal(calls[0].multimodalBudgetPolicy.mode, 'text_only');
+    assert.equal(calls[0].multimodalBudgetPolicy.reasons.includes('vision_budget_exhausted'), true);
+  });
+});
+
 test('visual verifier includes concise sanitized browser evidence in model artifacts', async () => {
   await withWorkspace(async ({ workspaceRoot }) => {
     const calls = [];
