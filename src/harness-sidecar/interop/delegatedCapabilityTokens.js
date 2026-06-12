@@ -31,6 +31,19 @@ function signTokenPayload(token, issuerSecret) {
     .digest('hex');
 }
 
+function resolveIssuerSecret({ issuerSecret, issuerSecretProvider } = {}) {
+  if (issuerSecret !== undefined && issuerSecret !== null && String(issuerSecret) !== '') {
+    return issuerSecret;
+  }
+  if (!issuerSecretProvider) return undefined;
+  if (typeof issuerSecretProvider === 'function') return issuerSecretProvider();
+  if (typeof issuerSecretProvider.loadIssuerSecret === 'function') return issuerSecretProvider.loadIssuerSecret();
+  if (typeof issuerSecretProvider.get === 'function') return issuerSecretProvider.get('issuerSecret');
+  if (typeof issuerSecretProvider.load === 'function') return issuerSecretProvider.load();
+  if (typeof issuerSecretProvider.issuerSecret === 'string') return issuerSecretProvider.issuerSecret;
+  return undefined;
+}
+
 function signaturesMatch(left, right) {
   const leftBuffer = Buffer.from(String(left || ''), 'hex');
   const rightBuffer = Buffer.from(String(right || ''), 'hex');
@@ -49,6 +62,7 @@ export function createDelegatedCapabilityToken({
   ttlMs = 5 * 60 * 1000,
   now = Date.now(),
   issuerSecret,
+  issuerSecretProvider,
 } = {}) {
   const issuedAt = Number(now);
   const ttl = Number(ttlMs);
@@ -65,7 +79,7 @@ export function createDelegatedCapabilityToken({
   };
   return {
     ...token,
-    signature: signTokenPayload(token, issuerSecret),
+    signature: signTokenPayload(token, resolveIssuerSecret({ issuerSecret, issuerSecretProvider })),
   };
 }
 
@@ -77,6 +91,7 @@ export function verifyDelegatedCapabilityToken(token, {
   mode = 'read',
   now = Date.now(),
   issuerSecret,
+  issuerSecretProvider,
 } = {}) {
   const reasons = [];
   if (!token) {
@@ -84,7 +99,7 @@ export function verifyDelegatedCapabilityToken(token, {
   }
 
   const timestamp = Number(now);
-  const expectedSignature = signTokenPayload(token, issuerSecret);
+  const expectedSignature = signTokenPayload(token, resolveIssuerSecret({ issuerSecret, issuerSecretProvider }));
   if (!signaturesMatch(token.signature, expectedSignature)) reasons.push('invalid_signature');
   if (String(token.taskId || '') !== String(taskId || '')) reasons.push('task_mismatch');
   if (String(token.agentId || '') !== String(agentId || '')) reasons.push('agent_mismatch');
