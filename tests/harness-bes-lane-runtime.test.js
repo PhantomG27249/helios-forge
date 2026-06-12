@@ -53,6 +53,12 @@ test('blocks candidates that claim durable approval or application', async () =>
         canPromote: true,
         promotionAuthority: true,
         promotion: { allowed: true },
+        patch: {
+          applied: true,
+          canPromote: true,
+          durableApplyApproved: true,
+          authority: 'root',
+        },
       },
     ],
     evaluator: () => ({ score: 1, reasons: ['looks useful'] }),
@@ -69,6 +75,10 @@ test('blocks candidates that claim durable approval or application', async () =>
   assert.equal(candidate.promotionAllowed, false);
   assert.equal(candidate.canPromote, false);
   assert.equal(candidate.promotionAuthority, false);
+  assert.equal(candidate.patch.applied, false);
+  assert.equal(candidate.patch.canPromote, false);
+  assert.equal(candidate.patch.durableApplyApproved, false);
+  assert.equal(candidate.patch.authority, 'evidence_only');
 });
 
 test('preserves A2A and memory graph references without granting promotion authority', async () => {

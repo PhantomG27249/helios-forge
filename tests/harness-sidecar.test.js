@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -665,12 +665,36 @@ test('sidecar exposes production organism evidence endpoints as read-only report
         assert.equal(body.canPromote, false);
         assert.equal(body.summary.itemCount, 1);
         assert.equal(body.items[0].canPromote, false);
+        assert.equal(JSON.stringify(body).includes('secret-value'), false);
+        assert.equal(JSON.stringify(body).includes('ghp_'), false);
+        assert.equal(JSON.stringify(body).includes('C:\\\\Users\\\\jackj\\\\secret.txt'), false);
         assert.equal(JSON.stringify(body).includes('durableApplyApproved'), false);
         assert.equal(JSON.stringify(body).includes('promotionAllowed'), false);
       }
     },
     {
       beforeStart: async ({ workspaceRoot }) => {
+        await mkdir(path.join(workspaceRoot, '.harness'), { recursive: true });
+        await writeFile(
+          path.join(workspaceRoot, '.harness', 'config.yaml'),
+          [
+            'productionCapabilities:',
+            '  operatorDashboards:',
+            '    enabled: true',
+            '  visualReplaySuites:',
+            '    enabled: true',
+            '  productionA2aQueues:',
+            '    enabled: true',
+            '  ensembleCalibration:',
+            '    enabled: true',
+            '  endpointCapacityRecommendations:',
+            '    enabled: true',
+            '  productionAutonomyPolicy:',
+            '    enabled: true',
+            '',
+          ].join('\n'),
+          'utf8',
+        );
         const fixtures = new Map([
           ['.harness/benchmarks/suites/suite-prod.json', { id: 'suite-prod', cases: [{ caseId: 'case-1' }] }],
           ['.harness/benchmarks/replay-cycles/replay-prod.json', { reportId: 'replay-prod', aggregateScore: 0.8 }],
@@ -690,6 +714,9 @@ test('sidecar exposes production organism evidence endpoints as read-only report
             filePath,
             `${JSON.stringify({
               ...content,
+              apiKey: 'secret-value',
+              notes: 'token=ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+              artifactPath: 'C:\\Users\\jackj\\secret.txt',
               canPromote: true,
               promotionAllowed: true,
               durableApplyApproved: true,
@@ -700,6 +727,78 @@ test('sidecar exposes production organism evidence endpoints as read-only report
       },
     },
   );
+});
+
+test('production evidence endpoints suppress persisted items when feature gates are disabled', async () => {
+  await withSidecar(
+    async ({ sidecar }) => {
+      const response = await fetch(`${sidecar.url}/v1/evidence/operator-dashboards`);
+      const body = await response.json();
+
+      assert.equal(response.status, 200);
+      assert.equal(body.type, 'operatorDashboards');
+      assert.equal(body.gate.enabled, false);
+      assert.equal(body.summary.itemCount, 0);
+      assert.deepEqual(body.items, []);
+      assert.equal(JSON.stringify(body).includes('operator-prod'), false);
+    },
+    {
+      beforeStart: async ({ workspaceRoot }) => {
+        const filePath = path.join(workspaceRoot, '.harness', 'dashboards', 'operator', 'operator-prod.json');
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, `${JSON.stringify({ snapshotId: 'operator-prod' })}\n`, 'utf8');
+      },
+    },
+  );
+});
+
+test('production evidence endpoints reject symlinked evidence directories', async (t) => {
+  const externalRoot = await mkdtemp(path.join(tmpdir(), 'pi-harness-external-evidence-'));
+  try {
+    await withSidecar(
+      async ({ sidecar }) => {
+        const response = await fetch(`${sidecar.url}/v1/evidence/held-out-suites`);
+        assert.equal(response.status, 400);
+      },
+      {
+        beforeStart: async ({ workspaceRoot }) => {
+          await mkdir(path.join(workspaceRoot, '.harness'), { recursive: true });
+          await writeFile(
+            path.join(workspaceRoot, '.harness', 'config.yaml'),
+            [
+              'productionCapabilities:',
+              '  operatorDashboards:',
+              '    enabled: true',
+              '',
+            ].join('\n'),
+            'utf8',
+          );
+          await mkdir(path.join(externalRoot, 'suites'), { recursive: true });
+          await writeFile(
+            path.join(externalRoot, 'suites', 'escaped.json'),
+            `${JSON.stringify({ id: 'escaped' })}\n`,
+            'utf8',
+          );
+          await mkdir(path.join(workspaceRoot, '.harness', 'benchmarks'), { recursive: true });
+          try {
+            await symlink(
+              path.join(externalRoot, 'suites'),
+              path.join(workspaceRoot, '.harness', 'benchmarks', 'suites'),
+              process.platform === 'win32' ? 'junction' : 'dir',
+            );
+          } catch (error) {
+            if (['EPERM', 'EACCES', 'ENOSYS'].includes(error?.code)) {
+              t.skip(`symlink creation unavailable: ${error.code}`);
+              return;
+            }
+            throw error;
+          }
+        },
+      },
+    );
+  } finally {
+    await rm(externalRoot, { recursive: true, force: true });
+  }
 });
 
 test('task startup launches enabled MCP capabilities through injected runtime', async () => {

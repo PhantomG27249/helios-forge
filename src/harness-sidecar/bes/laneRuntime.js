@@ -233,7 +233,6 @@ function normalizeTrajectoryEntry({ candidate, trajectory, lineage, lane }) {
 }
 
 function scrubCandidateAuthorityClaims(candidate = {}) {
-  const safe = cloneJson(candidate, {});
   const authorityKeys = [
     'applied',
     'approved',
@@ -246,15 +245,34 @@ function scrubCandidateAuthorityClaims(candidate = {}) {
     'promotionAuthority',
     'verifierBypass',
   ];
-  for (const key of authorityKeys) {
-    if (Object.hasOwn(safe, key)) safe[key] = false;
+
+  function scrub(value) {
+    if (Array.isArray(value)) return value.map(scrub);
+    if (!value || typeof value !== 'object') return value;
+
+    const safe = {};
+    for (const [key, child] of Object.entries(value)) {
+      if (authorityKeys.includes(key)) {
+        safe[key] = false;
+        continue;
+      }
+      if (key === 'authority' && typeof child === 'string') {
+        const authority = child.trim().toLowerCase();
+        safe[key] = authority === 'evidence_only' || authority.endsWith('_evidence_only')
+          ? child
+          : 'evidence_only';
+        continue;
+      }
+      if (key === 'status' && String(child || '').toLowerCase() === 'approved') {
+        safe[key] = 'shadow_only';
+        continue;
+      }
+      safe[key] = scrub(child);
+    }
+    return safe;
   }
-  const authority = String(safe.authority || '').trim().toLowerCase();
-  if (safe.authority && authority !== 'evidence_only' && !authority.endsWith('_evidence_only')) {
-    safe.authority = 'evidence_only';
-  }
-  if (String(safe.status || '').toLowerCase() === 'approved') safe.status = 'shadow_only';
-  return safe;
+
+  return scrub(cloneJson(candidate, {}));
 }
 
 export function summarizeBesLaneRuntimeResult(laneResult = {}) {

@@ -1,5 +1,5 @@
 import { createServer } from 'http';
-import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { planSubgoals } from './bes/subgoalPlanner.js';
@@ -123,6 +123,7 @@ import {
   rejectSkillCandidateForReview,
   summarizeSkillCandidate,
 } from './skills/skillCandidateReview.js';
+import { redactModelVisibleValue } from './security/modelVisibleQuarantine.js';
 
 const VERSION = '0.1.0';
 const CAPABILITY_STORE_MODULE = './capabilities/capabilityStore.js';
@@ -263,8 +264,8 @@ const EVIDENCE_AUTHORITY_KEYS = new Set([
   'verifierBypass',
 ]);
 
-function scrubEvidencePayload(value) {
-  if (Array.isArray(value)) return value.map(scrubEvidencePayload);
+function stripEvidenceAuthority(value) {
+  if (Array.isArray(value)) return value.map(stripEvidenceAuthority);
   if (!value || typeof value !== 'object') return value;
   const safe = {};
   for (const [key, child] of Object.entries(value)) {
@@ -273,10 +274,14 @@ function scrubEvidencePayload(value) {
       safe.canPromote = false;
       continue;
     }
-    safe[key] = scrubEvidencePayload(child);
+    safe[key] = stripEvidenceAuthority(child);
   }
   if (!Object.hasOwn(safe, 'canPromote')) safe.canPromote = false;
   return safe;
+}
+
+function scrubEvidencePayload(value) {
+  return stripEvidenceAuthority(redactModelVisibleValue(value));
 }
 
 function resolveAgentProfileToolCaps(profileId) {
@@ -3012,9 +3017,65 @@ export function createHarnessSidecar({
       });
   }
 
+  function assertEvidencePathInsideWorkspace(targetPath) {
+    const relative = path.relative(resolvedWorkspaceRoot, targetPath);
+    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return;
+    throw new Error('Production evidence path escapes workspace root');
+  }
+
+  async function assertNoSymlinkEvidencePath(targetPath) {
+    const relative = path.relative(resolvedWorkspaceRoot, targetPath);
+    const segments = relative.split(path.sep).filter(Boolean);
+    let current = resolvedWorkspaceRoot;
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      try {
+        const stat = await lstat(current);
+        if (stat.isSymbolicLink()) {
+          throw new Error('Production evidence path uses symlink or junction');
+        }
+      } catch (error) {
+        if (error?.code === 'ENOENT') return;
+        throw error;
+      }
+    }
+  }
+
+  async function assertRealEvidencePathInsideWorkspace(targetPath) {
+    const realWorkspaceRoot = await realpath(resolvedWorkspaceRoot);
+    const realTargetPath = await realpath(targetPath);
+    const relative = path.relative(realWorkspaceRoot, realTargetPath);
+    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return;
+    throw new Error('Production evidence path escapes workspace root');
+  }
+
+  async function resolveEvidenceFilePath(relativePath) {
+    const targetPath = path.resolve(resolvedWorkspaceRoot, relativePath);
+    assertEvidencePathInsideWorkspace(targetPath);
+    await assertNoSymlinkEvidencePath(path.dirname(targetPath));
+    try {
+      await assertRealEvidencePathInsideWorkspace(path.dirname(targetPath));
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    return targetPath;
+  }
+
+  async function resolveEvidenceDirectoryPath(relativeDir) {
+    const targetPath = path.resolve(resolvedWorkspaceRoot, relativeDir);
+    assertEvidencePathInsideWorkspace(targetPath);
+    await assertNoSymlinkEvidencePath(targetPath);
+    try {
+      await assertRealEvidencePathInsideWorkspace(targetPath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    return targetPath;
+  }
+
   async function readJsonFileIfPresent(relativePath) {
     try {
-      const raw = await readFile(path.join(resolvedWorkspaceRoot, relativePath), 'utf8');
+      const raw = await readFile(await resolveEvidenceFilePath(relativePath), 'utf8');
       return scrubEvidencePayload(JSON.parse(raw));
     } catch (error) {
       if (error?.code === 'ENOENT') return null;
@@ -3023,7 +3084,7 @@ export function createHarnessSidecar({
   }
 
   async function readJsonDirectory(relativeDir) {
-    const root = path.join(resolvedWorkspaceRoot, relativeDir);
+    const root = await resolveEvidenceDirectoryPath(relativeDir);
     let entries;
     try {
       entries = await readdir(root, { withFileTypes: true });
@@ -3048,7 +3109,9 @@ export function createHarnessSidecar({
     items,
   }) {
     const gate = await productionGate(gateName);
-    const safeItems = (Array.isArray(items) ? items : [items])
+    const gateEnabled = gate.enabled === true;
+    const loadedItems = gateEnabled && typeof items === 'function' ? await items() : items;
+    const safeItems = (gateEnabled ? (Array.isArray(loadedItems) ? loadedItems : [loadedItems]) : [])
       .filter(Boolean)
       .map(scrubEvidencePayload);
     return {
@@ -3057,7 +3120,7 @@ export function createHarnessSidecar({
       canPromote: false,
       gate: {
         name: gateName,
-        enabled: gate.enabled === true,
+        enabled: gateEnabled,
         mode: gate.mode || 'offline',
         authority: 'evidence_only',
       },
@@ -3074,59 +3137,59 @@ export function createHarnessSidecar({
       return productionEvidenceResponse({
         type,
         gateName: 'operatorDashboards',
-        items: await readJsonDirectory(path.join('.harness', 'benchmarks', 'suites')),
+        items: () => readJsonDirectory(path.join('.harness', 'benchmarks', 'suites')),
       });
     }
     if (type === 'replayCycles') {
       return productionEvidenceResponse({
         type,
         gateName: 'operatorDashboards',
-        items: await readJsonDirectory(path.join('.harness', 'benchmarks', 'replay-cycles')),
+        items: () => readJsonDirectory(path.join('.harness', 'benchmarks', 'replay-cycles')),
       });
     }
     if (type === 'operatorDashboards') {
       return productionEvidenceResponse({
         type,
         gateName: 'operatorDashboards',
-        items: await readJsonDirectory(path.join('.harness', 'dashboards', 'operator')),
+        items: () => readJsonDirectory(path.join('.harness', 'dashboards', 'operator')),
       });
     }
     if (type === 'visualSuites') {
       return productionEvidenceResponse({
         type,
         gateName: 'visualReplaySuites',
-        items: await readJsonDirectory(path.join('.harness', 'visual', 'replay-suites')),
+        items: () => readJsonDirectory(path.join('.harness', 'visual', 'replay-suites')),
       });
     }
     if (type === 'a2aStatus') {
       return productionEvidenceResponse({
         type,
         gateName: 'productionA2aQueues',
-        items: await readJsonFileIfPresent(path.join('.harness', 'a2a', 'queue-state.json')),
+        items: () => readJsonFileIfPresent(path.join('.harness', 'a2a', 'queue-state.json')),
       });
     }
     if (type === 'modelCouncilCalibration') {
       return productionEvidenceResponse({
         type,
         gateName: 'ensembleCalibration',
-        items: await readJsonDirectory(path.join('.harness', 'model-council', 'calibration')),
+        items: () => readJsonDirectory(path.join('.harness', 'model-council', 'calibration')),
       });
     }
     if (type === 'endpointCapacity') {
       return productionEvidenceResponse({
         type,
         gateName: 'endpointCapacityRecommendations',
-        items: await readJsonFileIfPresent(path.join('.harness', 'model', 'endpoint-capacity', 'recommendations.json')),
+        items: () => readJsonFileIfPresent(path.join('.harness', 'model', 'endpoint-capacity', 'recommendations.json')),
       });
     }
     if (type === 'autonomyRollback') {
       return productionEvidenceResponse({
         type,
         gateName: 'productionAutonomyPolicy',
-        items: {
+        items: async () => ({
           autonomy: await readJsonFileIfPresent(path.join('.harness', 'governance', 'autonomy-summary.json')),
           rollback: await readJsonFileIfPresent(path.join('.harness', 'governance', 'rollback-drills.json')),
-        },
+        }),
       });
     }
     throw new Error(`Unknown production evidence type: ${type}`);
