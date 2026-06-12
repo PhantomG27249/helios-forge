@@ -95,3 +95,28 @@ test('passing rollback drill satisfies rollback evidence but never grants apply 
   assert.equal(autonomy.canApply, false);
   assert.equal(autonomy.directApplyAllowed, false);
 });
+
+test('failed rollback drills do not satisfy production rollback evidence', async () => {
+  const drill = await runRollbackDrill({
+    candidate: { candidateId: 'config-failed' },
+    recordArtifact: async () => ({ artifactId: 'rollback-log', path: '.harness/rollback/log.json', hash: 'sha256:abc' }),
+    verifyRestore: async () => false,
+  });
+  const autonomy = evaluateProductionAutonomy({
+    candidate: {
+      candidateId: 'config-failed',
+      candidateType: 'config',
+      risk: 'low',
+      changeType: 'local_config',
+      writeScope: 'workspace_local',
+    },
+    evidence: { rollback: drill },
+    operatorPolicy: enabledPolicy,
+  });
+
+  assert.equal(drill.status, 'failed');
+  assert.equal(drill.restoreVerified, false);
+  assert.equal(autonomy.rollbackPolicy.available, false);
+  assert.equal(autonomy.blockers.includes('rollback_required'), true);
+  assert.equal(autonomy.promotionEligible, false);
+});

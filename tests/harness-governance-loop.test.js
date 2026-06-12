@@ -125,8 +125,9 @@ test('applies autonomy levels, low-risk reversible approval policy, and escalati
   assert.equal(escalated.decision, 'escalated');
   assert.equal(escalated.auditEvent.type, 'governance.escalation');
   assert.deepEqual(escalated.auditEvent.reasons, ['branch_mutation_requires_human']);
-  assert.equal(override.decision, 'override_approved');
+  assert.equal(override.decision, 'override_audited');
   assert.equal(override.auditEvent.type, 'governance.override');
+  assert.equal(override.auditEvent.override.trustKernelBypass, false);
 });
 
 test('formal autonomy levels narrow auto approval to reversible local config and summarize escalation reasons', () => {

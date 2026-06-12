@@ -117,8 +117,19 @@ function containsRedactedValue(value) {
 function rollbackEvidence(candidate = {}, evidence = {}) {
   const rollback = asObject(evidence.rollback || candidate.rollback);
   const redacted = containsRedactedValue(rollback);
+  const drillBacked = Boolean(rollback.drillId);
+  const drillPassed = drillBacked
+    && rollback.status !== 'failed'
+    && rollback.reversible === true
+    && (rollback.restoreVerified === true || rollback.rollbackVerified === true)
+    && Array.isArray(rollback.artifacts)
+    && rollback.artifacts.length > 0;
   const reversible = !redacted && (
-    rollback.reversible === true || rollback.available === true || Boolean(rollback.drillId)
+    drillPassed || (
+      (rollback.reversible === true || rollback.available === true)
+      && rollback.status !== 'failed'
+      && (drillBacked ? rollback.restoreVerified !== false && rollback.rollbackVerified !== false : true)
+    )
   );
   return {
     required: true,
