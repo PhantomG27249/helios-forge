@@ -186,5 +186,47 @@ test('meta-harness campaign hides active workspace roots from variant runners an
 
     assert.equal(observedInput.workspaceRoot, undefined);
     assert.equal(observedInput.campaign.workspaceRoot, undefined);
+    assert.equal(observedInput.variantRoot, undefined);
+    assert.equal(observedInput.variant.variantDir, undefined);
+    assert.equal(JSON.stringify(observedInput).includes(workspaceRoot), false);
+  });
+});
+
+test('meta-harness campaign strips proposer mutation and promotion claims from candidate artifacts', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const result = await runMetaHarnessCampaign({
+      campaign: {
+        campaignId: 'proposal_claim_campaign',
+        workspaceRoot,
+      },
+      maxCycles: 1,
+      proposer: async () => ({
+        candidateId: 'claim_candidate',
+        activeWorkspaceMutation: true,
+        promotionAuthority: true,
+        canPromote: true,
+        applied: true,
+        durableApplyApproved: true,
+      }),
+      evaluator: async () => ({
+        metrics: { quality: 0.4, safety: 0.9, cost: 0.3, latency: 0.3 },
+      }),
+    });
+
+    const candidateArtifact = JSON.parse(await readFile(
+      path.join(result.cycles[0].run.runDir, 'candidate.json'),
+      'utf8',
+    ));
+
+    assert.equal(result.cycles[0].candidate.activeWorkspaceMutation, false);
+    assert.equal(result.cycles[0].candidate.promotionAuthority, false);
+    assert.equal(result.cycles[0].candidate.canPromote, false);
+    assert.equal(result.cycles[0].candidate.applied, false);
+    assert.equal(result.cycles[0].candidate.durableApplyApproved, false);
+    assert.equal(candidateArtifact.activeWorkspaceMutation, false);
+    assert.equal(candidateArtifact.promotionAuthority, false);
+    assert.equal(candidateArtifact.canPromote, false);
+    assert.equal(candidateArtifact.applied, false);
+    assert.equal(candidateArtifact.durableApplyApproved, false);
   });
 });

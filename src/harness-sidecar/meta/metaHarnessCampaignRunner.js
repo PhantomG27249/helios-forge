@@ -58,6 +58,15 @@ function sourceTreeRunnerConfig(sourceTree = {}) {
   return config;
 }
 
+function publicVariant(variant = {}) {
+  return {
+    schemaVersion: variant.schemaVersion,
+    cycleId: variant.cycleId,
+    variantId: variant.variantId,
+    manifest: variant.manifest,
+  };
+}
+
 function normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant }) {
   if (variantRunner) return variantRunner;
   if (typeof sourceTree?.commandRunner === 'function') {
@@ -68,6 +77,34 @@ function normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, vari
     });
   }
   return null;
+}
+
+function evidenceOnlyCandidate(proposal = {}, candidateId, target) {
+  const normalized = normalizeObject(proposal);
+  return {
+    ...normalized,
+    candidateId,
+    target: normalized.target || target,
+    requiresApproval: true,
+    activeWorkspaceMutation: false,
+    promotionAuthority: false,
+    promotionAllowed: false,
+    canPromote: false,
+    applied: false,
+    durableApplyApproved: false,
+    verifierBypass: false,
+    authority: 'evidence_only',
+    promotion: {
+      ...normalizeObject(normalized.promotion),
+      allowed: false,
+      evidenceOnly: true,
+      promotionAuthority: false,
+    },
+    patch: {
+      ...(normalizeObject(normalized.patch)),
+      applied: false,
+    },
+  };
 }
 
 function assertNoActiveMutationClaims(value, label = 'variant result', seen = new WeakSet()) {
@@ -123,19 +160,18 @@ async function readReplayReportFromArtifacts({ variant, artifacts } = {}) {
 
 async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycleArgs }) {
   const runnerSourceTree = sourceTreeRunnerConfig(sourceTree);
+  const safeVariant = publicVariant(variant);
   const prepared = typeof variantRunner?.prepareVariant === 'function'
     ? await variantRunner.prepareVariant({
       ...runnerSourceTree,
-      variantRoot: variant.variantDir,
-      variant,
+      variant: safeVariant,
       ...cycleArgs,
     })
     : null;
   const run = typeof variantRunner?.runVariant === 'function'
     ? await variantRunner.runVariant({
       ...(runnerSourceTree.run || {}),
-      variantRoot: variant.variantDir,
-      variant,
+      variant: safeVariant,
       prepared,
       ...cycleArgs,
     })
@@ -143,8 +179,7 @@ async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycl
   const collected = typeof variantRunner?.collectArtifacts === 'function'
     ? await variantRunner.collectArtifacts({
       ...(runnerSourceTree.collect || {}),
-      variantRoot: variant.variantDir,
-      variant,
+      variant: safeVariant,
       prepared,
       run,
       ...cycleArgs,
@@ -169,8 +204,7 @@ async function invokeVariantRunner({ variantRunner, sourceTree, workspaceRoot, v
   if (typeof runner === 'function') {
     const result = normalizeObject(await runner({
       ...cycleArgs,
-      variant,
-      variantRoot: variant.variantDir,
+      variant: publicVariant(variant),
       sourceTree: runnerSourceTree,
     }));
     assertNoActiveMutationClaims(result);
@@ -249,16 +283,11 @@ export async function runMetaHarnessCampaign({
       previousCandidateIds,
       previousReplayReports,
     });
-    const candidate = {
-      ...normalizeObject(proposal),
-      candidateId: assertSafeId(proposal?.candidateId, 'candidate id'),
-      target: proposal?.target || target,
-      requiresApproval: true,
-      patch: {
-        ...(normalizeObject(proposal?.patch)),
-        applied: false,
-      },
-    };
+    const candidate = evidenceOnlyCandidate(
+      proposal,
+      assertSafeId(proposal?.candidateId, 'candidate id'),
+      target,
+    );
     const variant = await createHarnessVariantWorkspace({
       workspaceRoot,
       cycleId,
