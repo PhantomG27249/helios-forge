@@ -1,4 +1,5 @@
 import { redactSecrets } from './agentCards.js';
+import { normalizeA2aLineage } from './a2aMultiHopLineage.js';
 
 function normalizedList(value = []) {
   const list = Array.isArray(value) ? value : [value];
@@ -64,9 +65,7 @@ function scopedContext(context = {}) {
 }
 
 function normalizedLineageObjects(value = []) {
-  const list = Array.isArray(value) ? value : [value];
-  return list
-    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+  return normalizeA2aLineage(value)
     .map((item) => redactSecrets({
       messageId: item.messageId,
       parentMessageId: item.parentMessageId,
@@ -75,6 +74,8 @@ function normalizedLineageObjects(value = []) {
       to: item.to,
       taskId: item.taskId,
       attemptId: item.attemptId,
+      ...(item.layer ? { layer: item.layer } : {}),
+      ...(item.trust ? { trust: item.trust } : {}),
     }));
 }
 
