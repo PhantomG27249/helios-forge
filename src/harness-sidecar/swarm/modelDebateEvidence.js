@@ -1,8 +1,18 @@
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
+
 const DEFAULT_CONFIDENCE = 0.5;
 
 function boundedText(value, maxLength = 240) {
   if (typeof value !== 'string' && typeof value !== 'number') return '';
   return String(value).trim().slice(0, maxLength);
+}
+
+function safeModelVisibleText(value, maxLength = 240, reasons = null) {
+  const quarantined = quarantineModelVisiblePayload(boundedText(value, maxLength), { maxStringLength: maxLength });
+  if (reasons && quarantined.quarantined) {
+    for (const reason of quarantined.reasons) reasons.add(reason);
+  }
+  return quarantined.value;
 }
 
 function clamp01(value, fallback = DEFAULT_CONFIDENCE) {
@@ -58,25 +68,25 @@ function normalizeParticipant(participant = {}, index = 0) {
   };
 }
 
-function normalizeClaim(claim = {}, { participantId, index } = {}) {
+function normalizeClaim(claim = {}, { participantId, index, quarantineReasons = null } = {}) {
   const claimId = boundedText(claim.claimId || claim.id || `${participantId || 'participant'}-claim-${index + 1}`, 96);
   return {
     claimId,
     participantId: boundedText(claim.participantId || participantId, 96) || null,
-    text: boundedText(claim.text || claim.summary || claim.claim, 512),
+    text: safeModelVisibleText(claim.text || claim.summary || claim.claim, 512, quarantineReasons),
     confidence: roundMetric(claim.confidence),
     ...safetyFields(),
   };
 }
 
-function normalizeCritique(critique = {}, { participantId, index } = {}) {
+function normalizeCritique(critique = {}, { participantId, index, quarantineReasons = null } = {}) {
   const verdict = boundedText(critique.verdict || critique.status || 'concern', 48).toLowerCase();
   return {
     critiqueId: boundedText(critique.critiqueId || critique.id || `${participantId || 'participant'}-critique-${index + 1}`, 96),
     participantId: boundedText(critique.participantId || participantId, 96) || null,
     targetClaimId: boundedText(critique.targetClaimId || critique.claimId, 96) || null,
     verdict: ['agree', 'disagree', 'concern', 'uncertain'].includes(verdict) ? verdict : 'concern',
-    summary: boundedText(critique.summary || critique.text || critique.reason, 512),
+    summary: safeModelVisibleText(critique.summary || critique.text || critique.reason, 512, quarantineReasons),
     confidence: roundMetric(critique.confidence),
     ...safetyFields(),
   };
@@ -130,12 +140,13 @@ export function buildModelDebatePrompt({
 } = {}) {
   const normalizedParticipant = normalizeParticipant(participant);
   const taskId = boundedText(task.taskId || task.id, 96);
-  const goal = boundedText(task.goal || task.task || task.prompt, 1024);
+  const quarantineReasons = new Set();
+  const goal = safeModelVisibleText(task.goal || task.task || task.prompt, 1024, quarantineReasons);
   const constraints = Array.isArray(task.constraints)
-    ? task.constraints.map((constraint) => boundedText(constraint, 240)).filter(Boolean)
+    ? task.constraints.map((constraint) => safeModelVisibleText(constraint, 240, quarantineReasons)).filter(Boolean)
     : [];
   const claimLines = claims.map((claim, index) => {
-    const normalized = normalizeClaim(claim, { participantId: claim.participantId, index });
+    const normalized = normalizeClaim(claim, { participantId: claim.participantId, index, quarantineReasons });
     return `- ${normalized.claimId}: ${normalized.text} (confidence ${normalized.confidence})`;
   });
 
@@ -166,6 +177,10 @@ export function buildModelDebatePrompt({
       requiredFields: ['claims', 'critiques', 'confidence'],
       evidenceOnly: true,
     },
+    quarantine: {
+      required: quarantineReasons.size > 0,
+      reasons: [...quarantineReasons].sort(),
+    },
     ...safetyFields(),
   };
 }
@@ -179,16 +194,17 @@ export function buildModelDebateEvidence({
   const normalizedParticipants = participants.map(normalizeParticipant);
   const normalizedClaims = [];
   const normalizedCritiques = [];
+  const quarantineReasons = new Set();
 
   for (const [outputIndex, output] of outputs.entries()) {
     const participantId = boundedText(output?.participantId || normalizedParticipants[outputIndex]?.id, 96);
     const outputClaims = Array.isArray(output?.claims) ? output.claims : [];
     const outputCritiques = Array.isArray(output?.critiques) ? output.critiques : [];
     outputClaims.forEach((claim, index) => {
-      normalizedClaims.push(normalizeClaim(claim, { participantId, index }));
+      normalizedClaims.push(normalizeClaim(claim, { participantId, index, quarantineReasons }));
     });
     outputCritiques.forEach((critique, index) => {
-      normalizedCritiques.push(normalizeCritique(critique, { participantId, index }));
+      normalizedCritiques.push(normalizeCritique(critique, { participantId, index, quarantineReasons }));
     });
   }
 
@@ -197,7 +213,7 @@ export function buildModelDebateEvidence({
     ...(Array.isArray(output?.claims) ? output.claims : []),
     ...(Array.isArray(output?.critiques) ? output.critiques : []),
   ]);
-  const quarantineReasons = unsafeFieldReasons(rawNestedRecords);
+  for (const reason of unsafeFieldReasons(rawNestedRecords)) quarantineReasons.add(reason);
 
   return {
     debateId: boundedText(debateId, 96),
@@ -211,8 +227,8 @@ export function buildModelDebateEvidence({
       outputs,
     }),
     quarantine: {
-      required: quarantineReasons.length > 0,
-      reasons: quarantineReasons,
+      required: quarantineReasons.size > 0,
+      reasons: [...quarantineReasons].sort(),
     },
     ...safetyFields(),
   };

@@ -41,6 +41,38 @@ test('recommends evidence-only actions for degraded endpoints without changing r
   });
 });
 
+test('redacts health reasons and returns model-safe endpoint summaries', () => {
+  const report = recommendEndpointCapacityActions({
+    endpoints: {
+      primary: {
+        baseUrl: 'https://internal.example.test/v1',
+        modelId: 'primary-model',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        estimatedCostUsdPer1kTokens: 0.01,
+      },
+    },
+    routerHealth: {
+      primary: {
+        healthy: false,
+        reason: 'failed Authorization: Bearer secret-token api_key=abc123',
+      },
+    },
+    policy: {
+      routes: { implementer: 'primary' },
+    },
+  });
+  const visible = JSON.stringify(report);
+
+  assert.equal(visible.includes('secret-token'), false);
+  assert.equal(visible.includes('abc123'), false);
+  assert.equal(visible.includes('https://internal.example.test'), false);
+  assert.equal(visible.includes('OPENAI_API_KEY'), false);
+  assert.equal(report.endpoints.primary.baseUrl, undefined);
+  assert.equal(report.endpoints.primary.apiKeyEnv, undefined);
+  assert.equal(report.actions[0].reason, 'health_probe_failed');
+  assert.equal(report.actions[0].evidence.reason, 'health_probe_failed');
+});
+
 test('flags missing specialist routes and missing model profiles as capacity gaps', () => {
   const report = recommendEndpointCapacityActions({
     endpoints: {

@@ -63,6 +63,32 @@ test('harness-of-harnesses optimizer emits evidence-only candidates for all opti
   }
 });
 
+test('harness-of-harnesses optimizer uses deterministic evidence-derived candidate ids', () => {
+  const input = {
+    parentOptimizerId: 'meta-parent-001',
+    targets: ['rho'],
+    evidenceByTarget: {
+      rho: {
+        evidenceId: 'rho-heldout',
+        heldoutPassRate: 0.7,
+        baselinePassRate: 0.6,
+        safetyScore: 0.94,
+        averageCost: 0.25,
+        latencyMs: 1500,
+        coverage: 0.66,
+      },
+    },
+  };
+  const first = createHarnessOfHarnessesOptimizer({
+    now: () => new Date('2026-06-12T09:30:00.000Z'),
+  }).proposeEvidence(input).candidates[0];
+  const second = createHarnessOfHarnessesOptimizer({
+    now: () => new Date('2026-06-12T10:30:00.000Z'),
+  }).proposeEvidence(input).candidates[0];
+
+  assert.equal(first.optimizerCandidateId, second.optimizerCandidateId);
+});
+
 test('harness-of-harnesses optimizer freezes candidate promotion fields and nested evidence', () => {
   const candidate = new HarnessOfHarnessesOptimizer({
     now: () => new Date('2026-06-12T09:30:00.000Z'),
@@ -162,4 +188,24 @@ test('harness-of-harnesses optimizer blocks self-approval as evidence, never aut
   assert.equal(candidate.evidence.selfApproval.decision, undefined);
   assert.equal(candidate.applied, undefined);
   assert.equal(candidate.requiresApproval, undefined);
+});
+
+test('harness-of-harnesses optimizer blocks normalized self-approval optimizer ids', () => {
+  const [candidate] = createHarnessOfHarnessesOptimizer({
+    now: () => new Date('2026-06-12T09:30:00.000Z'),
+  }).proposeEvidence({
+    parentOptimizerId: 'Meta Parent 001',
+    targets: ['meta'],
+    evidenceByTarget: {
+      meta: { evidenceId: 'meta-heldout' },
+    },
+    selfApprovalAttempt: {
+      optimizerId: 'meta_parent_001',
+      decision: 'approve',
+    },
+  }).candidates;
+
+  assert.equal(candidate.canPromote, false);
+  assert.equal(candidate.evidence.selfApproval.attempted, true);
+  assert.equal(candidate.evidence.selfApproval.blocked, true);
 });

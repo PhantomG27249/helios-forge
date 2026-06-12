@@ -56,9 +56,46 @@ function normalizeHealthByEndpoint(routerHealth = {}) {
   return Object.fromEntries(Object.entries(routerHealth)
     .map(([endpointProfile, snapshot]) => [
       boundedString(endpointProfile, 96),
-      normalizeVllmHealthSnapshot(snapshot),
+      sanitizeHealthSnapshot(normalizeVllmHealthSnapshot(snapshot)),
     ])
     .filter(([endpointProfile]) => endpointProfile));
+}
+
+function safeReasonCode(value, fallback = 'health_probe_failed') {
+  const text = boundedString(value, 96).toLowerCase();
+  if (/^[a-z0-9_.:-]+$/.test(text)) return text;
+  return fallback;
+}
+
+function sanitizeHealthSnapshot(snapshot = {}) {
+  if (!isPlainObject(snapshot)) return {};
+  return {
+    ...snapshot,
+    reason: snapshot.reason ? safeReasonCode(snapshot.reason) : undefined,
+  };
+}
+
+function endpointSummary(endpoint = {}) {
+  return {
+    endpointProfile: endpoint.endpointProfile,
+    modelId: endpoint.modelId,
+    supportsVision: endpoint.supportsVision,
+    healthEnabled: endpoint.healthEnabled,
+    estimatedCostUsdPer1kTokens: endpoint.estimatedCostUsdPer1kTokens,
+    targetLatencyMs: endpoint.targetLatencyMs,
+    maxContextTokens: endpoint.maxContextTokens,
+    recommendedConcurrency: endpoint.recommendedConcurrency,
+    capabilities: Array.isArray(endpoint.capabilities) ? [...endpoint.capabilities] : undefined,
+  };
+}
+
+function endpointSummaries(endpoints = {}) {
+  return Object.fromEntries(Object.entries(endpoints).map(([id, endpoint]) => [
+    id,
+    Object.fromEntries(
+      Object.entries(endpointSummary(endpoint)).filter(([, value]) => value !== undefined),
+    ),
+  ]));
 }
 
 function action(base) {
@@ -153,12 +190,13 @@ export function recommendEndpointCapacityActions({
   for (const [endpointProfile, endpoint] of Object.entries(normalizedEndpoints)) {
     const health = normalizedHealth[endpointProfile] || {};
     if (health.healthy === false) {
+      const reason = safeReasonCode(health.reason);
       actions.push(action({
         type: 'endpoint.degraded',
         action: 'reduce_or_pause_endpoint',
         endpointProfile,
         modelId: endpoint.modelId,
-        reason: health.reason || 'health_probe_failed',
+        reason,
         evidence: health,
       }));
     }
@@ -195,7 +233,7 @@ export function recommendEndpointCapacityActions({
       }));
     } else {
       if (health.healthy === false) {
-        blockedReasons.push(health.reason || 'health_probe_failed');
+        blockedReasons.push(safeReasonCode(health.reason));
       }
 
       if (
@@ -269,7 +307,7 @@ export function recommendEndpointCapacityActions({
     recommendationOnly: true,
     autoProcurementAllowed: false,
     routerDefaultsChanged: false,
-    endpoints: normalizedEndpoints,
+    endpoints: endpointSummaries(normalizedEndpoints),
     routeRecommendations,
     actions: uniqueActions,
     summary: {

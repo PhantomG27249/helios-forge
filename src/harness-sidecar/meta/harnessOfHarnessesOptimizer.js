@@ -14,12 +14,6 @@ function safeIdPart(value) {
     .replace(/^_+|_+$/g, '') || 'optimizer';
 }
 
-function timestampPart(now) {
-  const value = typeof now === 'function' ? now() : now;
-  const date = value instanceof Date ? value : new Date(value || Date.now());
-  return date.toISOString().replace(/[-:.]/g, '').toLowerCase();
-}
-
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -37,6 +31,28 @@ function sourceEvidenceIds(record = {}, targetOptimizer) {
     ...(Array.isArray(record.sourceEvidenceIds) ? record.sourceEvidenceIds : []),
   ].filter(Boolean);
   return ids.length ? [...new Set(ids)] : [`${targetOptimizer}_evidence_unavailable`];
+}
+
+function evidenceFingerprint({ parentId, targetOptimizer, sourceEvidenceIds: ids, metrics }) {
+  return [
+    parentId,
+    targetOptimizer,
+    ...ids,
+    metrics.quality,
+    metrics.safety,
+    metrics.cost,
+    metrics.latency,
+    metrics.coverage,
+  ].join('|');
+}
+
+function stableFingerprintId(value) {
+  let hash = 0x811c9dc5;
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 function metricInputs(record = {}) {
@@ -61,8 +77,15 @@ function paretoMetricsFor(targetOptimizer, inputs) {
   });
 }
 
-function selfApprovalEvidence(selfApprovalAttempt, parentOptimizerId) {
-  if (!selfApprovalAttempt || selfApprovalAttempt.optimizerId !== parentOptimizerId) {
+function selfApprovalEvidence(selfApprovalAttempt, parentOptimizerId, parentId) {
+  const attemptedOptimizerId = String(selfApprovalAttempt?.optimizerId || '');
+  if (
+    !selfApprovalAttempt
+    || (
+      attemptedOptimizerId !== String(parentOptimizerId)
+      && safeIdPart(attemptedOptimizerId) !== parentId
+    )
+  ) {
     return Object.freeze({
       attempted: false,
       blocked: false,
@@ -103,24 +126,31 @@ export class HarnessOfHarnessesOptimizer {
     selfApprovalAttempt = null,
   } = {}) {
     const parentId = safeIdPart(parentOptimizerId);
-    const stamp = timestampPart(this.now);
     const candidates = targets.map((targetOptimizer, index) => {
       const normalizedTarget = safeIdPart(targetOptimizer);
       const record = evidenceByTarget[targetOptimizer] || evidenceByTarget[normalizedTarget] || {};
       const inputs = metricInputs(record);
+      const paretoMetrics = paretoMetricsFor(normalizedTarget, inputs);
+      const sourceIds = Object.freeze(sourceEvidenceIds(record, normalizedTarget));
+      const fingerprint = stableFingerprintId(evidenceFingerprint({
+        parentId,
+        targetOptimizer: normalizedTarget,
+        sourceEvidenceIds: sourceIds,
+        metrics: paretoMetrics,
+      }));
       const candidate = {
-        optimizerCandidateId: `${safeIdPart(this.idPrefix)}_${parentId}_${normalizedTarget}_${stamp}_${String(index + 1).padStart(3, '0')}`,
+        optimizerCandidateId: `${safeIdPart(this.idPrefix)}_${parentId}_${normalizedTarget}_${fingerprint}_${String(index + 1).padStart(3, '0')}`,
         parentOptimizerId,
         targetOptimizer: normalizedTarget,
         evidence: {
           kind: 'harness_of_harnesses_optimizer_evidence',
           parentOptimizerId,
           targetOptimizer: normalizedTarget,
-          sourceEvidenceIds: Object.freeze(sourceEvidenceIds(record, normalizedTarget)),
+          sourceEvidenceIds: sourceIds,
           metricInputs: inputs,
-          selfApproval: selfApprovalEvidence(selfApprovalAttempt, parentOptimizerId),
+          selfApproval: selfApprovalEvidence(selfApprovalAttempt, parentOptimizerId, parentId),
         },
-        paretoMetrics: paretoMetricsFor(normalizedTarget, inputs),
+        paretoMetrics,
         evidenceOnly: true,
         canPromote: false,
       };

@@ -112,13 +112,61 @@ test('normalizes critique outputs, agreement, disagreement, confidence, and quar
   assert.equal(evidence.confidence.bounded, true);
   assert.equal(evidence.confidence.authority, 'debate_evidence_only');
   assert.equal(evidence.quarantine.required, true);
-  assert.deepEqual(evidence.quarantine.reasons, [
+  assert.deepEqual([...evidence.quarantine.reasons].sort(), [
     'unsafe_approval_claim',
     'unsafe_apply_claim',
+    'unsafe_promotion_claim',
     'unsafe_verified_claim',
     'unsafe_verifier_bypass_claim',
-    'unsafe_promotion_claim',
-  ]);
+  ].sort());
+});
+
+test('redacts model-visible debate prompts claims and critiques', () => {
+  const prompt = buildModelDebatePrompt({
+    debateId: 'debate-secret',
+    task: {
+      taskId: 'task-secret',
+      goal: 'Review C:\\Users\\jackj\\secret\\trace.json with api_key=sk-test-secret',
+      constraints: ['Do not leak ghp_should_not_leak'],
+    },
+    participant: { id: 'critic' },
+    claims: [{
+      id: 'claim-secret',
+      text: 'Claim references token=ghp_should_not_leak and C:\\Users\\jackj\\secret\\trace.json',
+    }],
+  });
+  const promptText = JSON.stringify(prompt.messages);
+
+  assert.equal(promptText.includes('sk-test-secret'), false);
+  assert.equal(promptText.includes('ghp_should_not_leak'), false);
+  assert.equal(promptText.includes('C:\\Users\\jackj'), false);
+
+  const evidence = buildModelDebateEvidence({
+    debateId: 'debate-secret',
+    taskId: 'task-secret',
+    participants: [{ id: 'critic' }],
+    outputs: [{
+      participantId: 'critic',
+      claims: [{
+        id: 'claim-secret',
+        text: 'Claim includes api_key=sk-test-secret',
+      }],
+      critiques: [{
+        id: 'critique-secret',
+        claimId: 'claim-secret',
+        verdict: 'concern',
+        summary: 'Critique includes C:\\Users\\jackj\\secret\\trace.json and ghp_should_not_leak',
+      }],
+    }],
+  });
+  const visible = JSON.stringify(evidence);
+
+  assert.equal(visible.includes('sk-test-secret'), false);
+  assert.equal(visible.includes('ghp_should_not_leak'), false);
+  assert.equal(visible.includes('C:\\Users\\jackj'), false);
+  assert.equal(evidence.quarantine.required, true);
+  assert.equal(evidence.quarantine.reasons.includes('secret_like_value'), true);
+  assert.equal(evidence.quarantine.reasons.includes('unsafe_path_value'), true);
 });
 
 test('omits verifier bypass authority even when every participant claims approval', () => {
