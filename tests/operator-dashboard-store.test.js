@@ -37,7 +37,7 @@ test('operator dashboard snapshot normalizes evidence lanes and strips promotion
   assert.equal(snapshot.evidenceOnly, true);
   assert.equal(snapshot.canPromote, false);
   assert.equal(snapshot.frontier.canPromote, false);
-  assert.equal(snapshot.governance.apply, false);
+  assert.equal(Object.hasOwn(snapshot.governance, 'apply'), false);
   assert.equal(snapshot.memory.status, 'unavailable');
   assert.deepEqual(snapshot.visual.items, [{ suiteId: 'visual-smoke', passed: true }]);
   assert.equal(snapshot.trust.authority, 'evidence_only');
@@ -69,6 +69,39 @@ test('operator dashboard snapshot recursively quarantines model-visible secrets 
   assert.ok(snapshot.quarantine.reasons.includes('external_verification_escalation'));
 });
 
+test('operator dashboard snapshot strips authority-shaped fields regardless of value type', () => {
+  const snapshot = buildOperatorDashboardSnapshot({
+    promotionAuthority: 'self_authorizing',
+    durableApplyApproved: 'yes',
+    canApply: 'global',
+    router: {
+      recommendation: {
+        model: 'qwen',
+        promotionAuthority: 'router-owned',
+        canApply: 'true',
+        durableApplyApproved: { by: 'model' },
+      },
+    },
+    governance: {
+      nested: {
+        canMutateWorkspace: 'workspace',
+        verifierBypass: 'requested',
+      },
+    },
+    now: () => new Date('2026-06-12T00:00:03.000Z'),
+  });
+
+  assert.equal(Object.hasOwn(snapshot, 'promotionAuthority'), false);
+  assert.equal(Object.hasOwn(snapshot, 'durableApplyApproved'), false);
+  assert.equal(Object.hasOwn(snapshot, 'canApply'), false);
+  assert.equal(Object.hasOwn(snapshot.router.recommendation, 'promotionAuthority'), false);
+  assert.equal(Object.hasOwn(snapshot.router.recommendation, 'canApply'), false);
+  assert.equal(Object.hasOwn(snapshot.router.recommendation, 'durableApplyApproved'), false);
+  assert.equal(Object.hasOwn(snapshot.governance.nested, 'canMutateWorkspace'), false);
+  assert.equal(Object.hasOwn(snapshot.governance.nested, 'verifierBypass'), false);
+  assert.equal(snapshot.router.recommendation.model, 'qwen');
+});
+
 test('operator dashboard store persists snapshots under .harness dashboards operator', async () => {
   await withWorkspace(async (workspaceRoot) => {
     const store = createOperatorDashboardStore({ workspaceRoot });
@@ -90,6 +123,30 @@ test('operator dashboard store persists snapshots under .harness dashboards oper
     assert.equal(saved.snapshot.snapshotId, 'operator-2026-06-12T00-00-00-000Z');
     assert.equal(JSON.parse(await readFile(expectedPath, 'utf8')).evidenceOnly, true);
     assert.equal(path.relative(workspaceRoot, saved.filePath).startsWith(`.harness${path.sep}dashboards${path.sep}operator`), true);
+  });
+});
+
+test('operator dashboard store preserves same-millisecond snapshots with collision-safe ids', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const store = createOperatorDashboardStore({ workspaceRoot });
+    const now = () => new Date('2026-06-12T00:00:04.000Z');
+
+    const first = await store.saveSnapshot(buildOperatorDashboardSnapshot({
+      now,
+      router: { recommendedModel: 'first' },
+    }));
+    const second = await store.saveSnapshot(buildOperatorDashboardSnapshot({
+      now,
+      router: { recommendedModel: 'second' },
+    }));
+
+    assert.notEqual(first.snapshotId, second.snapshotId);
+    assert.deepEqual(await store.listSnapshotIds(), [
+      first.snapshotId,
+      second.snapshotId,
+    ]);
+    assert.equal((await store.loadSnapshot(first.snapshotId)).router.recommendedModel, 'first');
+    assert.equal((await store.loadSnapshot(second.snapshotId)).router.recommendedModel, 'second');
   });
 });
 

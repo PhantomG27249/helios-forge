@@ -19,6 +19,20 @@ const DEFAULT_FS = {
   realpath,
   writeFile,
 };
+const STRIP_AUTHORITY_KEYS = new Set([
+  'apply',
+  'approvalauthority',
+  'approved',
+  'canapply',
+  'canmutateworkspace',
+  'directapplyallowed',
+  'durableapplyapproved',
+  'promote',
+  'promoted',
+  'promotionauthority',
+  'promotionallowed',
+  'verifierbypass',
+]);
 
 function assertWorkspaceRoot(workspaceRoot) {
   if (!workspaceRoot) throw new Error('workspaceRoot is required');
@@ -65,6 +79,41 @@ function normalizeLane(value) {
   if (Array.isArray(value)) return { items: value };
   if (isPlainObject(value)) return { ...value };
   return { status: 'unavailable' };
+}
+
+function normalizeKey(key) {
+  return String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+function stripAuthorityClaims(value) {
+  if (Array.isArray(value)) {
+    const items = value.map(stripAuthorityClaims);
+    return {
+      value: items.map((item) => item.value),
+      stripped: items.some((item) => item.stripped),
+    };
+  }
+  if (!isPlainObject(value)) return { value, stripped: false };
+
+  let stripped = false;
+  const safe = {};
+  for (const [key, childValue] of Object.entries(value)) {
+    const normalizedKey = normalizeKey(key);
+    if (normalizedKey === 'canpromote') {
+      safe[key] = false;
+      stripped = childValue !== false;
+      continue;
+    }
+    if (STRIP_AUTHORITY_KEYS.has(normalizedKey)) {
+      stripped = true;
+      continue;
+    }
+
+    const child = stripAuthorityClaims(childValue);
+    safe[key] = child.value;
+    stripped = stripped || child.stripped;
+  }
+  return { value: safe, stripped };
 }
 
 function snapshotFromInput({
@@ -187,24 +236,33 @@ function jsonContent(value) {
 
 export function buildOperatorDashboardSnapshot(input = {}) {
   const normalized = normalizeSnapshot(input);
-  const quarantined = quarantineModelVisiblePayload(normalized);
+  const stripped = stripAuthorityClaims(normalized);
+  const quarantined = quarantineModelVisiblePayload(stripped.value);
+  const reasons = [...new Set([
+    ...quarantined.reasons,
+    ...(stripped.stripped ? ['authority_claim_removed'] : []),
+  ])].sort();
+  const safe = quarantined.value;
   const snapshot = {
-    ...quarantined.value,
     schemaVersion: 1,
     snapshotId: normalized.snapshotId,
     createdAt: normalized.createdAt,
     evidenceOnly: true,
     canPromote: false,
+    frontier: normalizeLane(safe.frontier),
+    governance: normalizeLane(safe.governance),
+    memory: normalizeLane(safe.memory),
+    visual: normalizeLane(safe.visual),
+    trust: normalizeLane(safe.trust),
+    swarm: normalizeLane(safe.swarm),
+    rho: normalizeLane(safe.rho),
+    router: normalizeLane(safe.router),
     quarantine: {
-      quarantined: quarantined.quarantined,
-      reasons: quarantined.reasons,
+      quarantined: quarantined.quarantined || stripped.stripped,
+      reasons,
       redacted: quarantined.redacted,
     },
   };
-  delete snapshot.apply;
-  delete snapshot.promote;
-  delete snapshot.approved;
-  delete snapshot.promotionAllowed;
   return snapshot;
 }
 
@@ -214,19 +272,27 @@ export function createOperatorDashboardStore({ workspaceRoot, fsImpl = DEFAULT_F
 
   async function saveSnapshot(snapshot = {}) {
     const normalized = normalizeSnapshot(snapshot);
-    const safeSnapshotId = assertSafeSnapshotId(normalized.snapshotId);
-    const filePath = filePathForSnapshot({
-      workspaceRoot: resolvedWorkspaceRoot,
-      snapshotId: safeSnapshotId,
-    });
-    const stored = buildOperatorDashboardSnapshot(normalized);
-    await prepareSafeTarget({ fsImpl, root: resolvedWorkspaceRoot, target: filePath });
-    await fsImpl.writeFile(filePath, jsonContent(stored), 'utf8');
-    return {
-      snapshot: stored,
-      snapshotId: stored.snapshotId,
-      filePath,
-    };
+    const baseSnapshotId = assertSafeSnapshotId(normalized.snapshotId);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const snapshotId = attempt === 0 ? baseSnapshotId : `${baseSnapshotId}-${attempt}`;
+      const filePath = filePathForSnapshot({
+        workspaceRoot: resolvedWorkspaceRoot,
+        snapshotId,
+      });
+      const stored = buildOperatorDashboardSnapshot({ ...normalized, snapshotId });
+      await prepareSafeTarget({ fsImpl, root: resolvedWorkspaceRoot, target: filePath });
+      try {
+        await fsImpl.writeFile(filePath, jsonContent(stored), { encoding: 'utf8', flag: 'wx' });
+        return {
+          snapshot: stored,
+          snapshotId: stored.snapshotId,
+          filePath,
+        };
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error;
+      }
+    }
+    throw new Error(`operator dashboard snapshot id collision limit exceeded: ${baseSnapshotId}`);
   }
 
   async function loadSnapshot(snapshotId) {
