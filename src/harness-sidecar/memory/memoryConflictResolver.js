@@ -31,15 +31,30 @@ function isStaleEvidence(value = {}) {
     && (
       value.stale === true
       || value.superseded === true
+      || Boolean(value.supersededBy)
       || value.status === 'stale'
       || value.sourceStatus === 'stale'
     );
 }
 
-function partitionProvenanceRefs(evidence = []) {
+function partitionProvenanceRefs(record = {}) {
+  const evidence = [...(record.evidence || [])];
+  if (isStaleEvidence(record)) {
+    return {
+      knownProvenanceRefs: [],
+      blockedProvenanceRefs: evidence.map(provenanceRef).filter(Boolean),
+    };
+  }
   return {
     knownProvenanceRefs: evidence.filter((item) => !isStaleEvidence(item)).map(provenanceRef).filter(Boolean),
     blockedProvenanceRefs: evidence.filter(isStaleEvidence).map(provenanceRef).filter(Boolean),
+  };
+}
+
+function mergeProvenancePartitions(...partitions) {
+  return {
+    knownProvenanceRefs: partitions.flatMap((partition) => partition.knownProvenanceRefs),
+    blockedProvenanceRefs: partitions.flatMap((partition) => partition.blockedProvenanceRefs),
   };
 }
 
@@ -62,7 +77,10 @@ export function detectMemoryConflicts({ graph, guardedResolutionEvidence } = {})
 
       const conflictingMemoryIds = [left.memoryId, right.memoryId];
       const evidence = [...(left.evidence || []), ...(right.evidence || [])];
-      const provenanceRefs = partitionProvenanceRefs(evidence);
+      const provenanceRefs = mergeProvenancePartitions(
+        partitionProvenanceRefs(left),
+        partitionProvenanceRefs(right),
+      );
       const guardedResolution = guardedResolutionFor(
         guardedResolutionEvidence,
         provenanceRefs,

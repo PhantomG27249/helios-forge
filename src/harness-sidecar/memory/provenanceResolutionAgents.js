@@ -1,6 +1,7 @@
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 const VERDICTS = new Set(['supported', 'contradicted', 'conflicted', 'insufficient_evidence']);
+const KEYED_WINDOWS_PATH_PATTERN = /\b([A-Za-z0-9_.-]+)=([A-Za-z]:[\\/][^\s,;'"<>]*)/g;
 
 function normalizeList(value) {
   if (!value) return [];
@@ -51,19 +52,34 @@ function inputProvenanceRefs(input = {}) {
   ].map(provenanceId).filter(Boolean));
 }
 
+function redactKeyedDrivePaths(value) {
+  let redacted = String(value);
+  let changed = false;
+  redacted = redacted.replace(KEYED_WINDOWS_PATH_PATTERN, (_match, key) => {
+    changed = true;
+    return `${key}=[redacted:path]`;
+  });
+  return {
+    value: redacted,
+    reasons: changed ? ['unsafe_path_value'] : [],
+  };
+}
+
 function sanitizeReasons(reasons) {
-  const quarantine = quarantineModelVisiblePayload({ reasons: normalizeList(reasons).map(String) }, { maxStringLength: 600 });
+  const preRedacted = normalizeList(reasons).map(redactKeyedDrivePaths);
+  const quarantine = quarantineModelVisiblePayload({ reasons: preRedacted.map((item) => item.value) }, { maxStringLength: 600 });
   return {
     reasons: normalizeList(quarantine.value?.reasons).map(String),
-    quarantineReasons: quarantine.reasons,
+    quarantineReasons: unique([...quarantine.reasons, ...preRedacted.flatMap((item) => item.reasons)]),
   };
 }
 
 function sanitizeProvenanceRef(ref) {
-  const quarantine = quarantineModelVisiblePayload({ provenanceRef: String(ref) }, { maxStringLength: 600 });
+  const preRedacted = redactKeyedDrivePaths(ref);
+  const quarantine = quarantineModelVisiblePayload({ provenanceRef: preRedacted.value }, { maxStringLength: 600 });
   return {
     ref: String(quarantine.value?.provenanceRef ?? ''),
-    reasons: quarantine.reasons,
+    reasons: unique([...quarantine.reasons, ...preRedacted.reasons]),
   };
 }
 

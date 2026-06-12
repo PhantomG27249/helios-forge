@@ -109,6 +109,25 @@ test('redacts secret and path shaped provenance refs while preserving safe refs'
   assert.equal(evidence.reasons.includes('secret_like_value'), true);
 });
 
+test('redacts key-prefixed drive paths in provenance refs and reasons', () => {
+  const keyPrefixedPath = 'ref=C:\\Users\\jackj\\Github\\helios-forge\\.env';
+  const sourceReason = 'source=C:\\Users\\jackj\\Github\\helios-forge\\.env';
+  const evidence = normalizeResolutionEvidence({
+    verdict: 'supported',
+    confidence: 0.8,
+    provenanceRefs: ['passage-safe', keyPrefixedPath],
+    reasons: [sourceReason],
+  }, { knownProvenanceRefs: ['passage-safe', keyPrefixedPath] });
+
+  const joinedRefs = evidence.provenanceRefs.join(' ');
+  const joinedReasons = evidence.reasons.join(' ');
+  assert.equal(evidence.provenanceRefs.includes('passage-safe'), true);
+  assert.equal(joinedRefs.includes('C:\\Users\\jackj'), false);
+  assert.equal(joinedReasons.includes('C:\\Users\\jackj'), false);
+  assert.equal(`${joinedRefs} ${joinedReasons}`.includes('[redacted:path]'), true);
+  assert.equal(evidence.reasons.includes('unsafe_path_value'), true);
+});
+
 test('redacts unknown path and token shaped provenance refs in reasons', () => {
   const unsafePath = 'C:\\Users\\jackj\\Github\\helios-forge\\.env';
   const unsafeSecret = 'token=abc123';
@@ -369,4 +388,43 @@ test('direct conflict resolver downgrades guarded resolution backed only by stal
   assert.deepEqual(conflicts[0].guardedResolution.provenanceRefs, []);
   assert.equal(conflicts[0].guardedResolution.reasons.includes('stale_provenance_ref:passage-stale'), true);
   assert.equal(conflicts[0].guardedResolution.reasons.includes('missing_guarded_provenance'), true);
+});
+
+test('direct conflict resolver blocks evidence from record-level stale memories', () => {
+  const graph = new MemoryGraph();
+  graph.addMemory({
+    type: 'fact',
+    subject: 'verifier.command',
+    predicate: 'equals',
+    object: 'npm test',
+    summary: 'The stale verifier command is npm test.',
+    evidence: ['passage-old'],
+    stale: true,
+    reviewStatus: 'reviewed',
+    validatorBacked: true,
+  });
+  graph.addMemory({
+    type: 'fact',
+    subject: 'verifier.command',
+    predicate: 'equals',
+    object: 'node --test tests/harness-memory.test.js',
+    summary: 'The verifier command is node --test.',
+    evidence: [],
+    reviewStatus: 'reviewed',
+    validatorBacked: true,
+  });
+
+  const conflicts = detectMemoryConflicts({
+    graph,
+    guardedResolutionEvidence: {
+      verdict: 'supported',
+      confidence: 0.9,
+      provenanceRefs: ['passage-old'],
+      reasons: ['Model cited a stale memory record.'],
+    },
+  });
+
+  assert.equal(conflicts[0].guardedResolution.verdict, 'insufficient_evidence');
+  assert.deepEqual(conflicts[0].guardedResolution.provenanceRefs, []);
+  assert.equal(conflicts[0].guardedResolution.reasons.includes('stale_provenance_ref:passage-old'), true);
 });
