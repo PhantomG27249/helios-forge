@@ -22,6 +22,15 @@ The purpose is to separate what Helios actually implements from what it borrows 
 | Planned | The repo contains a concrete plan, but the main runtime code does not exist yet. |
 | Not implemented | No meaningful implementation beyond docs or adjacent primitives. |
 
+Capability-goal maturity is tracked separately from this coverage status:
+
+| Maturity | Meaning |
+| --- | --- |
+| Implemented substrate | Deterministic local capability is present and test-covered. |
+| Production-gated capability | A real lane exists, but feature gates, model-backed providers, external transport, dashboards, or repeated production cycles remain required. |
+| Production evidence available | Persisted replay/report evidence and operator/frontier dashboard snapshots are available for the lane. |
+| Still-future paper-grade autonomy | The paper-grade autonomous loop remains unproven and must not be described as production autonomous or proven Level 4. |
+
 ## Overall Architecture
 
 Helios Forge is not a direct clone of any one paper. It combines ideas from all four into a safer local harness pattern:

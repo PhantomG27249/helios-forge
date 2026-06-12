@@ -177,6 +177,15 @@ implemented substrate -> shared composition layer -> governed network-of-network
 
 Helios is currently solidly in the first two bands, with a real but still gated foothold in the third.
 
+Capability-goal status rows use a stricter maturity legend:
+
+| Maturity | Meaning |
+| --- | --- |
+| Implemented substrate | The deterministic local capability exists with focused tests. |
+| Production-gated capability | The lane has a real implementation path, but production feature gates, model-backed providers, external transports, dashboards, or repeated cycles are still required. |
+| Production evidence available | Required persisted reports and operator/frontier dashboard snapshots exist for the lane. |
+| Still-future paper-grade autonomy | Repeated production-sized autonomous operation, learned judgment, external durability, or nested execution remains unproven. |
+
 ## Security And Control Boundaries
 
 The architecture treats model output, web content, tool output, external agent claims, visual OCR text, and generated candidates as untrusted until separately checked.

@@ -24,7 +24,7 @@ Approximate level:
 | Stage | Current Read |
 | --- | --- |
 | Current implementation | Level 3.9: self-improving swarm harness with unified evolution envelopes, deterministic recursive meta-harness capability spine, and improvement governance |
-| After scale/continuity hardening | Level 4: network-of-networks harness |
+| After scale/continuity hardening | Level 4-ready candidate: production-gated network-of-networks harness with persisted dashboard evidence |
 | Target architecture | Level 4: network-of-networks harness |
 | Paper-grade autonomous research system | Level 5: long-running governed research organism |
 
