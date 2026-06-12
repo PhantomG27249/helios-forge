@@ -1,5 +1,9 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { runHarnessExperiment } from './harnessExperimentRunner.js';
 import { updateHarnessFrontier } from './harnessFrontier.js';
+import { createSourceTreeVariantRunner } from './sourceTreeVariantRunner.js';
 import {
   createHarnessVariantWorkspace,
   readHarnessVariantProposerContext,
@@ -17,6 +21,11 @@ function assertSafeId(value, label) {
 function normalizeObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value;
+}
+
+function asArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function normalizePositiveInteger(value, fallback) {
@@ -39,10 +48,84 @@ async function invokeEvaluator(evaluator, args) {
   throw new Error('evaluator must be a function or expose evaluate');
 }
 
+function publicCampaign(campaign = {}) {
+  const { workspaceRoot, ...safeCampaign } = campaign;
+  return safeCampaign;
+}
+
+function sourceTreeRunnerConfig(sourceTree = {}) {
+  const { commandRunner, ...config } = normalizeObject(sourceTree);
+  return config;
+}
+
+function normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant }) {
+  if (variantRunner) return variantRunner;
+  if (typeof sourceTree?.commandRunner === 'function') {
+    return createSourceTreeVariantRunner({
+      workspaceRoot,
+      variantRoot: variant.variantDir,
+      commandRunner: sourceTree.commandRunner,
+    });
+  }
+  return null;
+}
+
+function assertNoActiveMutationClaims(value, label = 'variant result', seen = new WeakSet()) {
+  if (!value || typeof value !== 'object') return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (value.activeWorkspaceMutation === true) {
+    throw new Error(`${label} claimed active workspace mutation`);
+  }
+  if (value.promotionAuthority === true) {
+    throw new Error(`${label} claimed promotion authority`);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (child && typeof child === 'object') {
+      assertNoActiveMutationClaims(child, `${label}.${key}`, seen);
+    }
+  }
+}
+
+function assertRelativeArtifactPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('replay artifact path is required');
+  }
+  const normalized = path.normalize(filePath);
+  if (path.isAbsolute(normalized) || normalized === '..' || normalized.startsWith(`..${path.sep}`)) {
+    throw new Error(`Unsafe replay artifact path: ${filePath}`);
+  }
+  return normalized;
+}
+
+function isInsideRoot(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function readReplayReportFromArtifacts({ variant, artifacts } = {}) {
+  const replayFiles = asArray(artifacts?.replay?.files);
+  for (const file of replayFiles) {
+    const relativePath = assertRelativeArtifactPath(file?.path);
+    const reportPath = path.resolve(variant.variantDir, relativePath);
+    if (!isInsideRoot(variant.variantDir, reportPath)) {
+      throw new Error(`Replay artifact path escapes variant: ${file?.path}`);
+    }
+    try {
+      const parsed = JSON.parse(await readFile(reportPath, 'utf8'));
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  return null;
+}
+
 async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycleArgs }) {
+  const runnerSourceTree = sourceTreeRunnerConfig(sourceTree);
   const prepared = typeof variantRunner?.prepareVariant === 'function'
     ? await variantRunner.prepareVariant({
-      ...sourceTree,
+      ...runnerSourceTree,
       variantRoot: variant.variantDir,
       variant,
       ...cycleArgs,
@@ -50,7 +133,7 @@ async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycl
     : null;
   const run = typeof variantRunner?.runVariant === 'function'
     ? await variantRunner.runVariant({
-      ...(sourceTree.run || {}),
+      ...(runnerSourceTree.run || {}),
       variantRoot: variant.variantDir,
       variant,
       prepared,
@@ -59,7 +142,7 @@ async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycl
     : null;
   const collected = typeof variantRunner?.collectArtifacts === 'function'
     ? await variantRunner.collectArtifacts({
-      ...(sourceTree.collect || {}),
+      ...(runnerSourceTree.collect || {}),
       variantRoot: variant.variantDir,
       variant,
       prepared,
@@ -67,7 +150,7 @@ async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycl
       ...cycleArgs,
     })
     : null;
-  return {
+  const result = {
     prepared,
     run,
     collected,
@@ -75,19 +158,25 @@ async function runVariantRunnerObject({ variantRunner, sourceTree, variant, cycl
     artifacts: collected?.artifacts || null,
     replayReport: collected?.replayReport || run?.replayReport || prepared?.replayReport || null,
   };
+  assertNoActiveMutationClaims(result);
+  return result;
 }
 
-async function invokeVariantRunner({ variantRunner, sourceTree, variant, cycleArgs }) {
-  if (!variantRunner) return {};
-  if (typeof variantRunner === 'function') {
-    return normalizeObject(await variantRunner({
+async function invokeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant, cycleArgs }) {
+  const runner = normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant });
+  if (!runner) return {};
+  const runnerSourceTree = sourceTreeRunnerConfig(sourceTree);
+  if (typeof runner === 'function') {
+    const result = normalizeObject(await runner({
       ...cycleArgs,
       variant,
       variantRoot: variant.variantDir,
-      sourceTree,
+      sourceTree: runnerSourceTree,
     }));
+    assertNoActiveMutationClaims(result);
+    return result;
   }
-  return runVariantRunnerObject({ variantRunner, sourceTree, variant, cycleArgs });
+  return runVariantRunnerObject({ variantRunner: runner, sourceTree, variant, cycleArgs });
 }
 
 function metricsFromEvaluation(evaluation) {
@@ -133,6 +222,7 @@ export async function runMetaHarnessCampaign({
   const totalCycles = normalizePositiveInteger(maxCycles, normalizedCampaign.maxCycles || 1);
   const target = normalizedCampaign.target || 'meta-harness';
   const baselineMetrics = normalizeObject(normalizedCampaign.baselineMetrics);
+  const safeCampaign = publicCampaign(normalizedCampaign);
   let currentFrontier = Array.isArray(frontier)
     ? [...frontier]
     : [...(Array.isArray(normalizedCampaign.frontier) ? normalizedCampaign.frontier : [])];
@@ -149,7 +239,7 @@ export async function runMetaHarnessCampaign({
       variantRefs: cycles.map((cycle) => cycle.variant),
     });
     const proposal = await invokeProposer(proposer, {
-      campaign: normalizedCampaign,
+      campaign: safeCampaign,
       cycleIndex,
       cycleId,
       target,
@@ -186,7 +276,7 @@ export async function runMetaHarnessCampaign({
       },
     });
     const cycleArgs = {
-      campaign: normalizedCampaign,
+      campaign: safeCampaign,
       cycleIndex,
       cycleId,
       target,
@@ -198,17 +288,22 @@ export async function runMetaHarnessCampaign({
     const variantResult = await invokeVariantRunner({
       variantRunner,
       sourceTree: normalizeObject(normalizedCampaign.sourceTree),
+      workspaceRoot,
       variant,
       cycleArgs,
+    });
+    const artifactReplayReport = await readReplayReportFromArtifacts({
+      variant,
+      artifacts: variantResult.artifacts,
     });
     const evaluation = await invokeEvaluator(evaluator, {
       ...cycleArgs,
       variant,
       variantResult,
-      replayReport: replayReportFrom({ evaluation: variantResult, variantResult }),
+      replayReport: replayReportFrom({ evaluation: variantResult, variantResult }) || artifactReplayReport,
     });
     const metrics = metricsFromEvaluation(evaluation);
-    const replayReport = replayReportFrom({ evaluation, variantResult });
+    const replayReport = replayReportFrom({ evaluation, variantResult }) || artifactReplayReport;
     const frontierBefore = currentFrontier;
     currentFrontier = updateHarnessFrontier({
       current: currentFrontier,

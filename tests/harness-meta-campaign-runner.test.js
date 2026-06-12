@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -96,7 +96,6 @@ test('meta-harness campaign materializes isolated source-tree variants without p
   await withWorkspace(async (workspaceRoot) => {
     await writeFile(path.join(workspaceRoot, 'package.json'), '{"type":"module"}\n', 'utf8');
     await writeFile(path.join(workspaceRoot, 'runner.js'), 'export const baseline = true;\n', 'utf8');
-    const variantCalls = [];
 
     const result = await runMetaHarnessCampaign({
       campaign: {
@@ -109,6 +108,20 @@ test('meta-harness campaign materializes isolated source-tree variants without p
           configPaths: ['package.json'],
           run: { command: 'node', args: ['runner.js'], timeoutMs: 1000 },
           collect: { replayPaths: ['.harness/replay/report.json'] },
+          commandRunner: async ({ cwd, command, args }) => {
+            await mkdir(path.join(cwd, '.harness', 'replay'), { recursive: true });
+            await writeFile(
+              path.join(cwd, '.harness', 'replay', 'report.json'),
+              JSON.stringify({
+                replayId: 'source_tree_replay',
+                command,
+                args,
+                cases: [{ caseId: 'heldout', passed: true }],
+              }),
+              'utf8',
+            );
+            return { exitCode: 0, stdout: 'ok', stderr: '' };
+          },
         },
       },
       maxCycles: 1,
@@ -118,50 +131,60 @@ test('meta-harness campaign materializes isolated source-tree variants without p
           'candidate.js': 'export const candidate = true;\n',
         },
       }),
-      variantRunner: {
-        prepareVariant: async (input) => {
-          variantCalls.push({ step: 'prepare', ...input });
-          return {
-            sourceTreeManifest: {
-              entrypoint: input.entrypoint,
-              sourceFiles: [{ path: 'runner.js' }],
-              activeWorkspaceMutation: false,
-              evidenceOnly: true,
-            },
-          };
-        },
-        runVariant: async (input) => {
-          variantCalls.push({ step: 'run', ...input });
-          return { result: { exitCode: 0, stdout: 'ok', stderr: '' } };
-        },
-        collectArtifacts: async (input) => {
-          variantCalls.push({ step: 'collect', ...input });
-          return {
-            artifacts: {
-              replay: { files: [{ path: 'variant-artifacts/replay/report.json' }] },
-            },
-          };
-        },
-      },
       evaluator: async () => ({
         metrics: { quality: 0.7, safety: 0.96, cost: 0.2, latency: 0.2 },
-        replayReport: { replayId: 'source_tree_replay', cases: [{ caseId: 'heldout', passed: true }] },
       }),
     });
 
-    assert.deepEqual(variantCalls.map((call) => call.step), ['prepare', 'run', 'collect']);
-    assert.match(variantCalls[0].variantRoot, /source_tree_candidate$/);
-    assert.equal(variantCalls[0].entrypoint, 'runner.js');
-    assert.deepEqual(variantCalls[0].sourcePaths, ['runner.js']);
-    assert.equal(variantCalls[1].command, 'node');
-    assert.deepEqual(variantCalls[2].replayPaths, ['.harness/replay/report.json']);
+    assert.equal(result.cycles[0].sourceTree.sourceTreeManifest.entrypoint, 'runner.js');
+    assert.deepEqual(
+      result.cycles[0].sourceTree.artifacts.replay.files.map((file) => file.path),
+      ['variant-artifacts/replay/report.json'],
+    );
+    assert.equal(result.cycles[0].replayReport.replayId, 'source_tree_replay');
+    assert.equal(result.cycles[0].replayReport.command, 'node');
     assert.equal(result.cycles[0].sourceTree.sourceTreeManifest.activeWorkspaceMutation, false);
     assert.equal(result.cycles[0].promotion.evidenceOnly, true);
     assert.equal(result.cycles[0].promotion.activeWorkspaceMutation, false);
     assert.equal(result.cycles[0].promotion.promotionAuthority, false);
 
     const promotion = JSON.parse(await readFile(path.join(result.cycles[0].run.runDir, 'promotion.json'), 'utf8'));
+    const replayEvidence = JSON.parse(await readFile(
+      path.join(result.cycles[0].run.runDir, 'replay-evidence.json'),
+      'utf8',
+    ));
     assert.equal(promotion.promotionAuthority, false);
     assert.equal(promotion.activeWorkspaceMutation, false);
+    assert.equal(replayEvidence.report.replayId, 'source_tree_replay');
+  });
+});
+
+test('meta-harness campaign hides active workspace roots from variant runners and rejects mutation claims', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    let observedInput = null;
+
+    await assert.rejects(
+      () => runMetaHarnessCampaign({
+        campaign: {
+          campaignId: 'mutation_boundary_campaign',
+          workspaceRoot,
+        },
+        maxCycles: 1,
+        proposer: async () => ({ candidateId: 'mutation_candidate' }),
+        variantRunner: async (input) => {
+          observedInput = input;
+          return {
+            activeWorkspaceMutation: true,
+          };
+        },
+        evaluator: async () => ({
+          metrics: { quality: 0.4, safety: 0.9, cost: 0.3, latency: 0.3 },
+        }),
+      }),
+      /active workspace mutation/i,
+    );
+
+    assert.equal(observedInput.workspaceRoot, undefined);
+    assert.equal(observedInput.campaign.workspaceRoot, undefined);
   });
 });
