@@ -450,7 +450,12 @@ export async function runBesLaneRuntime({
     adaptiveAction,
     trajectoryOperators: [
       ...asArray(liveTrajectoryOperators),
-      ...normalizedCandidates.flatMap((candidate) => candidate.bes?.trajectoryOperators || []),
+      ...normalizedCandidates.flatMap((candidate) => (
+        candidate.bes?.trajectoryOperators || []
+      ).map((operator) => ({
+        ...operator,
+        candidateId: candidate.candidateId,
+      }))),
     ],
   });
   const liveFusionByCandidateId = new Map(

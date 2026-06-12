@@ -372,6 +372,30 @@ test('external policy evidence is recorded but does not grant BES lane apply aut
   assert.deepEqual(candidate.promotion.blockedReasons, ['evidence_only_lane']);
 });
 
+test('live BES fusion keeps candidate-local trajectory provenance scoped per candidate', async () => {
+  const result = await runBesLaneRuntime({
+    lane: 'code',
+    taskId: 'task-trajectory-scope',
+    candidates: [
+      {
+        candidateId: 'candidate_a',
+        trajectory: { operator: 'mutation', parents: ['seed_a'] },
+      },
+      {
+        candidateId: 'candidate_b',
+        trajectory: { operator: 'mutation', parents: ['seed_b'] },
+      },
+    ],
+    evaluator: () => ({ score: 0.5, reasons: ['trajectory scoped'] }),
+  });
+
+  const candidateA = result.candidates.find((candidate) => candidate.candidateId === 'candidate_a');
+  const candidateB = result.candidates.find((candidate) => candidate.candidateId === 'candidate_b');
+
+  assert.deepEqual(candidateA.bes.fusion.live.trajectoryOperators.map((operator) => operator.parents), [['seed_a']]);
+  assert.deepEqual(candidateB.bes.fusion.live.trajectoryOperators.map((operator) => operator.parents), [['seed_b']]);
+});
+
 test('emits a blocked BES lane event when runtime execution fails', async () => {
   const events = [];
 
