@@ -110,7 +110,6 @@ function graphConnectivity(graph = {}) {
   const nodeIds = new Set(nodes.map((node) => String(node.id ?? node)));
   const parent = new Map([...nodeIds].map((id) => [id, id]));
   const seenEdges = new Set();
-  let connectedEdges = 0;
 
   function find(id) {
     const current = parent.get(id);
@@ -136,10 +135,16 @@ function graphConnectivity(graph = {}) {
     const key = [from, to].sort().join('->');
     if (seenEdges.has(key)) continue;
     seenEdges.add(key);
-    if (union(from, to)) connectedEdges += 1;
+    union(from, to);
   }
 
-  return percent(connectedEdges, nodes.length);
+  const componentSizes = new Map();
+  for (const nodeId of nodeIds) {
+    const root = find(nodeId);
+    componentSizes.set(root, (componentSizes.get(root) || 0) + 1);
+  }
+  const largestComponentSize = Math.max(0, ...componentSizes.values());
+  return percent(largestComponentSize, nodes.length);
 }
 
 function retrievalHitRate(retrievalResults = []) {

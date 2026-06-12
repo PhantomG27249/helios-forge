@@ -125,7 +125,7 @@ test('memory scale evals report dashboard-safe paper metrics without authority',
   assert.equal(corpus.metrics.activeFactPrecision, 50);
   assert.equal(corpus.metrics.conflictQuality, 50);
   assert.equal(corpus.metrics.provenanceCoverage, 67);
-  assert.equal(corpus.metrics.connectivity, 50);
+  assert.equal(corpus.metrics.connectivity, 75);
   assert.equal(corpus.metrics.retrievalHitRate, 50);
   assert.equal(corpus.metrics.budgetEfficiency, 50);
   assert.equal(corpus.metrics.migrationHealth, 50);
@@ -214,5 +214,19 @@ test('connectivity ignores duplicate, cyclic, and nonexistent-node edges', () =>
     },
   });
 
-  assert.equal(corpus.metrics.connectivity, 50);
+  assert.equal(corpus.metrics.connectivity, 75);
+});
+
+test('connectivity scores a fully connected tree as complete graph coverage', () => {
+  const corpus = scoreMemoryCorpus({
+    graph: {
+      nodes: [{ id: 'memory-a' }, { id: 'memory-b' }, { id: 'memory-c' }],
+      edges: [
+        { from: 'memory-a', to: 'memory-b' },
+        { from: 'memory-b', to: 'memory-c' },
+      ],
+    },
+  });
+
+  assert.equal(corpus.metrics.connectivity, 100);
 });

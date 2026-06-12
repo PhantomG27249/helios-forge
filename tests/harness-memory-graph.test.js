@@ -209,7 +209,7 @@ test('memory evals report paper-grade graph retrieval and evidence metrics', () 
   assert.equal(corpus.metrics.conflictQuality, 50);
   assert.equal(corpus.metrics.activeFactPrecision, 50);
   assert.equal(corpus.metrics.evidenceCoverage, 50);
-  assert.equal(corpus.metrics.connectivity, 67);
+  assert.equal(corpus.metrics.connectivity, 100);
   assert.equal(corpus.metrics.retrievalHitRate, 50);
   assert.equal(corpus.metrics.budgetEfficiency, 50);
 });
