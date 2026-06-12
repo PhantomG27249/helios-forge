@@ -1,3 +1,5 @@
+import { normalizeResolutionEvidence } from './provenanceResolutionAgents.js';
+
 function isContradictory(left, right) {
   return left.memoryId !== right.memoryId
     && left.subject
@@ -7,7 +9,28 @@ function isContradictory(left, right) {
     && left.object !== right.object;
 }
 
-export function detectMemoryConflicts({ graph } = {}) {
+function provenanceRef(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'object') {
+    return value.id
+      || value.passageId
+      || value.provenanceId
+      || value.provenanceRef
+      || value.ref
+      || value.sourceId
+      || value.traceId
+      || null;
+  }
+  return String(value);
+}
+
+function guardedResolutionFor(evidence, knownProvenanceRefs) {
+  if (!evidence) return undefined;
+  return normalizeResolutionEvidence(evidence, { knownProvenanceRefs });
+}
+
+export function detectMemoryConflicts({ graph, guardedResolutionEvidence } = {}) {
   if (!graph) throw new Error('graph is required');
 
   const conflicts = [];
@@ -20,6 +43,11 @@ export function detectMemoryConflicts({ graph } = {}) {
       if (!isContradictory(left, right)) continue;
 
       const conflictingMemoryIds = [left.memoryId, right.memoryId];
+      const evidence = [...(left.evidence || []), ...(right.evidence || [])];
+      const guardedResolution = guardedResolutionFor(
+        guardedResolutionEvidence,
+        evidence.map(provenanceRef).filter(Boolean),
+      );
       graph.updateMemory(left.memoryId, {
         reviewStatus: 'quarantined',
         contradictions: [...(left.contradictions || []), right.memoryId],
@@ -35,7 +63,8 @@ export function detectMemoryConflicts({ graph } = {}) {
         subject: left.subject,
         predicate: left.predicate,
         conflictingMemoryIds,
-        evidence: [...(left.evidence || []), ...(right.evidence || [])],
+        evidence,
+        ...(guardedResolution ? { guardedResolution } : {}),
         reviewStatus: 'needs_review',
         validatorBacked: false,
       });
