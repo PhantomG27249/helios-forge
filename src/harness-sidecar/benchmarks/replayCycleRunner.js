@@ -100,20 +100,8 @@ function structuredReasonValue(reason) {
   }
 }
 
-function sanitizeRegressionReason(reason) {
-  const structuredReason = structuredReasonValue(reason);
-  if (structuredReason) {
-    const quarantined = quarantineModelVisiblePayload(structuredReason, { maxStringLength: 600 });
-    return {
-      reason: JSON.stringify(quarantined.value),
-      quarantineReasons: [...quarantined.reasons].sort(),
-    };
-  }
-
-  const quarantined = quarantineModelVisiblePayload({ reason: stringifyReason(reason) }, { maxStringLength: 600 });
-  const quarantineReasons = new Set(quarantined.reasons);
-  let sanitized = String(quarantined.value?.reason ?? '');
-
+function scrubReplayAuthorityText(value, quarantineReasons) {
+  let sanitized = value;
   sanitized = sanitized.replace(AUTHORITY_ASSIGNMENT_PATTERN, (match) => {
     quarantineReasons.add('authority_claim_removed');
     const separator = match.includes(':') ? ':' : '=';
@@ -124,6 +112,40 @@ function sanitizeRegressionReason(reason) {
     const separator = match.includes(':') ? ':' : '=';
     return `canPromote${separator}false`;
   });
+  return sanitized;
+}
+
+function scrubStructuredReasonStringLeaves(value, quarantineReasons) {
+  if (typeof value === 'string') return scrubReplayAuthorityText(value, quarantineReasons);
+  if (Array.isArray(value)) {
+    return value.map((item) => scrubStructuredReasonStringLeaves(item, quarantineReasons));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        scrubStructuredReasonStringLeaves(entry, quarantineReasons),
+      ]),
+    );
+  }
+  return value;
+}
+
+function sanitizeRegressionReason(reason) {
+  const structuredReason = structuredReasonValue(reason);
+  if (structuredReason) {
+    const quarantined = quarantineModelVisiblePayload(structuredReason, { maxStringLength: 600 });
+    const quarantineReasons = new Set(quarantined.reasons);
+    return {
+      reason: JSON.stringify(scrubStructuredReasonStringLeaves(quarantined.value, quarantineReasons)),
+      quarantineReasons: [...quarantineReasons].sort(),
+    };
+  }
+
+  const quarantined = quarantineModelVisiblePayload({ reason: stringifyReason(reason) }, { maxStringLength: 600 });
+  const quarantineReasons = new Set(quarantined.reasons);
+  let sanitized = String(quarantined.value?.reason ?? '');
+  sanitized = scrubReplayAuthorityText(sanitized, quarantineReasons);
 
   return {
     reason: sanitized || 'regression_reason_quarantined',

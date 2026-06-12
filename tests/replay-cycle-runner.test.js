@@ -293,6 +293,42 @@ test('structured regression reasons are recursively sanitized before stringifyin
   );
 });
 
+test('structured regression reason string leaves use replay authority quarantine', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'structured-regression-string-leaves',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-string-leaf' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.1 },
+      reasons: [{
+        note: 'authority=apply canPromote=true',
+        nested: { notes: ['safe observation', 'canPromote=true authority=apply'] },
+      }],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.regressions[0].reasons, [
+    '{"note":"authority=evidence_only canPromote=false","nested":{"notes":["safe observation","canPromote=false authority=evidence_only"]}}',
+  ]);
+  const serialized = JSON.stringify(report.regressions);
+  assert.equal(serialized.includes('authority=apply'), false);
+  assert.equal(serialized.includes('canPromote=true'), false);
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'regression_reason',
+      id: 'candidate-string-leaf:case-1',
+      reason: 'authority_claim_removed',
+    },
+  ]);
+});
+
 test('duplicate candidate ids are rejected before replay execution', async () => {
   const calls = [];
   await assert.rejects(
