@@ -2,6 +2,7 @@ import { verifyDenseSubgoals } from './denseSubgoalVerifier.js';
 import { recordLineage } from './globalLineageTracker.js';
 import { getBesLaneContract } from './laneContracts.js';
 import { normalizeLaneEvidence, sanitizeModelRouterEvidence, summarizeLanePromotion } from './laneEvidence.js';
+import { fuseLiveBesLane } from './liveBesFusion.js';
 import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
 import { normalizeSoulRefs } from '../souls/soulEvidence.js';
 
@@ -288,6 +289,9 @@ export async function runBesLaneRuntime({
   candidates = [],
   hardCases = [],
   denseSubgoals = [],
+  backwardGoals = [],
+  denseScores = [],
+  adaptiveAction,
   evaluator,
   replayRunner,
   a2aEnvelope,
@@ -295,6 +299,7 @@ export async function runBesLaneRuntime({
   adaptiveSearch,
   toolTree,
   trajectory,
+  trajectoryOperators: liveTrajectoryOperators,
   championArchive,
   frontier,
   verifierGenome,
@@ -305,6 +310,7 @@ export async function runBesLaneRuntime({
   const normalizedHardCases = cloneJson(asArray(hardCases), []);
   const normalizedCandidates = [];
   const futureHardCases = [];
+  let liveFusion = null;
 
   for (let index = 0; index < asArray(candidates).length; index += 1) {
     const candidate = asArray(candidates)[index] ?? {};
@@ -437,6 +443,34 @@ export async function runBesLaneRuntime({
     normalizedCandidates.push(normalizedCandidate);
   }
 
+  liveFusion = fuseLiveBesLane({
+    forwardCandidates: normalizedCandidates,
+    backwardGoals,
+    denseScores,
+    adaptiveAction,
+    trajectoryOperators: liveTrajectoryOperators,
+  });
+  const liveFusionByCandidateId = new Map(
+    liveFusion.candidates.map((candidate) => [candidate.candidateId, candidate]),
+  );
+  for (const candidate of normalizedCandidates) {
+    const live = liveFusionByCandidateId.get(candidate.candidateId);
+    candidate.bes.fusion = {
+      ...candidate.bes.fusion,
+      live: live ? {
+        kind: liveFusion.kind,
+        rank: live.rank,
+        score: live.score,
+        scoreBreakdown: live.scoreBreakdown,
+        matchedBackwardGoalIds: live.matchedBackwardGoalIds,
+        trajectoryOperators: live.trajectoryOperators,
+        compatibleFamily: live.compatibleFamily,
+        authority: live.authority,
+        canPromote: live.canPromote,
+      } : null,
+    };
+  }
+
   return {
     lane: contract.lane,
     taskId: normalizeId(taskId, 'task'),
@@ -445,6 +479,7 @@ export async function runBesLaneRuntime({
     futureHardCases,
     candidateCount: normalizedCandidates.length,
     candidates: normalizedCandidates,
+    liveFusion,
     updatedAt: now,
   };
 }
