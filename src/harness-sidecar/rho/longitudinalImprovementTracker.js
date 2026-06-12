@@ -215,8 +215,9 @@ function classifyRecord({ aggregateDelta, regressions = [], drift = {} } = {}) {
 }
 
 function normalizeRegression(regression = {}, suiteId) {
-  const previous = Number(regression.previous);
-  const current = Number(regression.current);
+  const previous = Number(regression.previous ?? regression.baselineScore);
+  const current = Number(regression.current ?? regression.candidateScore);
+  const delta = Number(regression.delta);
   return {
     suiteId: stableString(regression.suiteId, suiteId),
     caseId: stableString(regression.caseId ?? regression.id, 'unknown_case'),
@@ -224,7 +225,9 @@ function normalizeRegression(regression = {}, suiteId) {
     metric: stableString(regression.metric, 'aggregateScore'),
     previous: Number.isFinite(previous) ? roundMetric(previous) : null,
     current: Number.isFinite(current) ? roundMetric(current) : null,
-    delta: Number.isFinite(previous) && Number.isFinite(current) ? roundMetric(current - previous) : null,
+    delta: Number.isFinite(delta)
+      ? roundMetric(delta)
+      : (Number.isFinite(previous) && Number.isFinite(current) ? roundMetric(current - previous) : null),
     authority: 'evidence_only',
     canPromote: false,
   };

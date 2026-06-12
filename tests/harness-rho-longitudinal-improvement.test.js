@@ -88,6 +88,47 @@ test('tracks regressions on old suites across repeated RHO reports', () => {
   });
 });
 
+test('preserves replay-cycle regression score evidence for old suites', () => {
+  const history = updateRhoImprovementHistory({
+    replayReport: {
+      reportId: 'rho-old-replay-regression',
+      suiteId: 'legacy-replay-suite',
+      suiteAgeDays: 60,
+      candidateIds: ['candidate-alpha'],
+      aggregateScore: 0.67,
+      domainScores: { code: { baselineScore: 0.82, bestCandidateScore: 0.67, delta: -0.15 } },
+      regressions: [
+        {
+          caseId: 'legacy-replay-case',
+          domain: 'code',
+          metric: 'quality',
+          baselineScore: 0.82,
+          candidateScore: 0.67,
+          delta: -0.15,
+          authority: 'trusted_apply',
+          canPromote: true,
+          apply: true,
+        },
+      ],
+      budget: { casesRun: 1 },
+    },
+    now: '2026-06-12T00:00:00.000Z',
+  });
+
+  assert.deepEqual(history[0].oldSuiteRegressions[0], {
+    suiteId: 'legacy-replay-suite',
+    caseId: 'legacy-replay-case',
+    domain: 'code',
+    metric: 'quality',
+    previous: 0.82,
+    current: 0.67,
+    delta: -0.15,
+    authority: 'evidence_only',
+    canPromote: false,
+  });
+  assert.equal(Object.hasOwn(history[0].oldSuiteRegressions[0], 'apply'), false);
+});
+
 test('captures domain-specific drift between longitudinal RHO reports', () => {
   const first = updateRhoImprovementHistory({
     replayReport: {
