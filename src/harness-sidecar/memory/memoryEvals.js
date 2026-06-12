@@ -11,8 +11,14 @@ function normalizeList(value) {
 }
 
 function safeText(value) {
-  if (!hasText(value)) return value;
-  return redactModelVisibleValue(String(value), { maxStringLength: 500 });
+  if (value === undefined || value === null) return value;
+  const sanitized = redactModelVisibleValue(value, { maxStringLength: 500 });
+  if (typeof sanitized === 'string') return sanitized;
+  if (typeof sanitized === 'number' || typeof sanitized === 'boolean' || typeof sanitized === 'bigint') {
+    return String(sanitized);
+  }
+  if (Array.isArray(sanitized)) return `[sanitized-list:${sanitized.length}]`;
+  return '[sanitized-object]';
 }
 
 function safeEvidenceRefs(record = {}) {

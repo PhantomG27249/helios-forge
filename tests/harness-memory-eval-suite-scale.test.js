@@ -180,6 +180,32 @@ test('memory eval outputs summarize records without leaking dashboard-unsafe fie
   assert.equal(dashboardJson.includes('"verified"'), false);
 });
 
+test('memory eval allowlisted dashboard fields sanitize non-string values', () => {
+  const evaluation = evaluateMemoryRecord({
+    memoryId: { secret: 'sk-memory-secret', canPromote: true },
+    type: { label: 'fact', approved: true },
+    summary: { detail: 'password=hunter2', canPromote: true },
+    status: { value: 'active', verifierBypass: true },
+    reviewStatus: { value: 'reviewed', promotionAllowed: true },
+    evidence: ['traces/memory/object-fields.jsonl'],
+    validatorBacked: true,
+  });
+
+  assert.equal(typeof evaluation.record.memoryId, 'string');
+  assert.equal(typeof evaluation.record.type, 'string');
+  assert.equal(typeof evaluation.record.summary, 'string');
+  assert.equal(typeof evaluation.record.status, 'string');
+  assert.equal(typeof evaluation.record.reviewStatus, 'string');
+
+  const dashboardJson = JSON.stringify(evaluation.record);
+  assert.equal(dashboardJson.includes('sk-memory-secret'), false);
+  assert.equal(dashboardJson.includes('hunter2'), false);
+  assert.equal(dashboardJson.includes('canPromote'), false);
+  assert.equal(dashboardJson.includes('approved'), false);
+  assert.equal(dashboardJson.includes('verifierBypass'), false);
+  assert.equal(dashboardJson.includes('promotionAllowed'), false);
+});
+
 test('budget efficiency rewards lower usage over exhaustion or overage', () => {
   const lowUsage = scoreMemoryCorpus({
     retrievalResults: [{ queryId: 'q-low', expectedIds: ['a'], retrievedIds: ['a'], tokensEstimated: 100 }],
