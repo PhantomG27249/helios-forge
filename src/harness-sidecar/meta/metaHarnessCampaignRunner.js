@@ -67,6 +67,15 @@ function publicVariant(variant = {}) {
   };
 }
 
+function publicVariantResult(value) {
+  if (Array.isArray(value)) return value.map(publicVariantResult);
+  if (!value || typeof value !== 'object') return value;
+  const hiddenKeys = new Set(['variantRoot', 'variantDir', 'sourceTreeDir', 'runDir', 'cwd']);
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !hiddenKeys.has(key))
+    .map(([key, child]) => [key, publicVariantResult(child)]));
+}
+
 function normalizeVariantRunner({ variantRunner, sourceTree, workspaceRoot, variant }) {
   if (variantRunner) return variantRunner;
   if (typeof sourceTree?.commandRunner === 'function') {
@@ -98,10 +107,16 @@ function evidenceOnlyCandidate(proposal = {}, candidateId, target) {
       ...normalizeObject(normalized.promotion),
       allowed: false,
       evidenceOnly: true,
+      activeWorkspaceMutation: false,
       promotionAuthority: false,
+      promotionAllowed: false,
+      canPromote: false,
     },
     patch: {
       ...(normalizeObject(normalized.patch)),
+      activeWorkspaceMutation: false,
+      promotionAuthority: false,
+      canPromote: false,
       applied: false,
     },
   };
@@ -327,8 +342,8 @@ export async function runMetaHarnessCampaign({
     });
     const evaluation = await invokeEvaluator(evaluator, {
       ...cycleArgs,
-      variant,
-      variantResult,
+      variant: publicVariant(variant),
+      variantResult: publicVariantResult(variantResult),
       replayReport: replayReportFrom({ evaluation: variantResult, variantResult }) || artifactReplayReport,
     });
     const metrics = metricsFromEvaluation(evaluation);

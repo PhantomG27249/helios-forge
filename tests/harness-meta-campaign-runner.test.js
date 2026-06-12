@@ -207,6 +207,14 @@ test('meta-harness campaign strips proposer mutation and promotion claims from c
         canPromote: true,
         applied: true,
         durableApplyApproved: true,
+        promotion: {
+          activeWorkspaceMutation: true,
+          canPromote: true,
+        },
+        patch: {
+          activeWorkspaceMutation: true,
+          promotionAuthority: true,
+        },
       }),
       evaluator: async () => ({
         metrics: { quality: 0.4, safety: 0.9, cost: 0.3, latency: 0.3 },
@@ -223,10 +231,50 @@ test('meta-harness campaign strips proposer mutation and promotion claims from c
     assert.equal(result.cycles[0].candidate.canPromote, false);
     assert.equal(result.cycles[0].candidate.applied, false);
     assert.equal(result.cycles[0].candidate.durableApplyApproved, false);
+    assert.equal(result.cycles[0].candidate.promotion.activeWorkspaceMutation, false);
+    assert.equal(result.cycles[0].candidate.promotion.canPromote, false);
+    assert.equal(result.cycles[0].candidate.patch.activeWorkspaceMutation, false);
+    assert.equal(result.cycles[0].candidate.patch.promotionAuthority, false);
     assert.equal(candidateArtifact.activeWorkspaceMutation, false);
     assert.equal(candidateArtifact.promotionAuthority, false);
     assert.equal(candidateArtifact.canPromote, false);
     assert.equal(candidateArtifact.applied, false);
     assert.equal(candidateArtifact.durableApplyApproved, false);
+    assert.equal(candidateArtifact.promotion.activeWorkspaceMutation, false);
+    assert.equal(candidateArtifact.promotion.canPromote, false);
+    assert.equal(candidateArtifact.patch.activeWorkspaceMutation, false);
+    assert.equal(candidateArtifact.patch.promotionAuthority, false);
+  });
+});
+
+test('meta-harness campaign hides active workspace roots from evaluators', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    let evaluatorInput = null;
+
+    await runMetaHarnessCampaign({
+      campaign: {
+        campaignId: 'evaluator_boundary_campaign',
+        workspaceRoot,
+        sourceTree: {
+          entrypoint: 'runner.js',
+          run: { command: 'node', args: ['runner.js'] },
+          commandRunner: async () => ({ exitCode: 0, stdout: 'ok', stderr: '' }),
+        },
+      },
+      maxCycles: 1,
+      proposer: async () => ({
+        candidateId: 'evaluator_candidate',
+        sourceFiles: { 'runner.js': 'console.log("ok");\n' },
+      }),
+      evaluator: async (input) => {
+        evaluatorInput = input;
+        return { metrics: { quality: 0.4, safety: 0.9, cost: 0.3, latency: 0.3 } };
+      },
+    });
+
+    assert.equal(evaluatorInput.variant.variantDir, undefined);
+    assert.equal(evaluatorInput.variantResult.prepared?.variantRoot, undefined);
+    assert.equal(evaluatorInput.variantResult.prepared?.sourceTreeDir, undefined);
+    assert.equal(JSON.stringify(evaluatorInput).includes(workspaceRoot), false);
   });
 });
