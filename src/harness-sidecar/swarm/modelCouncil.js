@@ -273,7 +273,7 @@ export function summarizeModelCouncil({ council, attempts = [], champion = null 
   const roles = uniqueSafe(attempts.map((attempt) => attempt.role || attempt.profile?.id || attempt.profile?.role), 96);
   const supportingAttemptIds = attempts
     .filter((attempt) => attempt.verifierPassed === true)
-    .map((attempt) => attempt.attemptId)
+    .map((attempt) => safeVisibleText(attempt.attemptId, 128))
     .filter(Boolean);
   const championRoute = champion?.model?.route || null;
 
@@ -299,7 +299,7 @@ export function summarizeModelCouncil({ council, attempts = [], champion = null 
     disagreement: disagreementSummary({ attempts, council }),
     championSupport: champion
       ? {
-        attemptId: champion.attemptId,
+        attemptId: safeVisibleText(champion.attemptId, 128) || null,
         modelProfile: safeVisibleText(championRoute?.modelProfile || champion.model?.profileName || '', 256) || null,
         endpointProfile: safeVisibleText(championRoute?.endpointProfile || '', 96) || null,
         verifierPassed: champion.verifierPassed === true,

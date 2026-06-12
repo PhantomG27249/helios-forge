@@ -248,7 +248,7 @@ test('model council fallback routes and summaries redact unsafe attempt labels',
       disagreementThreshold: 0.35,
     },
     attempts: [{
-      attemptId: 'attempt-secret',
+      attemptId: 'api_key=sk-leaked-attempt',
       role: 'ghp_role_should_not_leak',
       profile: { id: 'ghp_profile_should_not_leak' },
       model: {
@@ -260,7 +260,7 @@ test('model council fallback routes and summaries redact unsafe attempt labels',
       verifierPassed: true,
     }],
     champion: {
-      attemptId: 'attempt-secret',
+      attemptId: 'api_key=sk-leaked-attempt',
       model: {
         route: {
           modelProfile: 'sk-model-secret',
@@ -276,6 +276,9 @@ test('model council fallback routes and summaries redact unsafe attempt labels',
   assert.equal(visible.includes('ghp_profile_should_not_leak'), false);
   assert.equal(visible.includes('sk-model-secret'), false);
   assert.equal(visible.includes('ghp_endpoint_should_not_leak'), false);
+  assert.equal(visible.includes('sk-leaked-attempt'), false);
+  assert.deepEqual(summary.agreement.supportingAttemptIds, ['api_key=[redacted]']);
+  assert.equal(summary.championSupport.attemptId, 'api_key=[redacted]');
 });
 
 test('summarizes model council diversity and disagreement as evidence only', () => {
