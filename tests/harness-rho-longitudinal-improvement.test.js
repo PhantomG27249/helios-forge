@@ -169,6 +169,138 @@ test('normalizes budget accounting for longitudinal RHO reports', () => {
   assert.equal(summary.budget.blockedJobCount, 2);
 });
 
+test('normalizes real replay-cycle domain score objects', () => {
+  const first = updateRhoImprovementHistory({
+    replayReport: {
+      reportId: 'rho-replay-cycle-001',
+      suiteId: 'replay-cycle-suite',
+      candidateIds: ['candidate-replay'],
+      aggregateScore: 0.745,
+      domainScores: {
+        code: { baselineScore: 0.7, bestCandidateScore: 0.88, delta: 0.18 },
+        visual: { baselineScore: 0.6, bestCandidateScore: 0.61, delta: 0.01 },
+      },
+      budget: { casesRun: 4 },
+    },
+    now: '2026-06-12T00:00:00.000Z',
+  });
+
+  const second = updateRhoImprovementHistory({
+    history: first,
+    replayReport: {
+      reportId: 'rho-replay-cycle-002',
+      suiteId: 'replay-cycle-suite',
+      candidateIds: ['candidate-replay'],
+      aggregateScore: 0.695,
+      domainScores: {
+        code: { baselineScore: 0.7, bestCandidateScore: 0.8, delta: 0.1 },
+        visual: { baselineScore: 0.6, bestCandidateScore: 0.59, delta: -0.01 },
+      },
+      budget: { casesRun: 4 },
+    },
+    now: '2026-06-13T00:00:00.000Z',
+  });
+
+  assert.deepEqual(first[0].domainScores, { code: 0.88, visual: 0.61 });
+  assert.equal(second[1].domainDrift.code.previous, 0.88);
+  assert.equal(second[1].domainDrift.code.current, 0.8);
+  assert.equal(second[1].domainDrift.code.delta, -0.08);
+  assert.equal(second[1].domainDrift.visual.previous, 0.61);
+  assert.equal(second[1].domainDrift.visual.current, 0.59);
+  assert.equal(second[1].domainDrift.visual.delta, -0.02);
+});
+
+test('normalizes real replay-cycle nested budget accounting', () => {
+  const history = updateRhoImprovementHistory({
+    replayReport: {
+      reportId: 'rho-nested-budget-001',
+      suiteId: 'nested-budget-suite',
+      candidateIds: ['candidate-budget'],
+      aggregateScore: 0.66,
+      domainScores: { code: 0.66 },
+      budget: {
+        used: {
+          cost: 2.345,
+          tokens: 3456,
+          casesEvaluated: 7,
+        },
+        limits: {
+          cost: 10,
+          tokens: 10000,
+          casesEvaluated: 20,
+        },
+        blockedJobCount: 1,
+      },
+    },
+    now: '2026-06-12T00:00:00.000Z',
+  });
+
+  assert.deepEqual(history[0].budget, {
+    spentUsd: 2.35,
+    maxUsd: 10,
+    remainingUsd: 7.65,
+    percentUsdUsed: 23.45,
+    casesRun: 7,
+    maxCases: 20,
+    percentCasesUsed: 35,
+    tokensUsed: 3456,
+    maxTokens: 10000,
+    percentTokensUsed: 34.56,
+    blockedJobCount: 1,
+  });
+});
+
+test('sanitizes historical old-suite regressions back to evidence-only records', () => {
+  const history = updateRhoImprovementHistory({
+    history: [
+      {
+        recordedAt: '2026-06-12T00:00:00.000Z',
+        reportId: 'rho-unsafe-history',
+        suiteId: 'legacy-suite',
+        candidateId: 'candidate-unsafe',
+        aggregateScore: 0.62,
+        domainScores: { code: 0.62 },
+        oldSuite: true,
+        oldSuiteRegressions: [
+          {
+            suiteId: 'legacy-suite',
+            caseId: 'legacy-case',
+            domain: 'code',
+            metric: 'quality',
+            previous: 0.82,
+            current: 0.62,
+            authority: 'trusted_apply',
+            canPromote: true,
+            apply: true,
+          },
+        ],
+      },
+    ],
+    replayReport: {
+      reportId: 'rho-safe-next',
+      suiteId: 'legacy-suite',
+      candidateIds: ['candidate-unsafe'],
+      aggregateScore: 0.64,
+      domainScores: { code: 0.64 },
+      budget: { casesRun: 1 },
+    },
+    now: '2026-06-13T00:00:00.000Z',
+  });
+
+  assert.deepEqual(history[0].oldSuiteRegressions[0], {
+    suiteId: 'legacy-suite',
+    caseId: 'legacy-case',
+    domain: 'code',
+    metric: 'quality',
+    previous: 0.82,
+    current: 0.62,
+    delta: -0.2,
+    authority: 'evidence_only',
+    canPromote: false,
+  });
+  assert.equal(Object.hasOwn(history[0].oldSuiteRegressions[0], 'apply'), false);
+});
+
 test('summarizes dashboard-ready RHO trend rows', () => {
   const first = updateRhoImprovementHistory({
     replayReport: {

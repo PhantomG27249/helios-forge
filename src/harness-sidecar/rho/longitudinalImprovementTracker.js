@@ -62,12 +62,16 @@ function suiteIdFor(replayReport = {}) {
 
 function scoreFromDomain(value) {
   if (typeof value === 'number') return roundMetric(value);
+  const baselineScore = Number(value?.baselineScore);
+  const delta = Number(value?.delta);
   return roundMetric(
-    value?.candidateScore ??
+    value?.bestCandidateScore ??
+      value?.candidateScore ??
       value?.score ??
       value?.aggregateScore ??
       value?.meanScore ??
-      value?.current,
+      value?.current ??
+      (Number.isFinite(baselineScore) && Number.isFinite(delta) ? baselineScore + delta : undefined),
   );
 }
 
@@ -80,21 +84,30 @@ function normalizeDomainScores(domainScores = {}) {
 }
 
 function normalizeBudget(budget = {}) {
-  const rawSpentUsd = Number(budget.spentUsd ?? budget.usedUsd ?? budget.costUsd ?? 0);
+  const rawSpentUsd = Number(budget.spentUsd ?? budget.usedUsd ?? budget.costUsd ?? budget.used?.cost ?? budget.used?.usd ?? 0);
   const spentUsd = roundMoney(rawSpentUsd);
   const maxUsd = budget.maxUsd === undefined && budget.limitUsd === undefined
-    ? null
+    ? (budget.limits?.cost === undefined && budget.limits?.usd === undefined ? null : roundMoney(budget.limits?.cost ?? budget.limits?.usd))
     : roundMoney(budget.maxUsd ?? budget.limitUsd);
   const remainingUsd = budget.remainingUsd === undefined
     ? (maxUsd === null ? null : roundMoney(maxUsd - spentUsd))
     : roundMoney(budget.remainingUsd);
-  const casesRun = Math.max(0, Math.floor(Number(budget.casesRun ?? budget.caseCount ?? budget.usedCases ?? 0) || 0));
+  const casesRun = Math.max(0, Math.floor(Number(
+    budget.casesRun ??
+      budget.caseCount ??
+      budget.usedCases ??
+      budget.used?.casesEvaluated ??
+      budget.used?.cases ??
+      0,
+  ) || 0));
   const maxCases = budget.maxCases === undefined && budget.caseLimit === undefined
-    ? null
+    ? (budget.limits?.casesEvaluated === undefined && budget.limits?.cases === undefined
+      ? null
+      : Math.max(0, Math.floor(Number(budget.limits?.casesEvaluated ?? budget.limits?.cases) || 0)))
     : Math.max(0, Math.floor(Number(budget.maxCases ?? budget.caseLimit) || 0));
-  const tokensUsed = Math.max(0, Math.floor(Number(budget.tokensUsed ?? budget.usedTokens ?? 0) || 0));
+  const tokensUsed = Math.max(0, Math.floor(Number(budget.tokensUsed ?? budget.usedTokens ?? budget.used?.tokens ?? 0) || 0));
   const maxTokens = budget.maxTokens === undefined && budget.tokenLimit === undefined
-    ? null
+    ? (budget.limits?.tokens === undefined ? null : Math.max(0, Math.floor(Number(budget.limits?.tokens) || 0)))
     : Math.max(0, Math.floor(Number(budget.maxTokens ?? budget.tokenLimit) || 0));
 
   return {
@@ -208,7 +221,7 @@ function normalizeHistory(history = []) {
     domainScores: normalizeDomainScores(entry.domainScores),
     domainDrift: entry.domainDrift ?? {},
     oldSuite: entry.oldSuite === true,
-    oldSuiteRegressions: asArray(entry.oldSuiteRegressions),
+    oldSuiteRegressions: asArray(entry.oldSuiteRegressions).map((regression) => normalizeRegression(regression, entry.suiteId)),
     followUp: {
       required: entry.followUp?.required === true,
       candidateId: entry.followUp?.candidateId ?? null,
