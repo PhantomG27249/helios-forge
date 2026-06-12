@@ -3,6 +3,10 @@ import {
   normalizeEndpointProfiles,
   resolveEndpointProfile,
 } from '../model/modelEndpointProfiles.js';
+export {
+  buildModelDebateEvidence,
+  buildModelDebatePrompt,
+} from './modelDebateEvidence.js';
 
 const DEFAULT_DIVERSITY_REQUIRED = 2;
 const DEFAULT_DISAGREEMENT_THRESHOLD = 0.35;
