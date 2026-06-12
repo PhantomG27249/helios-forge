@@ -58,6 +58,20 @@ test('rejects missing provenance as insufficient evidence', () => {
   assert.equal(evidence.reasons.includes('missing_guarded_provenance'), true);
 });
 
+test('merges provenance alias fields when the primary ref list is empty', () => {
+  const evidence = normalizeResolutionEvidence({
+    verdict: 'supported',
+    confidence: 0.8,
+    provenanceRefs: [],
+    provenanceIds: ['passage-new'],
+    reasons: ['Alias provenance IDs should still count.'],
+  }, { knownProvenanceRefs: ['passage-new'] });
+
+  assert.equal(evidence.verdict, 'supported');
+  assert.deepEqual(evidence.provenanceRefs, ['passage-new']);
+  assert.equal(evidence.reasons.includes('missing_guarded_provenance'), false);
+});
+
 test('redacts secret and path shaped model-visible reasons', () => {
   const evidence = normalizeResolutionEvidence({
     verdict: 'contradicted',
@@ -315,4 +329,44 @@ test('attaches guarded resolution evidence only when supplied to deterministic c
   assert.equal(conflicts[0].guardedResolution.modelEvidenceOnly, true);
   assert.equal(conflicts[0].guardedResolution.promotionAllowed, false);
   assert.deepEqual(conflicts[0].guardedResolution.provenanceRefs, ['passage-new']);
+});
+
+test('direct conflict resolver downgrades guarded resolution backed only by stale evidence', () => {
+  const graph = new MemoryGraph();
+  const staleEvidence = { id: 'passage-stale', text: 'Old verifier command.', stale: true };
+  graph.addMemory({
+    type: 'fact',
+    subject: 'verifier.command',
+    predicate: 'equals',
+    object: 'npm test',
+    summary: 'The verifier command is npm test.',
+    evidence: [staleEvidence],
+    reviewStatus: 'reviewed',
+    validatorBacked: true,
+  });
+  graph.addMemory({
+    type: 'fact',
+    subject: 'verifier.command',
+    predicate: 'equals',
+    object: 'node --test tests/harness-memory.test.js',
+    summary: 'The verifier command is node --test.',
+    evidence: [],
+    reviewStatus: 'reviewed',
+    validatorBacked: true,
+  });
+
+  const conflicts = detectMemoryConflicts({
+    graph,
+    guardedResolutionEvidence: {
+      verdict: 'supported',
+      confidence: 0.9,
+      provenanceRefs: ['passage-stale'],
+      reasons: ['Model cited only stale evidence.'],
+    },
+  });
+
+  assert.equal(conflicts[0].guardedResolution.verdict, 'insufficient_evidence');
+  assert.deepEqual(conflicts[0].guardedResolution.provenanceRefs, []);
+  assert.equal(conflicts[0].guardedResolution.reasons.includes('stale_provenance_ref:passage-stale'), true);
+  assert.equal(conflicts[0].guardedResolution.reasons.includes('missing_guarded_provenance'), true);
 });

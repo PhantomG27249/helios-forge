@@ -25,9 +25,27 @@ function provenanceRef(value) {
   return String(value);
 }
 
-function guardedResolutionFor(evidence, knownProvenanceRefs) {
+function isStaleEvidence(value = {}) {
+  return Boolean(value)
+    && typeof value === 'object'
+    && (
+      value.stale === true
+      || value.superseded === true
+      || value.status === 'stale'
+      || value.sourceStatus === 'stale'
+    );
+}
+
+function partitionProvenanceRefs(evidence = []) {
+  return {
+    knownProvenanceRefs: evidence.filter((item) => !isStaleEvidence(item)).map(provenanceRef).filter(Boolean),
+    blockedProvenanceRefs: evidence.filter(isStaleEvidence).map(provenanceRef).filter(Boolean),
+  };
+}
+
+function guardedResolutionFor(evidence, { knownProvenanceRefs = [], blockedProvenanceRefs = [] } = {}) {
   if (!evidence) return undefined;
-  return normalizeResolutionEvidence(evidence, { knownProvenanceRefs });
+  return normalizeResolutionEvidence(evidence, { knownProvenanceRefs, blockedProvenanceRefs });
 }
 
 export function detectMemoryConflicts({ graph, guardedResolutionEvidence } = {}) {
@@ -44,9 +62,10 @@ export function detectMemoryConflicts({ graph, guardedResolutionEvidence } = {})
 
       const conflictingMemoryIds = [left.memoryId, right.memoryId];
       const evidence = [...(left.evidence || []), ...(right.evidence || [])];
+      const provenanceRefs = partitionProvenanceRefs(evidence);
       const guardedResolution = guardedResolutionFor(
         guardedResolutionEvidence,
-        evidence.map(provenanceRef).filter(Boolean),
+        provenanceRefs,
       );
       graph.updateMemory(left.memoryId, {
         reviewStatus: 'quarantined',

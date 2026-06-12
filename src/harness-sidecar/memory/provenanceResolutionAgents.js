@@ -42,13 +42,13 @@ function provenanceId(value) {
 }
 
 function inputProvenanceRefs(input = {}) {
-  return unique(normalizeList(
-    input.provenanceRefs
-      || input.provenanceIds
-      || input.passageIds
-      || input.provenance
-      || input.refs,
-  ).map(provenanceId).filter(Boolean));
+  return unique([
+    ...normalizeList(input.provenanceRefs),
+    ...normalizeList(input.provenanceIds),
+    ...normalizeList(input.passageIds),
+    ...normalizeList(input.provenance),
+    ...normalizeList(input.refs),
+  ].map(provenanceId).filter(Boolean));
 }
 
 function sanitizeReasons(reasons) {
