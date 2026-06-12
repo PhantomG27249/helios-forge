@@ -33,13 +33,15 @@ export function buildMultimodalRequest({
   profileOverride = {},
   prompt,
   visualItems = [],
+  multimodalBudgetPolicy = null,
 }) {
   const profile = resolveProfile(profileName, profileOverride);
-  if (visualItems.length > 0 && !profile.supportsVision) {
+  const budgetedVisualItems = multimodalBudgetPolicy?.mode === 'text_only' ? [] : visualItems;
+  if (budgetedVisualItems.length > 0 && !profile.supportsVision) {
     throw new Error(`Model profile does not support vision inputs: ${profileName}`);
   }
 
-  const visionInputs = visualItems.flatMap((item) =>
+  const visionInputs = budgetedVisualItems.flatMap((item) =>
     collectVisualPaths(item).map((path) => ({
       artifactId: item.artifactId || null,
       path,
