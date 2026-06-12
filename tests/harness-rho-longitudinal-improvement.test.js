@@ -126,6 +126,11 @@ test('preserves replay-cycle regression score evidence for old suites', () => {
     authority: 'evidence_only',
     canPromote: false,
   });
+  assert.equal(history[0].classification, 'regression');
+
+  const summary = summarizeRhoImprovementTrends(history);
+  assert.equal(summary.classificationCounts.regression, 1);
+  assert.equal(summary.classificationCounts.new, 0);
   assert.equal(Object.hasOwn(history[0].oldSuiteRegressions[0], 'apply'), false);
 });
 
@@ -409,6 +414,29 @@ test('sanitizes historical domain drift before dashboard exposure', () => {
   assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'apply'), false);
   assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'promote'), false);
   assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'verified'), false);
+});
+
+test('normalizes nullable persisted fields as empty evidence', () => {
+  const summary = summarizeRhoImprovementTrends([
+    {
+      recordedAt: '2026-06-12T00:00:00.000Z',
+      reportId: 'rho-null-persisted-fields',
+      suiteId: 'nullable-suite',
+      candidateId: 'candidate-nullable',
+      aggregateScore: 0.5,
+      domainScores: null,
+      domainDrift: null,
+      oldSuite: true,
+      oldSuiteRegressions: [null],
+      budget: null,
+    },
+  ]);
+
+  assert.deepEqual(summary.dashboardRows[0].domainScores, {});
+  assert.deepEqual(summary.dashboardRows[0].domainDrift, {});
+  assert.equal(summary.dashboardRows[0].oldSuiteRegressionCount, 0);
+  assert.equal(summary.dashboardRows[0].canPromote, false);
+  assert.equal(summary.dashboardRows[0].authority, 'evidence_only');
 });
 
 test('summarizes dashboard-ready RHO trend rows', () => {

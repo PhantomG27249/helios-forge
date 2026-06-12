@@ -33,6 +33,10 @@ function roundPercent(value) {
   return Math.round(numeric * 100) / 100;
 }
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function candidateIdFor(replayReport = {}, promotedCandidate = {}) {
   return stableString(
     promotedCandidate.candidateId ??
@@ -76,6 +80,7 @@ function scoreFromDomain(value) {
 }
 
 function normalizeDomainScores(domainScores = {}) {
+  if (!isRecord(domainScores)) return {};
   return Object.fromEntries(
     Object.entries(domainScores)
       .map(([domain, value]) => [stableString(domain, 'unknown'), scoreFromDomain(value)])
@@ -84,6 +89,7 @@ function normalizeDomainScores(domainScores = {}) {
 }
 
 function normalizeBudget(budget = {}) {
+  if (!isRecord(budget)) budget = {};
   const rawSpentUsd = Number(budget.spentUsd ?? budget.usedUsd ?? budget.costUsd ?? budget.used?.cost ?? budget.used?.usd ?? 0);
   const spentUsd = roundMoney(rawSpentUsd);
   const maxUsd = budget.maxUsd === undefined && budget.limitUsd === undefined
@@ -196,8 +202,10 @@ function normalizeDomainDriftEntry(entry = {}) {
 }
 
 function normalizeDomainDrift(domainDrift = {}) {
+  if (!isRecord(domainDrift)) return {};
   return Object.fromEntries(
     Object.entries(domainDrift)
+      .filter(([, entry]) => isRecord(entry))
       .map(([domain, entry]) => [stableString(domain, 'unknown'), normalizeDomainDriftEntry(entry)])
       .sort(([left], [right]) => left.localeCompare(right)),
   );
@@ -207,14 +215,15 @@ function classifyRecord({ aggregateDelta, regressions = [], drift = {} } = {}) {
   const domainClassifications = Object.values(drift).map((entry) => entry.classification);
   const hasRegression = regressions.length > 0 || aggregateDelta < 0 || domainClassifications.includes('regression');
   const hasImprovement = aggregateDelta > 0 || domainClassifications.includes('improvement');
-  if (aggregateDelta === null) return 'new';
   if (hasRegression && hasImprovement) return 'mixed';
   if (hasRegression) return 'regression';
+  if (aggregateDelta === null) return hasImprovement ? 'improvement' : 'new';
   if (hasImprovement) return 'improvement';
   return 'unchanged';
 }
 
 function normalizeRegression(regression = {}, suiteId) {
+  if (!isRecord(regression)) return null;
   const previous = Number(regression.previous ?? regression.baselineScore);
   const current = Number(regression.current ?? regression.candidateScore);
   const delta = Number(regression.delta);
@@ -272,7 +281,9 @@ function normalizeHistory(history = []) {
     domainScores: normalizeDomainScores(entry.domainScores),
     domainDrift: normalizeDomainDrift(entry.domainDrift),
     oldSuite: entry.oldSuite === true,
-    oldSuiteRegressions: asArray(entry.oldSuiteRegressions).map((regression) => normalizeRegression(regression, entry.suiteId)),
+    oldSuiteRegressions: asArray(entry.oldSuiteRegressions)
+      .map((regression) => normalizeRegression(regression, entry.suiteId))
+      .filter(Boolean),
     followUp: {
       required: entry.followUp?.required === true,
       candidateId: entry.followUp?.candidateId ?? null,
@@ -309,7 +320,9 @@ export function updateRhoImprovementHistory({
   const aggregateScore = roundMetric(replayReport.aggregateScore ?? replayReport.score);
   const aggregateDelta = previous ? roundMetric(aggregateScore - previous.aggregateScore) : null;
   const drift = domainDrift({ domainScores: draft.domainScores }, previous);
-  const regressions = asArray(replayReport.regressions).map((entry) => normalizeRegression(entry, suiteId));
+  const regressions = asArray(replayReport.regressions)
+    .map((entry) => normalizeRegression(entry, suiteId))
+    .filter(Boolean);
   const oldSuite = isOldSuite(replayReport, suiteId);
 
   const record = {
