@@ -495,6 +495,28 @@ test('canonicalizes persisted classification before dashboard exposure', () => {
   assert.equal(Object.hasOwn(summary.classificationCounts, 'trusted_apply'), false);
 });
 
+test('recomputes allowed persisted classification from evidence', () => {
+  const summary = summarizeRhoImprovementTrends([
+    {
+      recordedAt: '2026-06-12T00:00:00.000Z',
+      reportId: 'rho-poisoned-allowed-classification',
+      suiteId: 'classification-suite',
+      candidateId: 'candidate-classification',
+      aggregateScore: 0.6,
+      aggregateDelta: -0.2,
+      classification: 'improvement',
+      domainScores: { code: 0.6 },
+      domainDrift: {
+        code: { previous: 0.8, current: 0.6, delta: -0.2, classification: 'regression' },
+      },
+    },
+  ]);
+
+  assert.equal(summary.dashboardRows[0].classification, 'regression');
+  assert.equal(summary.classificationCounts.regression, 1);
+  assert.equal(summary.classificationCounts.improvement, 0);
+});
+
 test('skips null persisted history tombstones', () => {
   const summary = summarizeRhoImprovementTrends([null]);
 

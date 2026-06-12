@@ -227,8 +227,7 @@ function classifyRecord({ aggregateDelta, regressions = [], drift = {} } = {}) {
   return 'unchanged';
 }
 
-function normalizeClassification(classification, evidence) {
-  if (CLASSIFICATIONS.includes(classification)) return classification;
+function normalizeClassification(_classification, evidence) {
   return classifyRecord(evidence);
 }
 
