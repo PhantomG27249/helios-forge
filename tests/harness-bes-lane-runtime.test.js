@@ -309,6 +309,8 @@ test('attaches lane-specific dense verifier units and trajectory provenance', as
   assert.equal(candidate.bes.trajectoryOperators[0].operatorFamily, 'recombination');
   assert.equal(candidate.bes.trajectoryOperators[0].compatibleFamily, 'code');
   assert.deepEqual(candidate.bes.trajectoryOperators[0].parents, ['seed_a', 'seed_b']);
+  assert.deepEqual(candidate.bes.fusion.live.trajectoryOperators[0].parents, ['seed_a', 'seed_b']);
+  assert.equal(candidate.bes.fusion.live.trajectoryOperators[0].operatorFamily, 'recombination');
   assert.equal(candidate.evidence.sources.includes('trajectory_operator'), true);
   assert.ok(candidate.promotion.blockedReasons.includes('missing_external_policy_evidence'));
 });

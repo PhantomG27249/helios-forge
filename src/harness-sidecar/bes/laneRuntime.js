@@ -448,7 +448,10 @@ export async function runBesLaneRuntime({
     backwardGoals,
     denseScores,
     adaptiveAction,
-    trajectoryOperators: liveTrajectoryOperators,
+    trajectoryOperators: [
+      ...asArray(liveTrajectoryOperators),
+      ...normalizedCandidates.flatMap((candidate) => candidate.bes?.trajectoryOperators || []),
+    ],
   });
   const liveFusionByCandidateId = new Map(
     liveFusion.candidates.map((candidate) => [candidate.candidateId, candidate]),
