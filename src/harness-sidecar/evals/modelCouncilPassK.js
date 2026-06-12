@@ -1,4 +1,4 @@
-const DEFAULT_VARIANT_ORDER = ['bestSingle', 'repeatedSampling', 'staticCouncil', 'adaptiveCouncil'];
+const DEFAULT_VARIANT_ORDER = ['bestSingle', 'repeatedSampling', 'staticCouncil', 'adaptiveCouncil', 'calibratedEnsemble'];
 
 function clamp01(value) {
   const number = Number(value);
@@ -63,6 +63,7 @@ function defaultVariants() {
     repeatedSampling: defaultVariant(6),
     staticCouncil: defaultVariant(7),
     adaptiveCouncil: defaultVariant(8),
+    calibratedEnsemble: defaultVariant(8),
   };
 }
 
@@ -140,6 +141,47 @@ function upliftDelta(from, to) {
   };
 }
 
+function confidenceInterval(result = {}) {
+  const total = Number(result.totalCount || 0);
+  if (total <= 0) return { lower: 0, upper: 0 };
+  const p = Number(result.passAtK || 0);
+  const margin = 1.96 * Math.sqrt((p * (1 - p)) / total);
+  return {
+    lower: roundMetric(p - margin),
+    upper: roundMetric(p + margin),
+  };
+}
+
+function buildConfidenceIntervals(results = {}) {
+  return Object.fromEntries(Object.entries(results).map(([name, result]) => [name, confidenceInterval(result)]));
+}
+
+function regressionEvidence({ evalCases, minCases, baselines, variants } = {}) {
+  const regressions = [];
+  if (evalCases.length < minCases) {
+    regressions.push({
+      reason: 'minimum_case_count_not_met',
+      caseCount: evalCases.length,
+      minCases,
+    });
+  }
+  if ((variants.adaptiveCouncil?.passAtK || 0) < (baselines.bestSingle?.passAtK || 0)) {
+    regressions.push({
+      reason: 'adaptive_below_best_single',
+      adaptiveCouncilPassAtK: variants.adaptiveCouncil?.passAtK || 0,
+      bestSinglePassAtK: baselines.bestSingle?.passAtK || 0,
+    });
+  }
+  if ((variants.calibratedEnsemble?.passAtK || 0) < (variants.staticCouncil?.passAtK || 0)) {
+    regressions.push({
+      reason: 'calibrated_below_static_council',
+      calibratedEnsemblePassAtK: variants.calibratedEnsemble?.passAtK || 0,
+      staticCouncilPassAtK: variants.staticCouncil?.passAtK || 0,
+    });
+  }
+  return regressions;
+}
+
 export function summarizePassKUplift(report = {}) {
   const bestSingle = report.baselines?.bestSingle || {};
   const repeatedSampling = report.baselines?.repeatedSampling || {};
@@ -165,6 +207,7 @@ export function summarizePassKUplift(report = {}) {
 }
 
 export async function runModelCouncilPassKEval({
+  suiteId,
   cases,
   variants,
   k = 1,
@@ -198,27 +241,42 @@ export async function runModelCouncilPassKEval({
   const variantResults = {
     staticCouncil: results.staticCouncil,
     adaptiveCouncil: results.adaptiveCouncil,
+    calibratedEnsemble: results.calibratedEnsemble,
   };
   const uplift = {
     staticVsBestSingle: upliftDelta(baselines.bestSingle, variantResults.staticCouncil),
     adaptiveVsBestSingle: upliftDelta(baselines.bestSingle, variantResults.adaptiveCouncil),
     adaptiveVsStatic: upliftDelta(variantResults.staticCouncil, variantResults.adaptiveCouncil),
+    calibratedVsBestSingle: upliftDelta(baselines.bestSingle, variantResults.calibratedEnsemble),
+    calibratedVsStatic: upliftDelta(variantResults.staticCouncil, variantResults.calibratedEnsemble),
   };
   const confidence = {
     minCasesMet: evalCases.length >= minCases,
     upliftThresholdMet: uplift.adaptiveVsBestSingle.delta >= upliftThreshold,
   };
 
+  const confidenceIntervals = buildConfidenceIntervals(results);
+  const regressions = regressionEvidence({
+    evalCases,
+    minCases,
+    baselines,
+    variants: variantResults,
+  });
+
   return {
     evalId: `model-council-passk-${evalCases.length}-k${Math.max(1, Math.floor(Number(k) || 1))}`,
+    suiteId: suiteId || evalCases.find((caseRecord) => caseRecord?.suiteId)?.suiteId || null,
     caseCount: evalCases.length,
     k: Math.max(1, Math.floor(Number(k) || 1)),
     baselines,
     variants: variantResults,
     uplift,
     confidence,
+    confidenceIntervals,
+    regressions,
     proven: confidence.minCasesMet && confidence.upliftThresholdMet,
     authority: 'evidence_only',
     canPromote: false,
+    recommendedForPromotion: false,
   };
 }
