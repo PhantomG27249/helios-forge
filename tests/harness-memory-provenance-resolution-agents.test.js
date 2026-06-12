@@ -76,6 +76,25 @@ test('redacts secret and path shaped model-visible reasons', () => {
   assert.equal(joinedReasons.includes('[redacted'), true);
 });
 
+test('redacts secret and path shaped provenance refs while preserving safe refs', () => {
+  const unsafePath = 'C:\\Users\\jackj\\Github\\helios-forge\\.env';
+  const unsafeSecret = 'token=abc123';
+  const evidence = normalizeResolutionEvidence({
+    verdict: 'supported',
+    confidence: 0.8,
+    provenanceRefs: ['passage-safe', unsafePath, unsafeSecret],
+    reasons: ['Mixed safe and unsafe provenance refs.'],
+  }, { knownProvenanceRefs: ['passage-safe', unsafePath, unsafeSecret] });
+
+  const joinedRefs = evidence.provenanceRefs.join(' ');
+  assert.equal(evidence.provenanceRefs.includes('passage-safe'), true);
+  assert.equal(joinedRefs.includes('C:\\Users\\jackj'), false);
+  assert.equal(joinedRefs.includes('abc123'), false);
+  assert.equal(evidence.provenanceRefs.some((ref) => ref.startsWith('[redacted')), true);
+  assert.equal(evidence.reasons.includes('unsafe_path_value'), true);
+  assert.equal(evidence.reasons.includes('secret_like_value'), true);
+});
+
 test('runs supported, contradicted, conflicted, and insufficient evidence verdicts', async () => {
   const passages = [
     { id: 'passage-new', text: 'The verifier.command equals node --test tests/harness-memory.test.js.' },

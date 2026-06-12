@@ -59,6 +59,14 @@ function sanitizeReasons(reasons) {
   };
 }
 
+function sanitizeProvenanceRef(ref) {
+  const quarantine = quarantineModelVisiblePayload({ provenanceRef: String(ref) }, { maxStringLength: 600 });
+  return {
+    ref: String(quarantine.value?.provenanceRef ?? ''),
+    reasons: quarantine.reasons,
+  };
+}
+
 function staleStatus(value = {}) {
   return value.stale === true
     || value.superseded === true
@@ -146,7 +154,9 @@ export function normalizeResolutionEvidence(input, { knownProvenanceRefs = [], b
       reasons.push(`unknown_provenance_ref:${ref}`);
       continue;
     }
-    provenanceRefs.push(ref);
+    const sanitizedRef = sanitizeProvenanceRef(ref);
+    reasons.push(...sanitizedRef.reasons);
+    provenanceRefs.push(sanitizedRef.ref);
   }
 
   if (input?.promotionAllowed === true || input?.canPromote === true || input?.approved === true || input?.apply === true) {
