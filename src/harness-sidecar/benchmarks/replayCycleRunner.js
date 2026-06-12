@@ -2,9 +2,26 @@ import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantin
 
 const AUTHORITY_ASSIGNMENT_PATTERN = /\bauthority\s*[:=]\s*(?!evidence_only\b|advisory\b|none\b)[^\s,;'"<>]+/gi;
 const CAN_PROMOTE_TRUE_PATTERN = /\bcanPromote\s*[:=]\s*true\b/gi;
+const QUOTED_AUTHORITY_ASSIGNMENT_PATTERN = /\bauthority\s*([:=])\s*(['"])([^'"]*)\2/gi;
+const QUOTED_CAN_PROMOTE_TRUE_PATTERN = /\bcanPromote\s*([:=])\s*(['"])true\2/gi;
 const JSON_AUTHORITY_ASSIGNMENT_PATTERN = /"authority"\s*:\s*"(?!evidence_only\b|advisory\b|none\b)[^"]*"/gi;
-const JSON_CAN_PROMOTE_TRUE_PATTERN = /"canPromote"\s*:\s*true\b/gi;
-const JSON_APPLY_TRUE_PATTERN = /"(apply|approved|directApplyAllowed|durableApplyApproved|promoted|promotionAllowed)"\s*:\s*true\b/gi;
+const JSON_CAN_PROMOTE_TRUE_PATTERN = /"canPromote"\s*:\s*(?:"true"|true\b)/gi;
+const JSON_APPLY_TRUE_PATTERN = /"(apply|approved|directApplyAllowed|durableApplyApproved|promoted|promotionAllowed)"\s*:\s*(?:"true"|true\b)/gi;
+const SAFE_AUTHORITY_VALUES = new Set(['advisory', 'evidence_only', 'none']);
+const STRUCTURED_AUTHORITY_STRING_KEYS = new Set(['authority', 'authoritylevel']);
+const STRUCTURED_AUTHORITY_BOOLEAN_KEYS = new Set([
+  'apply',
+  'approved',
+  'canapply',
+  'canmutateworkspace',
+  'canpromote',
+  'directapplyallowed',
+  'durableapplyapproved',
+  'promoted',
+  'promotionallowed',
+  'promotionauthority',
+  'verifierbypass',
+]);
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -32,6 +49,10 @@ function safeId(value, fallback) {
 
 function reportIdPart(value, fallback) {
   return safeId(value, fallback).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || fallback;
+}
+
+function normalizeKey(key) {
+  return String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
 }
 
 function candidateId(candidate, index) {
@@ -115,6 +136,15 @@ function scrubReplayAuthorityText(value, quarantineReasons) {
     const separator = match.includes(':') ? ':' : '=';
     return `canPromote${separator}false`;
   });
+  sanitized = sanitized.replace(QUOTED_AUTHORITY_ASSIGNMENT_PATTERN, (match, separator, quote, value) => {
+    if (SAFE_AUTHORITY_VALUES.has(String(value).toLowerCase())) return match;
+    quarantineReasons.add('authority_claim_removed');
+    return `authority${separator}${quote}evidence_only${quote}`;
+  });
+  sanitized = sanitized.replace(QUOTED_CAN_PROMOTE_TRUE_PATTERN, (match, separator, quote) => {
+    quarantineReasons.add('authority_claim_removed');
+    return `canPromote${separator}${quote}false${quote}`;
+  });
   sanitized = sanitized.replace(JSON_AUTHORITY_ASSIGNMENT_PATTERN, () => {
     quarantineReasons.add('authority_claim_removed');
     return '"authority":"evidence_only"';
@@ -130,7 +160,21 @@ function scrubReplayAuthorityText(value, quarantineReasons) {
   return sanitized;
 }
 
-function scrubStructuredReasonStringLeaves(value, quarantineReasons) {
+function scrubStructuredReasonStringLeaves(value, quarantineReasons, key = '') {
+  const normalizedKey = normalizeKey(key);
+  if (STRUCTURED_AUTHORITY_STRING_KEYS.has(normalizedKey)) {
+    if (typeof value !== 'string' || !SAFE_AUTHORITY_VALUES.has(value.toLowerCase())) {
+      quarantineReasons.add('authority_claim_removed');
+      return 'evidence_only';
+    }
+  }
+  if (
+    STRUCTURED_AUTHORITY_BOOLEAN_KEYS.has(normalizedKey)
+    && (value === true || (typeof value === 'string' && value.toLowerCase() === 'true'))
+  ) {
+    quarantineReasons.add('authority_claim_removed');
+    return false;
+  }
   if (typeof value === 'string') return scrubReplayAuthorityText(value, quarantineReasons);
   if (Array.isArray(value)) {
     return value.map((item) => scrubStructuredReasonStringLeaves(item, quarantineReasons));
@@ -139,7 +183,7 @@ function scrubStructuredReasonStringLeaves(value, quarantineReasons) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         key,
-        scrubStructuredReasonStringLeaves(entry, quarantineReasons),
+        scrubStructuredReasonStringLeaves(entry, quarantineReasons, key),
       ]),
     );
   }

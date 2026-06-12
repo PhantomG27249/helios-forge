@@ -243,6 +243,35 @@ test('quarantine block reason text strips replay authority assignments', async (
   assert.equal(serialized.includes('canPromote=true'), false);
 });
 
+test('quarantine block reason text strips quoted replay authority assignments', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'quarantine-reason-quoted-authority',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-quoted-quarantine' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.5 } }),
+    candidateRunner: async () => ({
+      passed: true,
+      metrics: { quality: 0.9 },
+      quarantine: { quarantined: true, reasons: ['authority="apply" canPromote="true"'] },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'candidate_result',
+      id: 'candidate-quoted-quarantine',
+      reason: 'authority="evidence_only" canPromote="false"',
+    },
+  ]);
+  const serialized = JSON.stringify(report.quarantineBlocks);
+  assert.equal(serialized.includes('authority="apply"'), false);
+  assert.equal(serialized.includes('canPromote="true"'), false);
+});
+
 test('regression reasons are sanitized and quarantined before report output', async () => {
   const report = await runReplayCycle({
     suite: {
@@ -275,6 +304,36 @@ test('regression reasons are sanitized and quarantined before report output', as
   );
   assert.equal(report.canPromote, false);
   assert.equal(report.authority, 'evidence_only');
+});
+
+test('regression reasons strip quoted replay authority assignments', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'quoted-regression-reason-quarantine',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-quoted-leaky' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.2 },
+      reasons: ['authority="apply" canPromote="true"'],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.regressions[0].reasons, ['authority="evidence_only" canPromote="false"']);
+  assert.equal(JSON.stringify(report.regressions).includes('authority="apply"'), false);
+  assert.equal(JSON.stringify(report.regressions).includes('canPromote="true"'), false);
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'regression_reason',
+      id: 'candidate-quoted-leaky:case-1',
+      reason: 'authority_claim_removed',
+    },
+  ]);
 });
 
 test('structured regression reasons are recursively sanitized before stringifying', async () => {
@@ -321,6 +380,45 @@ test('structured regression reasons are recursively sanitized before stringifyin
       'regression_reason:candidate-structured:case-1:secret_like_value',
     ],
   );
+});
+
+test('structured regression reasons neutralize boolean and string authority fields', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'structured-regression-authority-values',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-structured-values' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.1 },
+      reasons: [{
+        authority: true,
+        canPromote: 'true',
+        note: 'observed',
+        nested: { promotionAllowed: 'true' },
+      }],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.regressions[0].reasons, [
+    '{"authority":"evidence_only","canPromote":false,"note":"observed","nested":{"promotionAllowed":false}}',
+  ]);
+  const serialized = JSON.stringify(report.regressions);
+  assert.equal(serialized.includes('"authority":true'), false);
+  assert.equal(serialized.includes('"canPromote":"true"'), false);
+  assert.equal(serialized.includes('"promotionAllowed":"true"'), false);
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'regression_reason',
+      id: 'candidate-structured-values:case-1',
+      reason: 'authority_claim_removed',
+    },
+  ]);
 });
 
 test('structured regression reason string leaves use replay authority quarantine', async () => {
