@@ -332,6 +332,44 @@ test('sanitizes historical old-suite regressions back to evidence-only records',
   assert.equal(Object.hasOwn(history[0].oldSuiteRegressions[0], 'apply'), false);
 });
 
+test('sanitizes historical domain drift before dashboard exposure', () => {
+  const summary = summarizeRhoImprovementTrends([
+    {
+      recordedAt: '2026-06-12T00:00:00.000Z',
+      reportId: 'rho-unsafe-drift',
+      suiteId: 'drift-suite',
+      candidateId: 'candidate-drift',
+      aggregateScore: 0.62,
+      domainScores: { code: 0.62 },
+      domainDrift: {
+        code: {
+          previous: 0.82,
+          current: 0.62,
+          delta: -0.2,
+          classification: 'regression',
+          authority: 'trusted_apply',
+          canPromote: true,
+          apply: true,
+          promote: true,
+          verified: true,
+        },
+      },
+    },
+  ]);
+
+  assert.deepEqual(summary.dashboardRows[0].domainDrift.code, {
+    previous: 0.82,
+    current: 0.62,
+    delta: -0.2,
+    classification: 'regression',
+    authority: 'evidence_only',
+    canPromote: false,
+  });
+  assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'apply'), false);
+  assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'promote'), false);
+  assert.equal(Object.hasOwn(summary.dashboardRows[0].domainDrift.code, 'verified'), false);
+});
+
 test('summarizes dashboard-ready RHO trend rows', () => {
   const first = updateRhoImprovementHistory({
     replayReport: {

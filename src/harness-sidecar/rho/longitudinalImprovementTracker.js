@@ -163,6 +163,46 @@ function domainDrift(current = {}, previous = null) {
   }));
 }
 
+function hasAuthorityShapedFields(entry = {}) {
+  return [
+    'authority',
+    'canPromote',
+    'promotionAllowed',
+    'apply',
+    'promote',
+    'approved',
+    'verified',
+  ].some((key) => Object.hasOwn(entry, key));
+}
+
+function normalizeDomainDriftEntry(entry = {}) {
+  const previous = roundMetric(entry.previous);
+  const current = roundMetric(entry.current);
+  const delta = entry.delta === undefined ? roundMetric(current - previous) : roundMetric(entry.delta);
+  const classification = ['improvement', 'mixed', 'new', 'regression', 'unchanged'].includes(entry.classification)
+    ? entry.classification
+    : (delta > 0 ? 'improvement' : delta < 0 ? 'regression' : 'unchanged');
+  const normalized = {
+    previous,
+    current,
+    delta,
+    classification,
+  };
+  if (hasAuthorityShapedFields(entry)) {
+    normalized.authority = 'evidence_only';
+    normalized.canPromote = false;
+  }
+  return normalized;
+}
+
+function normalizeDomainDrift(domainDrift = {}) {
+  return Object.fromEntries(
+    Object.entries(domainDrift)
+      .map(([domain, entry]) => [stableString(domain, 'unknown'), normalizeDomainDriftEntry(entry)])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
 function classifyRecord({ aggregateDelta, regressions = [], drift = {} } = {}) {
   const domainClassifications = Object.values(drift).map((entry) => entry.classification);
   const hasRegression = regressions.length > 0 || aggregateDelta < 0 || domainClassifications.includes('regression');
@@ -227,7 +267,7 @@ function normalizeHistory(history = []) {
     previousReportId: entry.previousReportId ?? null,
     classification: stableString(entry.classification, 'new'),
     domainScores: normalizeDomainScores(entry.domainScores),
-    domainDrift: entry.domainDrift ?? {},
+    domainDrift: normalizeDomainDrift(entry.domainDrift),
     oldSuite: entry.oldSuite === true,
     oldSuiteRegressions: asArray(entry.oldSuiteRegressions).map((regression) => normalizeRegression(regression, entry.suiteId)),
     followUp: {
