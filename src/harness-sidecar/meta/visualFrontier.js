@@ -1,4 +1,5 @@
 import { sanitizeCandidateId } from './frontierStore.js';
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -26,17 +27,18 @@ function normalizeMetrics(report = {}) {
 }
 
 function normalizeEntry({ replayReport = {}, now = () => new Date() }) {
+  const hardCases = asArray(replayReport.hardCases).map((hardCase) => quarantineModelVisiblePayload({
+    ...hardCase,
+    visualEvidenceRequired: true,
+    evidenceOnly: true,
+    canPromote: false,
+  }).value);
   return {
     suiteId: sanitizeCandidateId(replayReport.suiteId || 'visual-suite'),
     candidateId: sanitizeCandidateId(replayReport.candidateId || 'candidate'),
     recordedAt: replayReport.recordedAt || now().toISOString(),
     metrics: normalizeMetrics(replayReport),
-    hardCases: asArray(replayReport.hardCases).map((hardCase) => ({
-      ...hardCase,
-      visualEvidenceRequired: true,
-      evidenceOnly: true,
-      canPromote: false,
-    })),
+    hardCases,
     visualEvidenceRequired: true,
     evidenceOnly: true,
     canPromote: false,
@@ -91,6 +93,12 @@ export function summarizeVisualFrontier(frontier = []) {
     ...entry,
     candidateId: sanitizeCandidateId(entry.candidateId),
     metrics: normalizeMetrics(entry),
+    hardCases: asArray(entry.hardCases).map((hardCase) => quarantineModelVisiblePayload({
+      ...hardCase,
+      visualEvidenceRequired: true,
+      evidenceOnly: true,
+      canPromote: false,
+    }).value),
     visualEvidenceRequired: true,
     evidenceOnly: true,
     canPromote: false,

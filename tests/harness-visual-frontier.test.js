@@ -34,6 +34,30 @@ test('visual frontier records evidence-only updates and keeps failed evidence as
   assert.equal(frontier[0].metrics.failedEvidenceCount, 1);
 });
 
+test('visual frontier quarantines hard cases before dashboard summaries', () => {
+  const frontier = updateVisualFrontier({
+    frontier: [],
+    replayReport: {
+      suiteId: 'visual-prod',
+      candidateId: 'candidate-secret',
+      summary: { averageScore: 0.4, averageConfidence: 0.3, failedEvidenceCount: 1 },
+      hardCases: [{
+        caseId: 'unsafe-case',
+        reason: 'visual_false_negative',
+        artifactPath: 'C:\\Users\\jackj\\secret.png',
+        note: 'api_key=sk-frontier-secret',
+      }],
+    },
+  });
+  const summary = summarizeVisualFrontier(frontier);
+  const visible = JSON.stringify(summary);
+
+  assert.equal(visible.includes('C:\\Users'), false);
+  assert.equal(visible.includes('sk-frontier-secret'), false);
+  assert.equal(summary.frontier[0].hardCases[0].artifactPath, '[redacted:path]');
+  assert.equal(summary.frontier[0].hardCases[0].note, 'api_key=[redacted]');
+});
+
 test('visual frontier replaces dominated candidates and feeds policy evolution hard cases', () => {
   const first = updateVisualFrontier({
     frontier: [],
@@ -70,4 +94,27 @@ test('visual frontier replaces dominated candidates and feeds policy evolution h
   assert.equal(policy.evidenceOnly, true);
   assert.equal(policy.canPromote, false);
   assert.equal(policy.authority, 'visual_evidence_only');
+});
+
+test('visual policy BES lane keeps safety fields after candidate overrides', async () => {
+  const { runVisualPolicyBesLane } = await import('../src/harness-sidecar/meta/visualPolicyEvolution.js');
+  const result = await runVisualPolicyBesLane({
+    coreset: [{
+      caseId: 'visual-hard',
+      reason: 'visual_false_negative',
+      visualCase: { caseId: 'visual-hard', benchmarkKind: 'chart' },
+    }],
+    candidateOverrides: [{
+      visualEvidenceRequired: false,
+      evidenceOnly: false,
+      authority: 'root',
+      canPromote: true,
+    }],
+  });
+  const candidate = result.candidates[0];
+
+  assert.equal(candidate.visualEvidenceRequired, true);
+  assert.equal(candidate.evidenceOnly, true);
+  assert.equal(candidate.authority, 'visual_evidence_only');
+  assert.equal(candidate.canPromote, false);
 });

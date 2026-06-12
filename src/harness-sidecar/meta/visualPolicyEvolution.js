@@ -148,6 +148,16 @@ function evaluateAcrossCases({ candidate, hardCases, evaluate }) {
   };
 }
 
+function enforceVisualEvidenceOnly(candidate = {}) {
+  return {
+    ...candidate,
+    visualEvidenceRequired: true,
+    evidenceOnly: true,
+    authority: 'visual_evidence_only',
+    canPromote: false,
+  };
+}
+
 export async function runVisualPolicyBesLane({
   coreset,
   baselinePolicy = {},
@@ -159,7 +169,7 @@ export async function runVisualPolicyBesLane({
   const hardCases = laneCases(coreset);
   const proposalCoreset = { cases: hardCases, hardCases };
   const candidates = proposeVisualPolicies({ coreset: proposalCoreset, baselinePolicy, maxCandidates })
-    .map((candidate, index) => ({ ...candidate, ...(candidateOverrides[index] || {}) }));
+    .map((candidate, index) => enforceVisualEvidenceOnly({ ...candidate, ...(candidateOverrides[index] || {}) }));
 
   return runBesLaneRuntime({
     lane: 'visual',
