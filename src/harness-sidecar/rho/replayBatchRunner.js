@@ -58,8 +58,8 @@ function normalizeCandidateFamily({ candidateFamily, candidateRunner, candidate 
   }];
 }
 
-function summarizeValidation(rollouts) {
-  const results = rollouts.map(scoreSelfValidation);
+function summarizeValidation(rollouts, selfValidationJudge = scoreSelfValidation) {
+  const results = rollouts.map(selfValidationJudge);
   const passedCount = results.filter((result) => result.passed).length;
   const total = rollouts.length;
   return {
@@ -91,7 +91,16 @@ function summarizeMetrics(rollouts) {
   );
 }
 
-async function runVariant({ item, itemIndex, groupSize, variant, runner, heldoutVariants, candidate }) {
+async function runVariant({
+  item,
+  itemIndex,
+  groupSize,
+  variant,
+  runner,
+  heldoutVariants,
+  candidate,
+  judges = {},
+}) {
   const rollouts = [];
   for (const heldoutVariant of heldoutVariants) {
     for (let rolloutIndex = 0; rolloutIndex < groupSize; rolloutIndex += 1) {
@@ -123,8 +132,8 @@ async function runVariant({ item, itemIndex, groupSize, variant, runner, heldout
     heldoutVariantCount: heldoutVariants.length,
     rerollCount: rollouts.length,
     rollouts,
-    validation: summarizeValidation(rollouts),
-    consistency: scoreSelfConsistency({ rollouts }),
+    validation: summarizeValidation(rollouts, judges.selfValidation ?? scoreSelfValidation),
+    consistency: (judges.selfConsistency ?? scoreSelfConsistency)({ rollouts }),
     metrics: summarizeMetrics(rollouts),
   };
 }
@@ -176,7 +185,7 @@ function aggregatePromotionEvidence(entry, blockingEvidence = []) {
   return evidence.sort();
 }
 
-function summarizeFamily(preferences) {
+function summarizeFamily(preferences, { promotionEvidenceEligible = true } = {}) {
   const aggregates = new Map();
   for (const preference of preferences) {
     const current = aggregates.get(preference.candidateId) || {
@@ -234,7 +243,10 @@ function summarizeFamily(preferences) {
         candidateScore: Number(entry.candidateScore.toFixed(12)),
         scoreDelta: Number(entry.scoreDelta.toFixed(12)),
         blockingEvidence: [...new Set(blockingEvidence)].sort(),
-        promotionEvidence: aggregatePromotionEvidence(entry, [...new Set(blockingEvidence)]),
+        promotionEvidence: promotionEvidenceEligible
+          ? aggregatePromotionEvidence(entry, [...new Set(blockingEvidence)])
+          : [],
+        promotionEvidenceEligible,
         promotionAllowed: false,
         authority: 'evidence_only',
         advisoryOnly: true,
@@ -269,12 +281,14 @@ function summarizeFamily(preferences) {
       preferredCount: entry.preferredCount,
       blockingEvidence: entry.blockingEvidence,
       promotionEvidence: entry.promotionEvidence,
+      promotionEvidenceEligible: entry.promotionEvidenceEligible,
       promotionAllowed: entry.promotionAllowed,
       authority: entry.authority,
       advisoryOnly: entry.advisoryOnly,
       aggregate: entry.aggregate,
     })),
     promotionAllowed: false,
+    promotionEvidenceEligible,
     authority: 'evidence_only',
   };
 }
@@ -287,6 +301,8 @@ export async function runRhoReplayBatch({
   candidateRunner,
   candidateFamily,
   candidate = {},
+  judges = {},
+  promotionEvidenceEligible = true,
 } = {}) {
   if (typeof baselineRunner !== 'function') throw new Error('baselineRunner must be a function');
   const family = normalizeCandidateFamily({ candidateFamily, candidateRunner, candidate });
@@ -311,6 +327,7 @@ export async function runRhoReplayBatch({
       variant: 'baseline',
       runner: baselineRunner,
       heldoutVariants: caseHeldoutVariants,
+      judges,
     });
     const candidateSummaries = [];
     const preferences = [];
@@ -327,16 +344,18 @@ export async function runRhoReplayBatch({
           ...familyMember.candidate,
           candidateId: familyMember.candidateId,
         },
+        judges,
       });
       candidateSummary.candidateId = familyMember.candidateId;
       candidateSummaries.push(candidateSummary);
 
       const preference = {
         candidateId: familyMember.candidateId,
-        ...judgeSelfPreference({ baseline, candidate: candidateSummary }),
+        ...(judges.selfPreference ?? judgeSelfPreference)({ baseline, candidate: candidateSummary }),
         blockingEvidence: blockingEvidence(candidateSummary),
         aggregate: replayAggregate(candidateSummary),
         heldoutVariants: caseHeldoutVariants,
+        promotionEvidenceEligible,
         promotionAllowed: false,
         authority: 'evidence_only',
       };
@@ -363,6 +382,6 @@ export async function runRhoReplayBatch({
     caseCount: cases.length,
     cases,
     preferences: allPreferences,
-    familySummary: summarizeFamily(allPreferences),
+    familySummary: summarizeFamily(allPreferences, { promotionEvidenceEligible }),
   };
 }
