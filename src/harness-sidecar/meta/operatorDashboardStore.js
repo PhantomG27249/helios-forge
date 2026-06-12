@@ -19,20 +19,7 @@ const DEFAULT_FS = {
   realpath,
   writeFile,
 };
-const STRIP_AUTHORITY_KEYS = new Set([
-  'apply',
-  'approvalauthority',
-  'approved',
-  'canapply',
-  'canmutateworkspace',
-  'directapplyallowed',
-  'durableapplyapproved',
-  'promote',
-  'promoted',
-  'promotionauthority',
-  'promotionallowed',
-  'verifierbypass',
-]);
+const AUTHORITY_KEY_PATTERN = /(authority|apply|approval|approved|promote|promotion|verified|writescope|rewritescope|mutateworkspace|verifierbypass)/;
 
 function assertWorkspaceRoot(workspaceRoot) {
   if (!workspaceRoot) throw new Error('workspaceRoot is required');
@@ -85,6 +72,11 @@ function normalizeKey(key) {
   return String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
 }
 
+function isAuthorityClaimKey(key) {
+  const normalizedKey = normalizeKey(key);
+  return normalizedKey !== 'canpromote' && AUTHORITY_KEY_PATTERN.test(normalizedKey);
+}
+
 function stripAuthorityClaims(value) {
   if (Array.isArray(value)) {
     const items = value.map(stripAuthorityClaims);
@@ -104,7 +96,7 @@ function stripAuthorityClaims(value) {
       stripped = childValue !== false;
       continue;
     }
-    if (STRIP_AUTHORITY_KEYS.has(normalizedKey)) {
+    if (isAuthorityClaimKey(key)) {
       stripped = true;
       continue;
     }
@@ -234,6 +226,27 @@ function jsonContent(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function collisionSnapshotId(baseSnapshotId, attempt) {
+  return attempt === 0 ? baseSnapshotId : `${baseSnapshotId}-${String(attempt).padStart(4, '0')}`;
+}
+
+function parseSnapshotOrder(snapshotId) {
+  const match = String(snapshotId).match(/^(.*Z)(?:-(\d+))?$/);
+  if (!match) return { base: String(snapshotId), suffix: 0 };
+  return {
+    base: match[1],
+    suffix: match[2] ? Number(match[2]) : 0,
+  };
+}
+
+function compareSnapshotIds(left, right) {
+  const leftOrder = parseSnapshotOrder(left);
+  const rightOrder = parseSnapshotOrder(right);
+  const baseOrder = leftOrder.base.localeCompare(rightOrder.base);
+  if (baseOrder !== 0) return baseOrder;
+  return leftOrder.suffix - rightOrder.suffix;
+}
+
 export function buildOperatorDashboardSnapshot(input = {}) {
   const normalized = normalizeSnapshot(input);
   const stripped = stripAuthorityClaims(normalized);
@@ -274,7 +287,7 @@ export function createOperatorDashboardStore({ workspaceRoot, fsImpl = DEFAULT_F
     const normalized = normalizeSnapshot(snapshot);
     const baseSnapshotId = assertSafeSnapshotId(normalized.snapshotId);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const snapshotId = attempt === 0 ? baseSnapshotId : `${baseSnapshotId}-${attempt}`;
+      const snapshotId = collisionSnapshotId(baseSnapshotId, attempt);
       const filePath = filePathForSnapshot({
         workspaceRoot: resolvedWorkspaceRoot,
         snapshotId,
@@ -318,7 +331,7 @@ export function createOperatorDashboardStore({ workspaceRoot, fsImpl = DEFAULT_F
         .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
         .map((entry) => entry.name.slice(0, -'.json'.length))
         .filter((snapshotId) => SAFE_SNAPSHOT_ID.test(snapshotId))
-        .sort();
+        .sort(compareSnapshotIds);
     } catch (error) {
       if (error?.code === 'ENOENT') return [];
       throw error;

@@ -40,7 +40,7 @@ test('operator dashboard snapshot normalizes evidence lanes and strips promotion
   assert.equal(Object.hasOwn(snapshot.governance, 'apply'), false);
   assert.equal(snapshot.memory.status, 'unavailable');
   assert.deepEqual(snapshot.visual.items, [{ suiteId: 'visual-smoke', passed: true }]);
-  assert.equal(snapshot.trust.authority, 'evidence_only');
+  assert.equal(Object.hasOwn(snapshot.trust, 'authority'), false);
   assert.equal(typeof snapshot.promote, 'undefined');
   assert.equal(typeof snapshot.apply, 'undefined');
 });
@@ -61,12 +61,12 @@ test('operator dashboard snapshot recursively quarantines model-visible secrets 
   const serialized = JSON.stringify(snapshot);
   assert.equal(serialized.includes('sk-should-not-leak'), false);
   assert.equal(serialized.includes('secret.txt'), false);
-  assert.equal(snapshot.memory.nested.verified, false);
+  assert.equal(Object.hasOwn(snapshot.memory.nested, 'verified'), false);
   assert.equal(snapshot.memory.nested.artifactPath, '[redacted:path]');
   assert.equal(snapshot.quarantine.quarantined, true);
   assert.ok(snapshot.quarantine.reasons.includes('secret_like_value'));
   assert.ok(snapshot.quarantine.reasons.includes('unsafe_path_value'));
-  assert.ok(snapshot.quarantine.reasons.includes('external_verification_escalation'));
+  assert.ok(snapshot.quarantine.reasons.includes('authority_claim_removed'));
 });
 
 test('operator dashboard snapshot strips authority-shaped fields regardless of value type', () => {
@@ -100,6 +100,35 @@ test('operator dashboard snapshot strips authority-shaped fields regardless of v
   assert.equal(Object.hasOwn(snapshot.governance.nested, 'canMutateWorkspace'), false);
   assert.equal(Object.hasOwn(snapshot.governance.nested, 'verifierBypass'), false);
   assert.equal(snapshot.router.recommendation.model, 'qwen');
+});
+
+test('operator dashboard snapshot strips non-string authority and scope fields recursively', () => {
+  const snapshot = buildOperatorDashboardSnapshot({
+    trust: {
+      authority: true,
+      authorityLevel: { level: 'root' },
+      status: 'review_only',
+    },
+    router: {
+      selected: 'qwen',
+      workspaceWriteScope: { scope: 'global' },
+      workspaceRewriteScope: true,
+      nested: {
+        verified: { by: 'model' },
+        writeScope: false,
+      },
+    },
+    now: () => new Date('2026-06-12T00:00:05.000Z'),
+  });
+
+  assert.equal(Object.hasOwn(snapshot.trust, 'authority'), false);
+  assert.equal(Object.hasOwn(snapshot.trust, 'authorityLevel'), false);
+  assert.equal(snapshot.trust.status, 'review_only');
+  assert.equal(Object.hasOwn(snapshot.router, 'workspaceWriteScope'), false);
+  assert.equal(Object.hasOwn(snapshot.router, 'workspaceRewriteScope'), false);
+  assert.equal(Object.hasOwn(snapshot.router.nested, 'verified'), false);
+  assert.equal(Object.hasOwn(snapshot.router.nested, 'writeScope'), false);
+  assert.equal(snapshot.router.selected, 'qwen');
 });
 
 test('operator dashboard store persists snapshots under .harness dashboards operator', async () => {
@@ -147,6 +176,29 @@ test('operator dashboard store preserves same-millisecond snapshots with collisi
     ]);
     assert.equal((await store.loadSnapshot(first.snapshotId)).router.recommendedModel, 'first');
     assert.equal((await store.loadSnapshot(second.snapshotId)).router.recommendedModel, 'second');
+  });
+});
+
+test('operator dashboard store lists same-millisecond collision suffixes in numeric order', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const store = createOperatorDashboardStore({ workspaceRoot });
+    const now = () => new Date('2026-06-12T00:00:06.000Z');
+    const saved = [];
+
+    for (let index = 0; index < 12; index += 1) {
+      saved.push(await store.saveSnapshot(buildOperatorDashboardSnapshot({
+        now,
+        router: { sequence: index },
+      })));
+    }
+
+    assert.deepEqual(
+      await store.listSnapshotIds(),
+      saved.map((entry) => entry.snapshotId),
+    );
+    for (let index = 0; index < saved.length; index += 1) {
+      assert.equal((await store.loadSnapshot(saved[index].snapshotId)).router.sequence, index);
+    }
   });
 });
 
