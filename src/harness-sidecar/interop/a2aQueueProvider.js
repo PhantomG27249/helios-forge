@@ -30,7 +30,8 @@ export function createA2AQueueProvider({
   const queueRoot = root || (workspaceRoot ? join(workspaceRoot, '.harness', 'a2a') : null);
   if (!queueRoot) throw new Error('A2A queue provider requires workspaceRoot or root');
   const queuePath = path || join(queueRoot, 'queue-state.json');
-  const durableStore = createJsonFileA2ADurableStore({ root: queueRoot, path: queuePath });
+  const containmentRoot = workspaceRoot && !root ? workspaceRoot : queueRoot;
+  const durableStore = createJsonFileA2ADurableStore({ root: containmentRoot, path: queuePath });
 
   return {
     backend,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 import { test } from 'node:test';
@@ -101,6 +101,28 @@ test('production queue provider rejects path escapes and accepts injected stores
     assert.equal(persisted.outbox.length, 1);
   } finally {
     rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('production queue provider rejects symlinked workspace harness ancestors', (t) => {
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'helios-a2a-prod-'));
+  const outside = mkdtempSync(join(tmpdir(), 'helios-a2a-outside-'));
+  try {
+    try {
+      symlinkSync(outside, join(workspaceRoot, '.harness'), 'junction');
+    } catch (error) {
+      t.skip(`symlink creation unavailable: ${error.code || error.message}`);
+      return;
+    }
+    const provider = createA2AQueueProvider({ workspaceRoot });
+
+    assert.throws(
+      () => provider.save({ outbox: [{ message: 'must not leave workspace' }] }),
+      /symlink or junction/,
+    );
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
