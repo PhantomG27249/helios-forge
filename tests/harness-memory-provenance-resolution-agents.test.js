@@ -228,6 +228,30 @@ test('redacts stale path and token shaped provenance refs in runner reasons', as
   assert.equal(result.reasons.includes('secret_like_value'), true);
 });
 
+test('blocks supersededBy passages in runner provenance', async () => {
+  let modelPassageIds = [];
+  const result = await runProvenanceResolutionAgents({
+    conflict,
+    provenancePassages: [
+      { id: 'p-stale', text: 'Superseded source supports npm test.', supersededBy: 'passage-new' },
+    ],
+    modelResolver: async ({ provenancePassages }) => {
+      modelPassageIds = provenancePassages.map((passage) => passage.id);
+      return {
+        verdict: 'supported',
+        confidence: 0.9,
+        provenanceRefs: ['p-stale'],
+        reasons: ['Model cited a superseded passage.'],
+      };
+    },
+  });
+
+  assert.deepEqual(modelPassageIds, []);
+  assert.equal(result.verdict, 'insufficient_evidence');
+  assert.deepEqual(result.provenanceRefs, []);
+  assert.equal(result.reasons.includes('stale_provenance_ref:p-stale'), true);
+});
+
 test('ignores stale source passages unless policy allows stale evidence', async () => {
   const result = await runProvenanceResolutionAgents({
     conflict,

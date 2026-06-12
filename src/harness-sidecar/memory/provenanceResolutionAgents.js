@@ -91,6 +91,7 @@ function provenanceRefReasons(reason, ref) {
 function staleStatus(value = {}) {
   return value.stale === true
     || value.superseded === true
+    || Boolean(value.supersededBy)
     || value.status === 'stale'
     || value.sourceStatus === 'stale';
 }
