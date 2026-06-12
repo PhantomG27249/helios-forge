@@ -151,10 +151,23 @@ function evaluateAcrossCases({ candidate, hardCases, evaluate }) {
 function enforceVisualEvidenceOnly(candidate = {}) {
   return {
     ...candidate,
+    status: 'shadow_only',
     visualEvidenceRequired: true,
     evidenceOnly: true,
     authority: 'visual_evidence_only',
     canPromote: false,
+    promotable: false,
+    promotionAllowed: false,
+    safety: {
+      ...(candidate.safety && typeof candidate.safety === 'object' && !Array.isArray(candidate.safety)
+        ? candidate.safety
+        : {}),
+      status: 'shadow_only',
+      canPromote: false,
+      promotable: false,
+      promotionAllowed: false,
+      authority: 'visual_evidence_only',
+    },
   };
 }
 

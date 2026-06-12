@@ -136,6 +136,9 @@ test('visual policy BES lane keeps safety fields after candidate overrides', asy
       evidenceOnly: false,
       authority: 'root',
       canPromote: true,
+      status: 'approved',
+      promotable: true,
+      safety: { status: 'unsafe', canPromote: true },
     }],
   });
   const candidate = result.candidates[0];
@@ -144,4 +147,8 @@ test('visual policy BES lane keeps safety fields after candidate overrides', asy
   assert.equal(candidate.evidenceOnly, true);
   assert.equal(candidate.authority, 'visual_evidence_only');
   assert.equal(candidate.canPromote, false);
+  assert.equal(candidate.status, 'shadow_only');
+  assert.equal(candidate.promotable, false);
+  assert.equal(candidate.safety.status, 'shadow_only');
+  assert.equal(candidate.safety.canPromote, false);
 });
