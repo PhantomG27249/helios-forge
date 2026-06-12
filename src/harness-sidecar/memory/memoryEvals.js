@@ -1,37 +1,76 @@
 import { decideReflectionGate } from './reflectionGate.js';
+import { redactModelVisibleValue } from '../security/modelVisibleQuarantine.js';
 
 function hasText(value) {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function normalizeList(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
+}
+
+function safeText(value) {
+  if (!hasText(value)) return value;
+  return redactModelVisibleValue(String(value), { maxStringLength: 500 });
+}
+
+function safeEvidenceRefs(record = {}) {
+  return normalizeList(record.evidence)
+    .map((entry) => safeText(String(entry)))
+    .filter(hasText);
+}
+
+function hasRecordEvidence(record = {}) {
+  return safeEvidenceRefs(record).length > 0
+    || normalizeList(record.evidenceRefs).length > 0
+    || Number(record.evidenceCount) > 0;
+}
+
+function summarizeRecordForDashboard(record = {}) {
+  const evidenceRefs = safeEvidenceRefs(record);
+  return {
+    memoryId: safeText(record.memoryId),
+    type: safeText(record.type),
+    summary: safeText(record.summary),
+    status: safeText(record.status),
+    reviewStatus: safeText(record.reviewStatus),
+    validatorBacked: record.validatorBacked === true,
+    evidenceCount: evidenceRefs.length || Number(record.evidenceCount) || normalizeList(record.evidenceRefs).length,
+    evidenceRefs: evidenceRefs.length > 0
+      ? evidenceRefs
+      : normalizeList(record.evidenceRefs).map((entry) => safeText(String(entry))).filter(hasText),
+  };
 }
 
 export function evaluateMemoryRecord(record = {}) {
   const checks = {
     hasType: hasText(record.type),
     hasSummary: hasText(record.summary),
-    hasEvidence: Array.isArray(record.evidence) && record.evidence.length > 0,
+    hasEvidence: hasRecordEvidence(record),
     reviewed: record.reviewStatus === 'reviewed' || record.reviewStatus === 'approved',
     validatorBacked: record.validatorBacked === true,
   };
 
   const score = Object.values(checks).filter(Boolean).length * 20;
-  const gate = decideReflectionGate(record);
+  const gate = decideReflectionGate({
+    ...record,
+    evidence: safeEvidenceRefs(record).length > 0 ? safeEvidenceRefs(record) : normalizeList(record.evidenceRefs),
+  });
 
   return {
-    record,
+    record: summarizeRecordForDashboard(record),
     score,
     checks,
     gate,
+    evidenceOnly: true,
+    canPromote: false,
   };
 }
 
 function percent(numerator, denominator) {
   if (!denominator) return 0;
   return Math.round((numerator / denominator) * 100);
-}
-
-function normalizeList(value) {
-  if (!value) return [];
-  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
 }
 
 function expectedFactRecords(records = []) {
@@ -50,7 +89,7 @@ function activeFactPrecision(records = []) {
 
 function evidenceCoverage(records = []) {
   return percent(
-    records.filter((record) => normalizeList(record.evidence).length > 0).length,
+    records.filter((record) => hasRecordEvidence(record)).length,
     records.length,
   );
 }
@@ -67,8 +106,40 @@ function provenanceCoverage(records = []) {
 
 function graphConnectivity(graph = {}) {
   const nodes = normalizeList(graph.nodes);
+  if (nodes.length === 0) return 0;
+  const nodeIds = new Set(nodes.map((node) => String(node.id ?? node)));
+  const parent = new Map([...nodeIds].map((id) => [id, id]));
+  const seenEdges = new Set();
+  let connectedEdges = 0;
+
+  function find(id) {
+    const current = parent.get(id);
+    if (current === id) return id;
+    const root = find(current);
+    parent.set(id, root);
+    return root;
+  }
+
+  function union(left, right) {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot === rightRoot) return false;
+    parent.set(rightRoot, leftRoot);
+    return true;
+  }
+
   const edges = normalizeList(graph.edges);
-  return percent(Math.min(edges.length, nodes.length), nodes.length);
+  for (const edge of edges) {
+    const from = String(edge.from ?? '');
+    const to = String(edge.to ?? '');
+    if (!nodeIds.has(from) || !nodeIds.has(to) || from === to) continue;
+    const key = [from, to].sort().join('->');
+    if (seenEdges.has(key)) continue;
+    seenEdges.add(key);
+    if (union(from, to)) connectedEdges += 1;
+  }
+
+  return percent(connectedEdges, nodes.length);
 }
 
 function retrievalHitRate(retrievalResults = []) {
@@ -85,7 +156,7 @@ function budgetEfficiency({ retrievalResults = [], budget = {} } = {}) {
   const tokenBudget = Number(budget.tokenBudget ?? budget.maxTokens);
   if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) return 0;
   const used = normalizeList(retrievalResults).reduce((sum, result) => sum + (Number(result.tokensEstimated) || 0), 0);
-  return Math.max(0, Math.min(100, Math.round((used / tokenBudget) * 100)));
+  return Math.max(0, Math.min(100, Math.round(100 - ((used / tokenBudget) * 100))));
 }
 
 function hasEvidence(value = {}) {

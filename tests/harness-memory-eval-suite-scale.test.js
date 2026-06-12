@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { scoreMemoryCorpus } from '../src/harness-sidecar/memory/memoryEvals.js';
+import { evaluateMemoryRecord, scoreMemoryCorpus } from '../src/harness-sidecar/memory/memoryEvals.js';
 
 test('memory scale evals report dashboard-safe paper metrics without authority', () => {
   const corpus = scoreMemoryCorpus({
@@ -131,4 +131,88 @@ test('memory scale evals report dashboard-safe paper metrics without authority',
   assert.equal(corpus.metrics.migrationHealth, 50);
   assert.equal(corpus.metrics.decayConsolidationHealth, 60);
   assert.equal(corpus.metrics.visualEvidenceCoverage, 67);
+});
+
+test('memory eval outputs summarize records without leaking dashboard-unsafe fields', () => {
+  const record = {
+    memoryId: 'unsafe-memory',
+    type: 'fact',
+    summary: 'Safe summary for dashboard.',
+    evidence: ['traces/memory/safe.jsonl'],
+    reviewStatus: 'reviewed',
+    validatorBacked: true,
+    secret: 'sk-live-secret',
+    apiToken: 'token-secret-value',
+    unsafePath: 'C:\\Users\\jackj\\.ssh\\id_rsa',
+    traversalPath: '..\\..\\secrets.env',
+    apply: true,
+    promote: true,
+    approved: true,
+    verified: true,
+    nested: { token: 'nested-secret' },
+  };
+
+  const evaluation = evaluateMemoryRecord(record);
+  const corpus = scoreMemoryCorpus({ records: [record] });
+  const dashboardJson = JSON.stringify({ evaluation, corpusEvaluations: corpus.evaluations });
+
+  assert.equal(evaluation.evidenceOnly, true);
+  assert.equal(evaluation.canPromote, false);
+  assert.equal(corpus.evaluations[0].evidenceOnly, true);
+  assert.equal(corpus.evaluations[0].canPromote, false);
+  assert.deepEqual(Object.keys(evaluation.record).sort(), [
+    'evidenceCount',
+    'evidenceRefs',
+    'memoryId',
+    'reviewStatus',
+    'status',
+    'summary',
+    'type',
+    'validatorBacked',
+  ].sort());
+  assert.equal(dashboardJson.includes('sk-live-secret'), false);
+  assert.equal(dashboardJson.includes('token-secret-value'), false);
+  assert.equal(dashboardJson.includes('id_rsa'), false);
+  assert.equal(dashboardJson.includes('secrets.env'), false);
+  assert.equal(dashboardJson.includes('"apply"'), false);
+  assert.equal(dashboardJson.includes('"promote"'), false);
+  assert.equal(dashboardJson.includes('"approved"'), false);
+  assert.equal(dashboardJson.includes('"verified"'), false);
+});
+
+test('budget efficiency rewards lower usage over exhaustion or overage', () => {
+  const lowUsage = scoreMemoryCorpus({
+    retrievalResults: [{ queryId: 'q-low', expectedIds: ['a'], retrievedIds: ['a'], tokensEstimated: 100 }],
+    budget: { tokenBudget: 400 },
+  });
+  const exhausted = scoreMemoryCorpus({
+    retrievalResults: [{ queryId: 'q-full', expectedIds: ['a'], retrievedIds: ['a'], tokensEstimated: 400 }],
+    budget: { tokenBudget: 400 },
+  });
+  const overage = scoreMemoryCorpus({
+    retrievalResults: [{ queryId: 'q-over', expectedIds: ['a'], retrievedIds: ['a'], tokensEstimated: 450 }],
+    budget: { tokenBudget: 400 },
+  });
+
+  assert.equal(lowUsage.metrics.budgetEfficiency, 75);
+  assert.equal(exhausted.metrics.budgetEfficiency, 0);
+  assert.equal(overage.metrics.budgetEfficiency, 0);
+  assert.equal(lowUsage.metrics.budgetEfficiency > exhausted.metrics.budgetEfficiency, true);
+});
+
+test('connectivity ignores duplicate, cyclic, and nonexistent-node edges', () => {
+  const corpus = scoreMemoryCorpus({
+    graph: {
+      nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
+      edges: [
+        { from: 'a', to: 'b' },
+        { from: 'b', to: 'a' },
+        { from: 'a', to: 'missing' },
+        { from: 'a', to: 'c' },
+        { from: 'b', to: 'c' },
+      ],
+    },
+  });
+
+  assert.equal(corpus.metrics.connectivity, 50);
 });
