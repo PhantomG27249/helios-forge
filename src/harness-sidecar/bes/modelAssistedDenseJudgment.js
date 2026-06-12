@@ -150,20 +150,29 @@ export async function judgeDenseSubgoalWithModel({
     };
   }
 
-  const satisfied = providerResult.satisfied === true || providerResult.status === 'satisfied';
+  const providerProvenanceIds = [...new Set(asArray(providerResult.provenanceIds).filter(Boolean).map(String))]
+    .filter((id) => provenanceIds.includes(id))
+    .sort();
+  const providerSatisfied = providerResult.satisfied === true || providerResult.status === 'satisfied';
+  const missingRequiredModelProvenance = normalizedPolicy.requireProvenance === true
+    && providerSatisfied
+    && providerProvenanceIds.length === 0;
+  const satisfied = providerSatisfied && !missingRequiredModelProvenance;
   return {
     ...baseResult({
       subgoal,
-      status: satisfied ? 'satisfied' : 'missing',
+      status: missingRequiredModelProvenance
+        ? 'insufficient_model_provenance'
+        : satisfied ? 'satisfied' : 'missing',
       satisfied,
       confidence: clampConfidence(providerResult.confidence, normalizedPolicy.maxConfidence),
-      reasons: sanitizedReasons(providerResult.reasons ?? providerResult.reason),
+      reasons: missingRequiredModelProvenance
+        ? ['missing_model_provenance']
+        : sanitizedReasons(providerResult.reasons ?? providerResult.reason),
     }),
     modelAssisted: true,
     deterministicFallback: fallbackSatisfied,
-    provenanceIds: [...new Set(asArray(providerResult.provenanceIds).filter(Boolean).map(String))]
-      .filter((id) => provenanceIds.includes(id))
-      .sort(),
+    provenanceIds: providerProvenanceIds,
     quarantine,
   };
 }

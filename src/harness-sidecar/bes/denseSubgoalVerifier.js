@@ -56,11 +56,20 @@ function judgmentForSubgoal(modelJudgments, id) {
 
 function normalizeModelJudgment(judgment = {}) {
   if (!judgment || typeof judgment !== 'object') return null;
+  const confidence = Math.max(0, Math.min(1, Number.isFinite(Number(judgment.confidence)) ? Number(judgment.confidence) : 0));
+  const provenanceIds = asArray(judgment.provenanceIds)
+    .filter(Boolean)
+    .map(String)
+    .sort();
+  const canSatisfy = judgment.evidenceOnly === true
+    && judgment.satisfied === true
+    && provenanceIds.length > 0;
   return {
     subgoalId: String(judgment.subgoalId ?? judgment.id ?? ''),
-    status: judgment.satisfied === true ? 'satisfied' : (judgment.status || 'missing'),
-    satisfied: judgment.satisfied === true,
-    confidence: Number.isFinite(Number(judgment.confidence)) ? Number(judgment.confidence) : 0,
+    status: canSatisfy ? 'satisfied' : 'missing',
+    satisfied: canSatisfy,
+    confidence,
+    provenanceIds,
     evidenceOnly: true,
     promotionAuthority: false,
     canPromote: false,

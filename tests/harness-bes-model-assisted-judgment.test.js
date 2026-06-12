@@ -70,6 +70,25 @@ test('model-assisted dense judgment requires provenance before invoking the mode
   assert.equal(result.evidenceOnly, true);
 });
 
+test('model-assisted dense judgment rejects satisfied claims without matching provenance', async () => {
+  const result = await judgeDenseSubgoalWithModel({
+    subgoal: { id: 'citation', requiredEvidence: 'source citation' },
+    evidence: [{ text: 'source citation appears', provenanceId: 'trace-known' }],
+    policy: { enabled: true, requireProvenance: true },
+    modelProvider: async () => ({
+      satisfied: true,
+      confidence: 0.8,
+      provenanceIds: ['unknown-trace'],
+    }),
+  });
+
+  assert.equal(result.satisfied, false);
+  assert.equal(result.status, 'insufficient_model_provenance');
+  assert.deepEqual(result.provenanceIds, []);
+  assert.equal(result.reasons.includes('missing_model_provenance'), true);
+});
+
+
 test('model-visible dense judgment inputs are quarantined before provider invocation', async () => {
   let providerInput = null;
   const result = await judgeDenseSubgoalWithModel({
@@ -116,6 +135,7 @@ test('dense subgoal verifier merges advisory model judgments without promotion a
         satisfied: true,
         confidence: 0.7,
         evidenceOnly: true,
+        provenanceIds: ['trace-1'],
         canPromote: true,
         promotionAuthority: true,
       },
@@ -128,4 +148,26 @@ test('dense subgoal verifier merges advisory model judgments without promotion a
   assert.equal(result.denseFeedback[0].modelAssisted.satisfied, true);
   assert.equal(result.denseFeedback[0].modelAssisted.canPromote, false);
   assert.equal(result.denseFeedback[0].modelAssisted.promotionAuthority, false);
+});
+
+test('dense subgoal verifier rejects unprovenanced or unbounded model judgments', () => {
+  const result = verifyDenseSubgoals({
+    subgoals: [
+      { id: 'unsafe-model', requiredEvidence: 'semantic evidence' },
+    ],
+    evidence: [],
+    modelJudgments: [
+      {
+        subgoalId: 'unsafe-model',
+        satisfied: true,
+        confidence: 7,
+      },
+    ],
+  });
+
+  assert.equal(result.score, 0);
+  assert.deepEqual(result.satisfiedSubgoalIds, []);
+  assert.deepEqual(result.missingSubgoalIds, ['unsafe-model']);
+  assert.equal(result.denseFeedback[0].modelAssisted.satisfied, false);
+  assert.equal(result.denseFeedback[0].modelAssisted.confidence, 1);
 });
