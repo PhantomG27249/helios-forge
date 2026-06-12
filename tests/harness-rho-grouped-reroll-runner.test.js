@@ -86,6 +86,32 @@ function successfulRollout({ variant, item, candidate, heldoutVariant }) {
   };
 }
 
+function collectAuthorityViolations(value, path = '$') {
+  const violations = [];
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => {
+      violations.push(...collectAuthorityViolations(entry, `${path}[${index}]`));
+    });
+    return violations;
+  }
+  if (!value || typeof value !== 'object') return violations;
+
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = `${path}.${key}`;
+    if (['canPromote', 'apply', 'approved', 'promotionAllowed'].includes(key) && child === true) {
+      violations.push(childPath);
+    }
+    if (key === 'verified' && child === true) {
+      violations.push(childPath);
+    }
+    if (key === 'authority' && child !== 'evidence_only') {
+      violations.push(childPath);
+    }
+    violations.push(...collectAuthorityViolations(child, childPath));
+  }
+  return violations;
+}
+
 test('runs grouped baseline and candidate family rerolls with domain coverage and evidence-only authority', async () => {
   const calls = [];
   const report = await runGroupedRhoRerolls({
@@ -186,3 +212,96 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
   assert.equal(report.futureHardCases.some((entry) => entry.failureModes.includes('quarantine_replay_failed')), true);
 });
 
+test('downgrades nested rollout and judge authority claims throughout grouped reports', async () => {
+  const report = await runGroupedRhoRerolls({
+    schedule: makeSchedule(),
+    baseline: { candidateId: 'baseline_current' },
+    candidateFamilies: [{ candidateId: 'cand_self_authorizing' }],
+    judges: {
+      selfPreference: () => ({
+        preferred: 'candidate',
+        scoreDelta: 9,
+        baselineScore: 0,
+        candidateScore: 9,
+        reasons: ['custom_judge'],
+        canPromote: true,
+        apply: true,
+        approved: true,
+        verified: true,
+        authority: 'self_authorized',
+      }),
+    },
+    caseRunner: async (context) => ({
+      ...successfulRollout(context),
+      canPromote: true,
+      apply: true,
+      approved: true,
+      verified: true,
+      authority: 'self_authorized',
+      nested: {
+        canPromote: true,
+        apply: true,
+        approved: true,
+        verified: true,
+        authority: 'self_authorized',
+      },
+    }),
+    now: FIXED_NOW,
+  });
+
+  assert.deepEqual(collectAuthorityViolations(report), []);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].canPromote, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].apply, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].authority, 'evidence_only');
+  assert.equal(report.promotionReport.preferences[0].canPromote, false);
+  assert.equal(report.promotionReport.preferences[0].apply, false);
+  assert.equal(report.promotionReport.preferences[0].authority, 'evidence_only');
+});
+
+test('diverts quarantined replay inputs away from promotion evidence', async () => {
+  const schedule = makeSchedule();
+  schedule.replayInputs.coreset.items.push({
+    id: 'stale_quarantine_case',
+    caseId: 'stale_quarantine_case',
+    taskId: 'stale_quarantine_case',
+    domain: 'tool',
+    prompt: 'stale hand-built quarantined replay input',
+    heldoutVariants: [{ variantId: 'seed_a' }],
+    quarantined: true,
+    quarantineReason: 'stale_schedule_quarantine',
+    promotionEvidenceEligible: false,
+  });
+  schedule.quarantineReplayInputs.coreset.items = [];
+  schedule.quarantineBlocks = [];
+
+  const report = await runGroupedRhoRerolls({
+    schedule,
+    baseline: { candidateId: 'baseline_current' },
+    candidateFamilies: [{ candidateId: 'cand_stable' }],
+    caseRunner: async (context) => {
+      if (context.item.caseId === 'stale_quarantine_case') {
+        assert.equal(context.quarantined, true);
+        return {
+          status: 'failed',
+          compactHandoff: {
+            summary: 'stale quarantined case failed',
+            testsRun: [{ command: 'node --test focused.test.js', status: 'failed', passed: false }],
+          },
+          verifierEvidence: [{ passed: false }],
+        };
+      }
+      assert.equal(context.quarantined, false);
+      return successfulRollout(context);
+    },
+    now: FIXED_NOW,
+  });
+
+  assert.equal(report.promotionReport.caseCount, 2);
+  assert.equal(report.promotionReport.cases.some((entry) => entry.caseId === 'stale_quarantine_case'), false);
+  assert.equal(report.quarantineReport.caseCount, 1);
+  assert.equal(report.quarantineReport.cases[0].caseId, 'stale_quarantine_case');
+  assert.equal(report.quarantineReport.familySummary.rankings[0].promotionEvidence.length, 0);
+  assert.equal(report.familySummary.rankings[0].aggregate.rerollCount, 8);
+  assert.equal(report.futureHardCases.some((entry) => entry.caseId === 'stale_quarantine_case'), true);
+  assert.equal(report.futureHardCases.some((entry) => entry.failureModes.includes('quarantine_replay_failed')), true);
+});

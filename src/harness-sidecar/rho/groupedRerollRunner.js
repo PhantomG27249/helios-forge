@@ -38,11 +38,60 @@ function coresetItems(coreset) {
   return asArray(coreset?.items ?? coreset?.cases ?? coreset?.traces);
 }
 
+function coresetWithItems(coreset, items) {
+  if (Array.isArray(coreset)) return items;
+  return {
+    ...(coreset ?? {}),
+    items,
+    selectedCount: items.length,
+  };
+}
+
 function replayInputsFromSchedule(schedule = {}, key) {
   const inputs = schedule[key] ?? {};
   return {
     groupSize: Math.max(1, Math.floor(Number(inputs.groupSize ?? schedule.cadence?.groupSize ?? 1) || 1)),
     coreset: inputs.coreset ?? { items: [] },
+  };
+}
+
+function itemIsQuarantined(item = {}) {
+  return item.quarantined === true ||
+    item.promotionEvidenceEligible === false ||
+    Boolean(item.quarantine) ||
+    (item.external === true && item.verified === false);
+}
+
+function splitReplayInputs({ promotionInputs, quarantineInputs }) {
+  const promotionItems = coresetItems(promotionInputs.coreset);
+  const scheduledQuarantineItems = coresetItems(quarantineInputs.coreset);
+  const safePromotionItems = promotionItems.filter((item) => !itemIsQuarantined(item));
+  const staleQuarantineItems = promotionItems
+    .filter(itemIsQuarantined)
+    .map((item) => ({
+      ...item,
+      quarantined: true,
+      promotionEvidenceEligible: false,
+      quarantineReason: stableString(item.quarantineReason ?? item.quarantine?.reason ?? 'quarantined_replay_input'),
+    }));
+  const quarantineById = new Map();
+  for (const item of [...scheduledQuarantineItems, ...staleQuarantineItems]) {
+    quarantineById.set(caseId(item, item.id), {
+      ...item,
+      quarantined: true,
+      promotionEvidenceEligible: false,
+    });
+  }
+
+  return {
+    promotionInputs: {
+      ...promotionInputs,
+      coreset: coresetWithItems(promotionInputs.coreset, safePromotionItems),
+    },
+    quarantineInputs: {
+      ...quarantineInputs,
+      coreset: coresetWithItems(quarantineInputs.coreset, [...quarantineById.values()]),
+    },
   };
 }
 
@@ -161,10 +210,20 @@ function hardCasesFromReport(report = {}, { quarantined = false } = {}) {
 }
 
 function sanitizeQuarantineBlocks({ schedule = {}, quarantineReport = {} } = {}) {
-  const blocks = asArray(schedule.quarantineBlocks);
+  const explicitBlocks = asArray(schedule.quarantineBlocks);
+  const blockIds = new Set(explicitBlocks.map((block) => stableString(block.caseId ?? block.id)));
   const casesById = new Map(
     asArray(quarantineReport.cases).map((entry) => [caseId(entry.item, entry.caseId), entry]),
   );
+  const implicitBlocks = asArray(quarantineReport.cases)
+    .filter((entry) => !blockIds.has(caseId(entry.item, entry.caseId)))
+    .map((entry) => ({
+      caseId: caseId(entry.item, entry.caseId),
+      domain: caseDomain(entry.item),
+      reason: stableString(entry.item?.quarantineReason ?? 'quarantined_replay_input'),
+      promotionEvidenceEligible: false,
+    }));
+  const blocks = [...explicitBlocks, ...implicitBlocks];
 
   return blocks.map((block) => {
     const replayCase = casesById.get(stableString(block.caseId ?? block.id));
@@ -242,10 +301,12 @@ export async function runGroupedRhoRerolls({
   if (family.length === 0) throw new Error('candidateFamilies must include at least one candidate');
 
   const generatedAt = normalizeNow(now ?? schedule.generatedAt);
-  const promotionInputs = replayInputsFromSchedule(schedule, 'replayInputs');
-  const quarantineInputs = replayInputsFromSchedule(schedule, 'quarantineReplayInputs');
+  const replayInputs = splitReplayInputs({
+    promotionInputs: replayInputsFromSchedule(schedule, 'replayInputs'),
+    quarantineInputs: replayInputsFromSchedule(schedule, 'quarantineReplayInputs'),
+  });
   const promotionReport = await runBatch({
-    inputs: promotionInputs,
+    inputs: replayInputs.promotionInputs,
     baseline,
     candidateFamilies: family,
     caseRunner,
@@ -254,9 +315,9 @@ export async function runGroupedRhoRerolls({
     quarantined: false,
     promotionEvidenceEligible: true,
   });
-  const quarantineReport = coresetItems(quarantineInputs.coreset).length > 0
+  const quarantineReport = coresetItems(replayInputs.quarantineInputs.coreset).length > 0
     ? await runBatch({
-      inputs: quarantineInputs,
+      inputs: replayInputs.quarantineInputs,
       baseline,
       candidateFamilies: family,
       caseRunner,
@@ -266,7 +327,7 @@ export async function runGroupedRhoRerolls({
       promotionEvidenceEligible: false,
     })
     : {
-      groupSize: quarantineInputs.groupSize,
+      groupSize: replayInputs.quarantineInputs.groupSize,
       caseCount: 0,
       cases: [],
       preferences: [],

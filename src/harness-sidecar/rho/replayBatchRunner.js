@@ -7,6 +7,42 @@ function asArray(value) {
   return Array.isArray(value) ? value : [value];
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeKey(key) {
+  return String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+}
+
+function isAuthorityBooleanKey(key) {
+  const normalized = normalizeKey(key);
+  return normalized === 'apply' ||
+    normalized === 'approved' ||
+    normalized === 'canpromote' ||
+    normalized === 'promotionallowed' ||
+    normalized === 'verified';
+}
+
+function sanitizeEvidenceOnlyValue(value) {
+  if (Array.isArray(value)) return value.map(sanitizeEvidenceOnlyValue);
+  if (!isPlainObject(value)) return value;
+
+  const sanitized = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isAuthorityBooleanKey(key) && child === true) {
+      sanitized[key] = false;
+      continue;
+    }
+    if (normalizeKey(key) === 'authority' && typeof child === 'string' && child !== 'evidence_only') {
+      sanitized[key] = 'evidence_only';
+      continue;
+    }
+    sanitized[key] = sanitizeEvidenceOnlyValue(child);
+  }
+  return sanitized;
+}
+
 function collectCoresetItems(coreset) {
   if (Array.isArray(coreset)) return coreset;
   return asArray(coreset?.items ?? coreset?.traces ?? coreset?.cases);
@@ -112,10 +148,11 @@ async function runVariant({
         heldoutVariant,
         candidate,
       });
+      const evidenceOnlyRollout = sanitizeEvidenceOnlyValue(rollout ?? {});
       rollouts.push({
-        ...rollout,
+        ...evidenceOnlyRollout,
         rhoReplay: {
-          ...(rollout?.rhoReplay ?? {}),
+          ...(evidenceOnlyRollout.rhoReplay ?? {}),
           variant,
           rolloutIndex,
           heldoutVariantId: String(heldoutVariant.variantId ?? heldoutVariant.id ?? heldoutVariant),
@@ -349,9 +386,12 @@ export async function runRhoReplayBatch({
       candidateSummary.candidateId = familyMember.candidateId;
       candidateSummaries.push(candidateSummary);
 
+      const preferenceJudgment = sanitizeEvidenceOnlyValue(
+        (judges.selfPreference ?? judgeSelfPreference)({ baseline, candidate: candidateSummary }),
+      );
       const preference = {
         candidateId: familyMember.candidateId,
-        ...(judges.selfPreference ?? judgeSelfPreference)({ baseline, candidate: candidateSummary }),
+        ...preferenceJudgment,
         blockingEvidence: blockingEvidence(candidateSummary),
         aggregate: replayAggregate(candidateSummary),
         heldoutVariants: caseHeldoutVariants,
