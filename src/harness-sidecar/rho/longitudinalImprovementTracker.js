@@ -87,7 +87,13 @@ function normalizeBudget(budget = {}) {
   const rawSpentUsd = Number(budget.spentUsd ?? budget.usedUsd ?? budget.costUsd ?? budget.used?.cost ?? budget.used?.usd ?? 0);
   const spentUsd = roundMoney(rawSpentUsd);
   const maxUsd = budget.maxUsd === undefined && budget.limitUsd === undefined
-    ? (budget.limits?.cost === undefined && budget.limits?.usd === undefined ? null : roundMoney(budget.limits?.cost ?? budget.limits?.usd))
+    ? (
+      budget.limits?.maxCost === undefined &&
+        budget.limits?.cost === undefined &&
+        budget.limits?.usd === undefined
+        ? null
+        : roundMoney(budget.limits?.maxCost ?? budget.limits?.cost ?? budget.limits?.usd)
+    )
     : roundMoney(budget.maxUsd ?? budget.limitUsd);
   const remainingUsd = budget.remainingUsd === undefined
     ? (maxUsd === null ? null : roundMoney(maxUsd - spentUsd))
@@ -101,13 +107,15 @@ function normalizeBudget(budget = {}) {
       0,
   ) || 0));
   const maxCases = budget.maxCases === undefined && budget.caseLimit === undefined
-    ? (budget.limits?.casesEvaluated === undefined && budget.limits?.cases === undefined
+    ? (budget.limits?.maxCases === undefined && budget.limits?.casesEvaluated === undefined && budget.limits?.cases === undefined
       ? null
-      : Math.max(0, Math.floor(Number(budget.limits?.casesEvaluated ?? budget.limits?.cases) || 0)))
+      : Math.max(0, Math.floor(Number(budget.limits?.maxCases ?? budget.limits?.casesEvaluated ?? budget.limits?.cases) || 0)))
     : Math.max(0, Math.floor(Number(budget.maxCases ?? budget.caseLimit) || 0));
   const tokensUsed = Math.max(0, Math.floor(Number(budget.tokensUsed ?? budget.usedTokens ?? budget.used?.tokens ?? 0) || 0));
   const maxTokens = budget.maxTokens === undefined && budget.tokenLimit === undefined
-    ? (budget.limits?.tokens === undefined ? null : Math.max(0, Math.floor(Number(budget.limits?.tokens) || 0)))
+    ? (budget.limits?.maxTokens === undefined && budget.limits?.tokens === undefined
+      ? null
+      : Math.max(0, Math.floor(Number(budget.limits?.maxTokens ?? budget.limits?.tokens) || 0)))
     : Math.max(0, Math.floor(Number(budget.maxTokens ?? budget.tokenLimit) || 0));
 
   return {

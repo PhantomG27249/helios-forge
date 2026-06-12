@@ -250,6 +250,37 @@ test('normalizes real replay-cycle nested budget accounting', () => {
   });
 });
 
+test('normalizes replay-cycle max budget limits', () => {
+  const history = updateRhoImprovementHistory({
+    replayReport: {
+      reportId: 'rho-replay-budget-limits-001',
+      suiteId: 'replay-budget-limits-suite',
+      candidateIds: ['candidate-budget-limits'],
+      aggregateScore: 0.71,
+      domainScores: { code: 0.71 },
+      budget: {
+        used: { cost: 10, tokens: 100, casesEvaluated: 2 },
+        limits: { maxCost: 20, maxTokens: 200, maxCases: 4 },
+      },
+    },
+    now: '2026-06-12T00:00:00.000Z',
+  });
+
+  assert.deepEqual(history[0].budget, {
+    spentUsd: 10,
+    maxUsd: 20,
+    remainingUsd: 10,
+    percentUsdUsed: 50,
+    casesRun: 2,
+    maxCases: 4,
+    percentCasesUsed: 50,
+    tokensUsed: 100,
+    maxTokens: 200,
+    percentTokensUsed: 50,
+    blockedJobCount: 0,
+  });
+});
+
 test('sanitizes historical old-suite regressions back to evidence-only records', () => {
   const history = updateRhoImprovementHistory({
     history: [
