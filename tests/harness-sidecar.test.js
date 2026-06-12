@@ -641,6 +641,67 @@ test('sidecar prepares deterministic model council pass@k eval and emits evidenc
   });
 });
 
+test('sidecar exposes production organism evidence endpoints as read-only reports', async () => {
+  await withSidecar(
+    async ({ sidecar }) => {
+      const endpoints = [
+        ['/v1/evidence/held-out-suites', 'heldOutSuites'],
+        ['/v1/evidence/replay-cycles', 'replayCycles'],
+        ['/v1/evidence/operator-dashboards', 'operatorDashboards'],
+        ['/v1/evidence/visual-suites', 'visualSuites'],
+        ['/v1/evidence/a2a-status', 'a2aStatus'],
+        ['/v1/evidence/model-council-calibration', 'modelCouncilCalibration'],
+        ['/v1/evidence/endpoint-capacity', 'endpointCapacity'],
+        ['/v1/evidence/autonomy-rollback', 'autonomyRollback'],
+      ];
+
+      for (const [route, type] of endpoints) {
+        const response = await fetch(`${sidecar.url}${route}`);
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.type, type);
+        assert.equal(body.evidenceOnly, true);
+        assert.equal(body.canPromote, false);
+        assert.equal(body.summary.itemCount, 1);
+        assert.equal(body.items[0].canPromote, false);
+        assert.equal(JSON.stringify(body).includes('durableApplyApproved'), false);
+        assert.equal(JSON.stringify(body).includes('promotionAllowed'), false);
+      }
+    },
+    {
+      beforeStart: async ({ workspaceRoot }) => {
+        const fixtures = new Map([
+          ['.harness/benchmarks/suites/suite-prod.json', { id: 'suite-prod', cases: [{ caseId: 'case-1' }] }],
+          ['.harness/benchmarks/replay-cycles/replay-prod.json', { reportId: 'replay-prod', aggregateScore: 0.8 }],
+          ['.harness/dashboards/operator/operator-prod.json', { snapshotId: 'operator-prod', frontier: { status: 'stable' } }],
+          ['.harness/visual/replay-suites/visual-prod.json', { reportId: 'visual-prod', summary: { caseCount: 2 } }],
+          ['.harness/a2a/queue-state.json', { outbox: [{ messageId: 'msg-1', status: 'queued' }], inbox: [] }],
+          ['.harness/model-council/calibration/cal-prod.json', { calibrationId: 'cal-prod', modelWeights: { modelA: 1 } }],
+          ['.harness/model/endpoint-capacity/recommendations.json', { summary: { actionCount: 1 }, actions: [{ reason: 'latency_high' }] }],
+          ['.harness/governance/autonomy-summary.json', { autonomy: { levelName: 'supervised' } }],
+          ['.harness/governance/rollback-drills.json', { drills: [{ drillId: 'rollback-1', status: 'passed' }] }],
+        ]);
+
+        for (const [relativePath, content] of fixtures) {
+          const filePath = path.join(workspaceRoot, relativePath);
+          await mkdir(path.dirname(filePath), { recursive: true });
+          await writeFile(
+            filePath,
+            `${JSON.stringify({
+              ...content,
+              canPromote: true,
+              promotionAllowed: true,
+              durableApplyApproved: true,
+            })}\n`,
+            'utf8',
+          );
+        }
+      },
+    },
+  );
+});
+
 test('task startup launches enabled MCP capabilities through injected runtime', async () => {
   await withSidecar(
     async ({ sidecar }) => {

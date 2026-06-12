@@ -1,5 +1,5 @@
 import { createServer } from 'http';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { planSubgoals } from './bes/subgoalPlanner.js';
@@ -249,6 +249,34 @@ function normalizeMountResult(mountResult, profileId) {
     manifestPath,
     enabledCounts,
   };
+}
+
+const EVIDENCE_AUTHORITY_KEYS = new Set([
+  'applied',
+  'approved',
+  'canApply',
+  'canMutateWorkspace',
+  'directApplyAllowed',
+  'durableApplyApproved',
+  'promotionAllowed',
+  'promotionAuthority',
+  'verifierBypass',
+]);
+
+function scrubEvidencePayload(value) {
+  if (Array.isArray(value)) return value.map(scrubEvidencePayload);
+  if (!value || typeof value !== 'object') return value;
+  const safe = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (EVIDENCE_AUTHORITY_KEYS.has(key)) continue;
+    if (key === 'canPromote') {
+      safe.canPromote = false;
+      continue;
+    }
+    safe[key] = scrubEvidencePayload(child);
+  }
+  if (!Object.hasOwn(safe, 'canPromote')) safe.canPromote = false;
+  return safe;
 }
 
 function resolveAgentProfileToolCaps(profileId) {
@@ -682,11 +710,15 @@ export function createHarnessSidecar({
       };
       const councilRoutes = Object.fromEntries(
         Object.values(modelCouncil.roleRoutes || {})
-          .filter((route) => route.modelProfile && route.endpoint?.baseUrl && route.endpoint?.modelId)
+          .filter((route) => (
+            route.modelProfile
+            && route.privateEndpointOverride?.baseUrl
+            && route.privateEndpointOverride?.model
+          ))
           .flatMap((route) => {
             const providerRoute = {
-              baseUrl: route.endpoint.baseUrl,
-              modelId: route.endpoint.modelId,
+              baseUrl: route.privateEndpointOverride.baseUrl,
+              modelId: route.privateEndpointOverride.model,
               apiKeyEnv: profileOverrides[route.modelProfile]?.apiKeyEnv,
             };
             return [
@@ -724,21 +756,21 @@ export function createHarnessSidecar({
       if (modelCouncil.enabled) {
         const endpointBaseUrls = new Set(
           Object.values(modelCouncil.roleRoutes || {})
-            .map((route) => route.endpoint?.baseUrl)
+            .map((route) => route.privateEndpointOverride?.baseUrl)
             .filter(Boolean),
         );
         modelCouncil.health = {
           maxConcurrency: maxSwarmConcurrencyForConfig(harnessConfig),
           recommendedConcurrency: adaptiveConcurrency,
           endpoints: Object.values(modelCouncil.roleRoutes || {})
-            .filter((route) => route.endpoint?.baseUrl)
+            .filter((route) => route.privateEndpointOverride?.baseUrl)
             .map((route) => ({
               role: route.role,
               endpointProfile: route.endpointProfile,
-              baseUrl: route.endpoint.baseUrl,
-              healthUrl: route.endpoint.baseUrl === baseUrl ? vllmHealth?.healthUrl : undefined,
-              healthy: route.endpoint.baseUrl === baseUrl ? vllmHealth?.healthy : undefined,
-              recommendedConcurrency: route.endpoint.baseUrl === baseUrl ? adaptiveConcurrency : undefined,
+              baseUrl: route.privateEndpointOverride.baseUrl,
+              healthUrl: route.privateEndpointOverride.baseUrl === baseUrl ? vllmHealth?.healthUrl : undefined,
+              healthy: route.privateEndpointOverride.baseUrl === baseUrl ? vllmHealth?.healthy : undefined,
+              recommendedConcurrency: route.privateEndpointOverride.baseUrl === baseUrl ? adaptiveConcurrency : undefined,
             })),
         };
         await emitEvent({
@@ -2949,6 +2981,9 @@ export function createHarnessSidecar({
       repeatedSamplingPassAtK: summary.repeatedSamplingPassAtK,
       staticCouncilPassAtK: summary.staticCouncilPassAtK,
       adaptiveCouncilPassAtK: summary.adaptiveCouncilPassAtK,
+      calibratedEnsemblePassAtK: summary.calibratedEnsemblePassAtK,
+      calibratedEnsembleConfidenceInterval: summary.calibratedEnsembleConfidenceInterval,
+      regressionCount: summary.regressionCount,
       uplift: summary.uplift,
       proven: summary.proven,
       authority: 'evidence_only',
@@ -2966,6 +3001,135 @@ export function createHarnessSidecar({
     return {
       candidates: candidates.map((candidate) => summarizeSkillCandidate(candidate)),
     };
+  }
+
+  function productionGate(name) {
+    return loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot })
+      .then((config) => config.productionCapabilities?.[name] || {
+        enabled: false,
+        mode: 'offline',
+        authority: 'evidence_only',
+      });
+  }
+
+  async function readJsonFileIfPresent(relativePath) {
+    try {
+      const raw = await readFile(path.join(resolvedWorkspaceRoot, relativePath), 'utf8');
+      return scrubEvidencePayload(JSON.parse(raw));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async function readJsonDirectory(relativeDir) {
+    const root = path.join(resolvedWorkspaceRoot, relativeDir);
+    let entries;
+    try {
+      entries = await readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+
+    const items = [];
+    for (const entry of entries
+      .filter((item) => item.isFile() && item.name.endsWith('.json'))
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const raw = await readFile(path.join(root, entry.name), 'utf8');
+      items.push(scrubEvidencePayload(JSON.parse(raw)));
+    }
+    return items;
+  }
+
+  async function productionEvidenceResponse({
+    type,
+    gateName,
+    items,
+  }) {
+    const gate = await productionGate(gateName);
+    const safeItems = (Array.isArray(items) ? items : [items])
+      .filter(Boolean)
+      .map(scrubEvidencePayload);
+    return {
+      type,
+      evidenceOnly: true,
+      canPromote: false,
+      gate: {
+        name: gateName,
+        enabled: gate.enabled === true,
+        mode: gate.mode || 'offline',
+        authority: 'evidence_only',
+      },
+      summary: {
+        itemCount: safeItems.length,
+        available: safeItems.length > 0,
+      },
+      items: safeItems,
+    };
+  }
+
+  async function getProductionEvidence(type) {
+    if (type === 'heldOutSuites') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'operatorDashboards',
+        items: await readJsonDirectory(path.join('.harness', 'benchmarks', 'suites')),
+      });
+    }
+    if (type === 'replayCycles') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'operatorDashboards',
+        items: await readJsonDirectory(path.join('.harness', 'benchmarks', 'replay-cycles')),
+      });
+    }
+    if (type === 'operatorDashboards') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'operatorDashboards',
+        items: await readJsonDirectory(path.join('.harness', 'dashboards', 'operator')),
+      });
+    }
+    if (type === 'visualSuites') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'visualReplaySuites',
+        items: await readJsonDirectory(path.join('.harness', 'visual', 'replay-suites')),
+      });
+    }
+    if (type === 'a2aStatus') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'productionA2aQueues',
+        items: await readJsonFileIfPresent(path.join('.harness', 'a2a', 'queue-state.json')),
+      });
+    }
+    if (type === 'modelCouncilCalibration') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'ensembleCalibration',
+        items: await readJsonDirectory(path.join('.harness', 'model-council', 'calibration')),
+      });
+    }
+    if (type === 'endpointCapacity') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'endpointCapacityRecommendations',
+        items: await readJsonFileIfPresent(path.join('.harness', 'model', 'endpoint-capacity', 'recommendations.json')),
+      });
+    }
+    if (type === 'autonomyRollback') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'productionAutonomyPolicy',
+        items: {
+          autonomy: await readJsonFileIfPresent(path.join('.harness', 'governance', 'autonomy-summary.json')),
+          rollback: await readJsonFileIfPresent(path.join('.harness', 'governance', 'rollback-drills.json')),
+        },
+      });
+    }
+    throw new Error(`Unknown production evidence type: ${type}`);
   }
 
   async function getSkillCandidateReviewDetail(candidateId) {
@@ -3108,6 +3272,26 @@ export function createHarnessSidecar({
             ...body,
             command: body.command || 'harness_model_council_passk_eval_prepare',
           });
+          sendJson(res, 200, result);
+        } catch (error) {
+          sendBadRequest(res, error);
+        }
+        return;
+      }
+
+      const evidenceRoutes = new Map([
+        ['/v1/evidence/held-out-suites', 'heldOutSuites'],
+        ['/v1/evidence/replay-cycles', 'replayCycles'],
+        ['/v1/evidence/operator-dashboards', 'operatorDashboards'],
+        ['/v1/evidence/visual-suites', 'visualSuites'],
+        ['/v1/evidence/a2a-status', 'a2aStatus'],
+        ['/v1/evidence/model-council-calibration', 'modelCouncilCalibration'],
+        ['/v1/evidence/endpoint-capacity', 'endpointCapacity'],
+        ['/v1/evidence/autonomy-rollback', 'autonomyRollback'],
+      ]);
+      if (req.method === 'GET' && evidenceRoutes.has(url.pathname)) {
+        try {
+          const result = await getProductionEvidence(evidenceRoutes.get(url.pathname));
           sendJson(res, 200, result);
         } catch (error) {
           sendBadRequest(res, error);
