@@ -122,6 +122,27 @@ function collectAuthorityViolations(value, path = '$') {
   return violations;
 }
 
+function collectUnsafeText(value, path = '$') {
+  const violations = [];
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => {
+      violations.push(...collectUnsafeText(entry, `${path}[${index}]`));
+    });
+    return violations;
+  }
+  if (!value || typeof value !== 'object') {
+    if (typeof value === 'string' && (/sk-[A-Za-z0-9_-]+/.test(value) || /C:\\Users\\jackj/i.test(value))) {
+      violations.push(path);
+    }
+    return violations;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    violations.push(...collectUnsafeText(child, `${path}.${key}`));
+  }
+  return violations;
+}
+
 test('runs grouped baseline and candidate family rerolls with domain coverage and evidence-only authority', async () => {
   const calls = [];
   const report = await runGroupedRhoRerolls({
@@ -221,8 +242,9 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
   assert.equal(report.quarantineBlocks[0].caseId, 'quarantined_case');
   assert.equal(report.quarantineBlocks[0].promotionEvidenceEligible, false);
   assert.equal(report.quarantineBlocks[0].quarantine.quarantined, true);
-  assert.equal(report.quarantineBlocks[0].quarantine.reasons.includes('secret_like_value'), true);
-  assert.equal(report.quarantineBlocks[0].quarantine.reasons.includes('unsafe_path_value'), true);
+  assert.deepEqual(collectUnsafeText(report.quarantineReport), []);
+  assert.deepEqual(collectUnsafeText(report.quarantineBlocks), []);
+  assert.equal(JSON.stringify(report.quarantineReport).includes('external unverified trace contains'), false);
   assert.deepEqual(collectAuthorityViolations(report.quarantineBlocks), []);
   assert.equal(report.quarantineBlocks[0].safeApply, false);
   assert.equal(report.quarantineBlocks[0].approvalAuthority, false);
@@ -240,6 +262,7 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
 test('downgrades nested rollout and judge authority-shaped claims throughout grouped reports', async () => {
   const schedule = makeSchedule();
   Object.assign(schedule.replayInputs.coreset.items[0], {
+    prompt: 'promotion input leaks token=sk-promo-raw and C:\\Users\\jackj\\promo-secret',
     safeApply: true,
     approvalAuthority: true,
     verifierBypass: true,
@@ -248,6 +271,7 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
     authority: true,
   });
   Object.assign(schedule.replayInputs.coreset.items[0].heldoutVariants[0], {
+    note: 'heldout variant leaks token=sk-heldout-raw from C:\\Users\\jackj\\variant-secret',
     safeApply: true,
     approvalAuthority: true,
     verifierBypass: true,
@@ -256,6 +280,7 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
     authority: true,
   });
   Object.assign(schedule.quarantineReplayInputs.coreset.items[0].heldoutVariants[0], {
+    note: 'quarantine heldout leaks token=sk-quarantine-heldout from C:\\Users\\jackj\\quarantine-variant',
     safeApply: true,
     approvalAuthority: true,
     verifierBypass: true,
@@ -285,18 +310,14 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
         authority: 'self_authorized',
       }),
     },
-    caseRunner: async (context) => ({
-      ...successfulRollout(context),
-      canPromote: true,
-      apply: true,
-      approved: true,
-      approvalAuthority: true,
-      verified: true,
-      safeApply: true,
-      verifierBypass: true,
-      bypass: true,
-      authority: 'self_authorized',
-      nested: {
+    caseRunner: async (context) => {
+      const rollout = successfulRollout(context);
+      return {
+        ...rollout,
+        compactHandoff: {
+          ...rollout.compactHandoff,
+          summary: `${rollout.compactHandoff.summary} token=sk-rollout-raw C:\\Users\\jackj\\rollout-secret`,
+        },
         canPromote: true,
         apply: true,
         approved: true,
@@ -305,16 +326,29 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
         safeApply: true,
         verifierBypass: true,
         bypass: true,
-        authority: true,
-      },
-      evidenceMarker: {
-        authority: 'evidence_only',
-      },
-    }),
+        authority: 'self_authorized',
+        nested: {
+          canPromote: true,
+          apply: true,
+          approved: true,
+          approvalAuthority: true,
+          verified: true,
+          safeApply: true,
+          verifierBypass: true,
+          bypass: true,
+          authority: true,
+        },
+        evidenceMarker: {
+          authority: 'evidence_only',
+        },
+      };
+    },
     now: FIXED_NOW,
   });
 
   assert.deepEqual(collectAuthorityViolations(report), []);
+  assert.deepEqual(collectUnsafeText(report.promotionReport), []);
+  assert.deepEqual(collectUnsafeText(report.quarantineReport), []);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].canPromote, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].apply, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].safeApply, false);
@@ -322,10 +356,14 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].verifierBypass, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].nested.authority, 'evidence_only');
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].evidenceMarker.authority, 'evidence_only');
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].compactHandoff.summary.includes('[redacted'), true);
+  assert.equal(report.promotionReport.cases[0].baseline.consistency.majoritySummary.includes('[redacted'), true);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].authority, 'evidence_only');
   assert.equal(report.promotionReport.cases[0].item.safeApply, false);
+  assert.equal(report.promotionReport.cases[0].item.prompt.includes('[redacted'), true);
   assert.equal(report.promotionReport.cases[0].item.authority, 'evidence_only');
   assert.equal(report.promotionReport.cases[0].heldoutVariants[0].approvalAuthority, false);
+  assert.equal(report.promotionReport.cases[0].heldoutVariants[0].note.includes('[redacted'), true);
   assert.equal(report.promotionReport.cases[0].heldoutVariants[0].authority, 'evidence_only');
   assert.equal(report.promotionReport.preferences[0].heldoutVariants[0].verifierBypass, false);
   assert.equal(report.promotionReport.preferences[0].heldoutVariants[0].authority, 'evidence_only');

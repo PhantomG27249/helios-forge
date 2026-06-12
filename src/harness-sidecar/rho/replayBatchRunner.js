@@ -1,6 +1,7 @@
 import { scoreSelfConsistency } from './selfConsistency.js';
 import { judgeSelfPreference } from './selfPreferenceJudge.js';
 import { scoreSelfValidation } from './selfValidation.js';
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -42,6 +43,7 @@ function isAuthorityShapedKey(key) {
 
 export function sanitizeEvidenceOnlyValue(value) {
   if (Array.isArray(value)) return value.map(sanitizeEvidenceOnlyValue);
+  if (typeof value === 'string') return quarantineModelVisiblePayload(value).value;
   if (!isPlainObject(value)) return value;
 
   const sanitized = {};
@@ -57,6 +59,31 @@ export function sanitizeEvidenceOnlyValue(value) {
     sanitized[key] = sanitizeEvidenceOnlyValue(child);
   }
   return sanitized;
+}
+
+function isQuarantinedTextKey(key) {
+  const normalized = normalizeKey(key);
+  return normalized === 'prompt' ||
+    normalized === 'summary' ||
+    normalized === 'majoritysummary' ||
+    normalized === 'note' ||
+    normalized === 'text' ||
+    normalized === 'description';
+}
+
+export function redactQuarantinedTextFields(value) {
+  if (Array.isArray(value)) return value.map(redactQuarantinedTextFields);
+  if (!isPlainObject(value)) return value;
+
+  const redacted = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isQuarantinedTextKey(key) && typeof child === 'string' && child.length > 0) {
+      redacted[key] = '[redacted]';
+      continue;
+    }
+    redacted[key] = redactQuarantinedTextFields(child);
+  }
+  return redacted;
 }
 
 function collectCoresetItems(coreset) {
@@ -373,9 +400,15 @@ export async function runRhoReplayBatch({
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
     const item = items[itemIndex];
     const caseHeldoutVariants = collectHeldoutVariants(item, heldoutVariants);
-    const reportItem = sanitizeEvidenceOnlyValue(item);
-    const reportHeldoutVariants = sanitizeEvidenceOnlyValue(caseHeldoutVariants);
-    const baseline = await runVariant({
+    const sanitizedReportItem = sanitizeEvidenceOnlyValue(item);
+    const sanitizedHeldoutVariants = sanitizeEvidenceOnlyValue(caseHeldoutVariants);
+    const reportItem = promotionEvidenceEligible
+      ? sanitizedReportItem
+      : redactQuarantinedTextFields(sanitizedReportItem);
+    const reportHeldoutVariants = promotionEvidenceEligible
+      ? sanitizedHeldoutVariants
+      : redactQuarantinedTextFields(sanitizedHeldoutVariants);
+    let baseline = await runVariant({
       item,
       itemIndex,
       groupSize: safeGroupSize,
@@ -384,11 +417,12 @@ export async function runRhoReplayBatch({
       heldoutVariants: caseHeldoutVariants,
       judges,
     });
+    if (!promotionEvidenceEligible) baseline = redactQuarantinedTextFields(baseline);
     const candidateSummaries = [];
     const preferences = [];
 
     for (const familyMember of family) {
-      const candidateSummary = await runVariant({
+      let candidateSummary = await runVariant({
         item,
         itemIndex,
         groupSize: safeGroupSize,
@@ -401,6 +435,7 @@ export async function runRhoReplayBatch({
         },
         judges,
       });
+      if (!promotionEvidenceEligible) candidateSummary = redactQuarantinedTextFields(candidateSummary);
       candidateSummary.candidateId = familyMember.candidateId;
       candidateSummaries.push(candidateSummary);
 

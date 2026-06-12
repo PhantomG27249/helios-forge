@@ -1,4 +1,8 @@
-import { runRhoReplayBatch, sanitizeEvidenceOnlyValue } from './replayBatchRunner.js';
+import {
+  redactQuarantinedTextFields,
+  runRhoReplayBatch,
+  sanitizeEvidenceOnlyValue,
+} from './replayBatchRunner.js';
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 function asArray(value) {
@@ -245,7 +249,7 @@ function sanitizeQuarantineBlocks({ schedule = {}, quarantineReport = {} } = {})
         quarantined: quarantinedPayload.quarantined,
         reasons: quarantinedPayload.reasons,
         redacted: quarantinedPayload.redacted,
-        value: sanitizeEvidenceOnlyValue(quarantinedPayload.value),
+        value: redactQuarantinedTextFields(sanitizeEvidenceOnlyValue(quarantinedPayload.value)),
       },
     };
   });
