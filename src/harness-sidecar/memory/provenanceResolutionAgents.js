@@ -1,7 +1,8 @@
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 const VERDICTS = new Set(['supported', 'contradicted', 'conflicted', 'insufficient_evidence']);
-const KEYED_WINDOWS_PATH_PATTERN = /\b([A-Za-z0-9_.-]+)=([A-Za-z]:[\\/][^\s,;'"<>]*)/g;
+const KEYED_WINDOWS_PATH_PATTERN = /\b([A-Za-z0-9_.-]+)([:=])([A-Za-z]:[\\/][^\s,;'"<>]*)/g;
+const AUTHORITY_TEXT_PATTERN = /\b(authority|canPromote|promotionAllowed|canApply|apply|approved|verifierBypass)\s*[:=]\s*([^\s,;'"<>]+)/gi;
 
 function normalizeList(value) {
   if (!value) return [];
@@ -54,14 +55,18 @@ function inputProvenanceRefs(input = {}) {
 
 function redactKeyedDrivePaths(value) {
   let redacted = String(value);
-  let changed = false;
-  redacted = redacted.replace(KEYED_WINDOWS_PATH_PATTERN, (_match, key) => {
-    changed = true;
-    return `${key}=[redacted:path]`;
+  const reasons = new Set();
+  redacted = redacted.replace(KEYED_WINDOWS_PATH_PATTERN, (_match, key, operator) => {
+    reasons.add('unsafe_path_value');
+    return `${key}${operator}[redacted:path]`;
+  });
+  redacted = redacted.replace(AUTHORITY_TEXT_PATTERN, (_match, key) => {
+    reasons.add('authority_claim_removed');
+    return `${key}=[redacted:authority]`;
   });
   return {
     value: redacted,
-    reasons: changed ? ['unsafe_path_value'] : [],
+    reasons: [...reasons],
   };
 }
 
