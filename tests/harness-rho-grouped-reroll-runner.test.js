@@ -180,8 +180,17 @@ test('runs grouped baseline and candidate family rerolls with domain coverage an
 });
 
 test('keeps quarantine replay separate from promotion evidence and emits future hard cases for failures', async () => {
+  const schedule = makeSchedule();
+  Object.assign(schedule.quarantineBlocks[0], {
+    safeApply: true,
+    approvalAuthority: true,
+    verifierBypass: true,
+    bypass: true,
+    approved: true,
+    authority: true,
+  });
   const report = await runGroupedRhoRerolls({
-    schedule: makeSchedule(),
+    schedule,
     baseline: { candidateId: 'baseline_current' },
     candidateFamilies: [{ candidateId: 'cand_stable' }],
     caseRunner: async (context) => {
@@ -214,6 +223,12 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
   assert.equal(report.quarantineBlocks[0].quarantine.quarantined, true);
   assert.equal(report.quarantineBlocks[0].quarantine.reasons.includes('secret_like_value'), true);
   assert.equal(report.quarantineBlocks[0].quarantine.reasons.includes('unsafe_path_value'), true);
+  assert.deepEqual(collectAuthorityViolations(report.quarantineBlocks), []);
+  assert.equal(report.quarantineBlocks[0].safeApply, false);
+  assert.equal(report.quarantineBlocks[0].approvalAuthority, false);
+  assert.equal(report.quarantineBlocks[0].verifierBypass, false);
+  assert.equal(report.quarantineBlocks[0].approved, false);
+  assert.equal(report.quarantineBlocks[0].authority, 'evidence_only');
   assert.equal(report.futureHardCases.length > 0, true);
   assert.equal(report.futureHardCases.every((entry) => entry.authority === 'evidence_only'), true);
   assert.equal(report.futureHardCases.every((entry) => entry.promotionAllowed === false), true);
@@ -223,8 +238,33 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
 });
 
 test('downgrades nested rollout and judge authority-shaped claims throughout grouped reports', async () => {
+  const schedule = makeSchedule();
+  Object.assign(schedule.replayInputs.coreset.items[0], {
+    safeApply: true,
+    approvalAuthority: true,
+    verifierBypass: true,
+    bypass: true,
+    approved: true,
+    authority: true,
+  });
+  Object.assign(schedule.replayInputs.coreset.items[0].heldoutVariants[0], {
+    safeApply: true,
+    approvalAuthority: true,
+    verifierBypass: true,
+    bypass: true,
+    approved: true,
+    authority: true,
+  });
+  Object.assign(schedule.quarantineReplayInputs.coreset.items[0].heldoutVariants[0], {
+    safeApply: true,
+    approvalAuthority: true,
+    verifierBypass: true,
+    bypass: true,
+    approved: true,
+    authority: true,
+  });
   const report = await runGroupedRhoRerolls({
-    schedule: makeSchedule(),
+    schedule,
     baseline: { candidateId: 'baseline_current' },
     candidateFamilies: [{ candidateId: 'cand_self_authorizing' }],
     judges: {
@@ -267,6 +307,9 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
         bypass: true,
         authority: true,
       },
+      evidenceMarker: {
+        authority: 'evidence_only',
+      },
     }),
     now: FIXED_NOW,
   });
@@ -278,7 +321,14 @@ test('downgrades nested rollout and judge authority-shaped claims throughout gro
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].approvalAuthority, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].verifierBypass, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].nested.authority, 'evidence_only');
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].evidenceMarker.authority, 'evidence_only');
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].authority, 'evidence_only');
+  assert.equal(report.promotionReport.cases[0].item.safeApply, false);
+  assert.equal(report.promotionReport.cases[0].item.authority, 'evidence_only');
+  assert.equal(report.promotionReport.cases[0].heldoutVariants[0].approvalAuthority, false);
+  assert.equal(report.promotionReport.cases[0].heldoutVariants[0].authority, 'evidence_only');
+  assert.equal(report.promotionReport.preferences[0].heldoutVariants[0].verifierBypass, false);
+  assert.equal(report.promotionReport.preferences[0].heldoutVariants[0].authority, 'evidence_only');
   assert.equal(report.promotionReport.preferences[0].canPromote, false);
   assert.equal(report.promotionReport.preferences[0].apply, false);
   assert.equal(report.promotionReport.preferences[0].safeApply, false);

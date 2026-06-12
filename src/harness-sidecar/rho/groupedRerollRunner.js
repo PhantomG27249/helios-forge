@@ -1,4 +1,4 @@
-import { runRhoReplayBatch } from './replayBatchRunner.js';
+import { runRhoReplayBatch, sanitizeEvidenceOnlyValue } from './replayBatchRunner.js';
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 function asArray(value) {
@@ -234,8 +234,9 @@ function sanitizeQuarantineBlocks({ schedule = {}, quarantineReport = {} } = {})
       candidateFamily: replayCase?.candidateFamily,
       preferences: replayCase?.preferences,
     });
+    const safeBlock = sanitizeEvidenceOnlyValue(block);
     return {
-      ...block,
+      ...safeBlock,
       promotionEvidenceEligible: false,
       authority: 'evidence_only',
       promotionAllowed: false,
@@ -244,7 +245,7 @@ function sanitizeQuarantineBlocks({ schedule = {}, quarantineReport = {} } = {})
         quarantined: quarantinedPayload.quarantined,
         reasons: quarantinedPayload.reasons,
         redacted: quarantinedPayload.redacted,
-        value: quarantinedPayload.value,
+        value: sanitizeEvidenceOnlyValue(quarantinedPayload.value),
       },
     };
   });

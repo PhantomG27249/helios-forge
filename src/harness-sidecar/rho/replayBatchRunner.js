@@ -40,13 +40,13 @@ function isAuthorityShapedKey(key) {
     normalized.includes('bypass');
 }
 
-function sanitizeEvidenceOnlyValue(value) {
+export function sanitizeEvidenceOnlyValue(value) {
   if (Array.isArray(value)) return value.map(sanitizeEvidenceOnlyValue);
   if (!isPlainObject(value)) return value;
 
   const sanitized = {};
   for (const [key, child] of Object.entries(value)) {
-    if (normalizeKey(key) === 'authority' && child !== 'evidence_only') {
+    if (normalizeKey(key) === 'authority') {
       sanitized[key] = 'evidence_only';
       continue;
     }
@@ -181,7 +181,7 @@ async function runVariant({
   return {
     variant,
     candidateId: candidate?.candidateId,
-    heldoutVariants,
+    heldoutVariants: sanitizeEvidenceOnlyValue(heldoutVariants),
     heldoutVariantCount: heldoutVariants.length,
     rerollCount: rollouts.length,
     rollouts,
@@ -373,6 +373,8 @@ export async function runRhoReplayBatch({
   for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
     const item = items[itemIndex];
     const caseHeldoutVariants = collectHeldoutVariants(item, heldoutVariants);
+    const reportItem = sanitizeEvidenceOnlyValue(item);
+    const reportHeldoutVariants = sanitizeEvidenceOnlyValue(caseHeldoutVariants);
     const baseline = await runVariant({
       item,
       itemIndex,
@@ -410,7 +412,7 @@ export async function runRhoReplayBatch({
         ...preferenceJudgment,
         blockingEvidence: blockingEvidence(candidateSummary),
         aggregate: replayAggregate(candidateSummary),
-        heldoutVariants: caseHeldoutVariants,
+        heldoutVariants: reportHeldoutVariants,
         promotionEvidenceEligible,
         promotionAllowed: false,
         authority: 'evidence_only',
@@ -424,8 +426,8 @@ export async function runRhoReplayBatch({
 
     cases.push({
       caseId: caseId(item, itemIndex),
-      item,
-      heldoutVariants: caseHeldoutVariants,
+      item: reportItem,
+      heldoutVariants: reportHeldoutVariants,
       baseline,
       candidate: candidateSummaries[0],
       candidateFamily: candidateSummaries,
