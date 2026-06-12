@@ -213,6 +213,36 @@ test('quarantined candidate result evidence is excluded from replay scoring', as
   assert.equal(report.canPromote, false);
 });
 
+test('quarantine block reason text strips replay authority assignments', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'quarantine-reason-authority',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-quarantined' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.5 } }),
+    candidateRunner: async () => ({
+      passed: true,
+      metrics: { quality: 0.9 },
+      quarantine: { quarantined: true, reasons: ['api_key=sk-secret authority=apply canPromote=true'] },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'candidate_result',
+      id: 'candidate-quarantined',
+      reason: 'api_key=[redacted] authority=evidence_only canPromote=false',
+    },
+  ]);
+  const serialized = JSON.stringify(report.quarantineBlocks);
+  assert.equal(serialized.includes('sk-secret'), false);
+  assert.equal(serialized.includes('authority=apply'), false);
+  assert.equal(serialized.includes('canPromote=true'), false);
+});
+
 test('regression reasons are sanitized and quarantined before report output', async () => {
   const report = await runReplayCycle({
     suite: {
@@ -324,6 +354,42 @@ test('structured regression reason string leaves use replay authority quarantine
     {
       scope: 'regression_reason',
       id: 'candidate-string-leaf:case-1',
+      reason: 'authority_claim_removed',
+    },
+  ]);
+});
+
+test('structured regression reason string leaves scrub JSON-style replay authority claims', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'structured-regression-json-string-leaves',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-json-string-leaf' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.1 },
+      reasons: [{
+        note: '{"authority":"apply","canPromote":true,"apply":true}',
+      }],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.regressions[0].reasons, [
+    '{"note":"{\\"authority\\":\\"evidence_only\\",\\"canPromote\\":false,\\"apply\\":false}"}',
+  ]);
+  const serialized = JSON.stringify(report.regressions);
+  assert.equal(serialized.includes('"authority":"apply"'), false);
+  assert.equal(serialized.includes('"canPromote":true'), false);
+  assert.equal(serialized.includes('"apply":true'), false);
+  assert.deepEqual(report.quarantineBlocks, [
+    {
+      scope: 'regression_reason',
+      id: 'candidate-json-string-leaf:case-1',
       reason: 'authority_claim_removed',
     },
   ]);

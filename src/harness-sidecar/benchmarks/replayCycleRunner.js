@@ -2,6 +2,9 @@ import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantin
 
 const AUTHORITY_ASSIGNMENT_PATTERN = /\bauthority\s*[:=]\s*(?!evidence_only\b|advisory\b|none\b)[^\s,;'"<>]+/gi;
 const CAN_PROMOTE_TRUE_PATTERN = /\bcanPromote\s*[:=]\s*true\b/gi;
+const JSON_AUTHORITY_ASSIGNMENT_PATTERN = /"authority"\s*:\s*"(?!evidence_only\b|advisory\b|none\b)[^"]*"/gi;
+const JSON_CAN_PROMOTE_TRUE_PATTERN = /"canPromote"\s*:\s*true\b/gi;
+const JSON_APPLY_TRUE_PATTERN = /"(apply|approved|directApplyAllowed|durableApplyApproved|promoted|promotionAllowed)"\s*:\s*true\b/gi;
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -71,7 +74,7 @@ function addQuarantineBlocks(blocks, { scope, id, quarantine }) {
     blocks.push({
       scope: String(value.scope ?? scope),
       id: String(value.id ?? id),
-      reason: String(value.reason ?? reason),
+      reason: scrubReplayAuthorityText(String(value.reason ?? reason), new Set()),
     });
   }
   return true;
@@ -111,6 +114,18 @@ function scrubReplayAuthorityText(value, quarantineReasons) {
     quarantineReasons.add('authority_claim_removed');
     const separator = match.includes(':') ? ':' : '=';
     return `canPromote${separator}false`;
+  });
+  sanitized = sanitized.replace(JSON_AUTHORITY_ASSIGNMENT_PATTERN, () => {
+    quarantineReasons.add('authority_claim_removed');
+    return '"authority":"evidence_only"';
+  });
+  sanitized = sanitized.replace(JSON_CAN_PROMOTE_TRUE_PATTERN, () => {
+    quarantineReasons.add('authority_claim_removed');
+    return '"canPromote":false';
+  });
+  sanitized = sanitized.replace(JSON_APPLY_TRUE_PATTERN, (match, key) => {
+    quarantineReasons.add('authority_claim_removed');
+    return `"${key}":false`;
   });
   return sanitized;
 }
