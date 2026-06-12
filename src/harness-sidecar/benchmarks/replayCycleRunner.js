@@ -204,11 +204,27 @@ export async function runReplayCycle({
   };
   let rollbackDrillRequired = false;
 
-  addQuarantineBlocks(quarantineBlocks, {
+  const suiteBlocked = addQuarantineBlocks(quarantineBlocks, {
     scope: 'suite',
     id: suiteId,
     quarantine: suite.quarantine,
   });
+  if (suiteBlocked) {
+    return {
+      reportId: buildReportId({ suiteId, candidateIds, now }),
+      suiteId,
+      candidateIds,
+      domainScores: {},
+      aggregateScore: 0,
+      regressions: [],
+      quarantineBlocks,
+      rollbackDrillRequired: false,
+      budget: budgetSummary(budget, usedBudget),
+      promotionEvidenceOnly: true,
+      canPromote: false,
+      authority: 'evidence_only',
+    };
+  }
 
   for (const replayCase of replayCases) {
     const caseId = safeId(replayCase?.id, 'case');
@@ -252,16 +268,17 @@ export async function runReplayCycle({
         case: replayCase,
         baseline,
       }), {});
-      const score = scoreResult(result, replayCase, suite);
       usedBudget.candidateRuns += 1;
       addBudgetUsage(usedBudget, result);
 
-      addQuarantineBlocks(quarantineBlocks, {
+      const resultBlocked = addQuarantineBlocks(quarantineBlocks, {
         scope: 'candidate_result',
         id,
         quarantine: result.quarantine,
       });
+      if (resultBlocked) continue;
 
+      const score = scoreResult(result, replayCase, suite);
       if (!candidateScoresByDomain.has(domain)) candidateScoresByDomain.set(domain, new Map());
       const domainCandidates = candidateScoresByDomain.get(domain);
       if (!domainCandidates.has(id)) domainCandidates.set(id, []);

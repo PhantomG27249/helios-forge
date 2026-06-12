@@ -79,7 +79,6 @@ test('quarantine blocks unsafe suites cases candidates and runner evidence witho
     suite: {
       id: 'quarantine-replay',
       domains: ['code'],
-      quarantine: { quarantined: true, reasons: ['operator_review'] },
       cases: [
         { id: 'safe-case', domain: 'code', metricWeights: { quality: 1 } },
         { id: 'blocked-case', domain: 'code', metricWeights: { quality: 1 }, quarantine: true },
@@ -115,7 +114,6 @@ test('quarantine blocks unsafe suites cases candidates and runner evidence witho
       'candidate:candidate-blocked:unsafe_claim',
       'candidate_result:candidate-safe:secret_like_value',
       'case:blocked-case:quarantined',
-      'suite:quarantine-replay:operator_review',
     ],
   );
   assert.equal(report.promotionEvidenceOnly, true);
@@ -123,6 +121,96 @@ test('quarantine blocks unsafe suites cases candidates and runner evidence witho
   assert.equal(report.authority, 'evidence_only');
   assert.equal(JSON.stringify(report).includes('"canPromote":true'), false);
   assert.equal(JSON.stringify(report).includes('"authority":"apply"'), false);
+});
+
+test('suite quarantine blocks replay execution and scoring', async () => {
+  const calls = [];
+  const report = await runReplayCycle({
+    suite: {
+      id: 'suite-quarantined',
+      domains: ['code'],
+      quarantine: { quarantined: true, reasons: ['operator_hold'] },
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-a' }],
+    baselineRunner: async () => {
+      calls.push('baseline');
+      return { passed: true, metrics: { quality: 0.5 } };
+    },
+    candidateRunner: async () => {
+      calls.push('candidate');
+      return { passed: true, metrics: { quality: 0.9 } };
+    },
+    budget: { maxCases: 1, maxCost: 1 },
+    now: fixedNow,
+  });
+
+  assert.deepEqual(calls, []);
+  assert.deepEqual(report.domainScores, {});
+  assert.equal(report.aggregateScore, 0);
+  assert.deepEqual(report.regressions, []);
+  assert.deepEqual(report.budget.used, {
+    baselineRuns: 0,
+    candidateRuns: 0,
+    casesEvaluated: 0,
+    cost: 0,
+    tokens: 0,
+  });
+  assert.deepEqual(report.quarantineBlocks, [
+    { scope: 'suite', id: 'suite-quarantined', reason: 'operator_hold' },
+  ]);
+  assert.equal(report.rollbackDrillRequired, false);
+  assert.equal(report.canPromote, false);
+});
+
+test('quarantined candidate result evidence is excluded from replay scoring', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'candidate-result-quarantine',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-clean' }, { id: 'candidate-quarantined' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.5 }, budget: { cost: 1 } }),
+    candidateRunner: async ({ candidate }) => (
+      candidate.id === 'candidate-quarantined'
+        ? {
+          passed: true,
+          metrics: { quality: 0.99 },
+          quarantine: { quarantined: true, reasons: ['secret_like_value'] },
+          budget: { cost: 7 },
+        }
+        : {
+          passed: true,
+          metrics: { quality: 0.6 },
+          budget: { cost: 2 },
+          rollbackDrill: { passed: true },
+        }
+    ),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.domainScores.code, {
+    baselineScore: 0.5,
+    bestCandidateId: 'candidate-clean',
+    bestCandidateScore: 0.6,
+    delta: 0.1,
+    caseCount: 1,
+  });
+  assert.equal(report.aggregateScore, 0.1);
+  assert.deepEqual(report.regressions, []);
+  assert.equal(report.rollbackDrillRequired, false);
+  assert.deepEqual(report.quarantineBlocks, [
+    { scope: 'candidate_result', id: 'candidate-quarantined', reason: 'secret_like_value' },
+  ]);
+  assert.deepEqual(report.budget.used, {
+    baselineRuns: 1,
+    candidateRuns: 2,
+    casesEvaluated: 1,
+    cost: 10,
+    tokens: 0,
+  });
+  assert.equal(report.canPromote, false);
 });
 
 test('requires rollback drills for improved candidates without passing rollback evidence', async () => {
