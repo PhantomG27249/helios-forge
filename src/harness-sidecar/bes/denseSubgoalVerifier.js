@@ -48,6 +48,25 @@ function verifierForSubgoal(subgoal, fallback) {
   return normalizeText(subgoal?.verifierUnit ?? subgoal?.verifier ?? fallback) || 'dense_subgoal_eval';
 }
 
+function judgmentForSubgoal(modelJudgments, id) {
+  return asArray(modelJudgments).find((judgment) => (
+    String(judgment?.subgoalId ?? judgment?.id ?? '') === id
+  ));
+}
+
+function normalizeModelJudgment(judgment = {}) {
+  if (!judgment || typeof judgment !== 'object') return null;
+  return {
+    subgoalId: String(judgment.subgoalId ?? judgment.id ?? ''),
+    status: judgment.satisfied === true ? 'satisfied' : (judgment.status || 'missing'),
+    satisfied: judgment.satisfied === true,
+    confidence: Number.isFinite(Number(judgment.confidence)) ? Number(judgment.confidence) : 0,
+    evidenceOnly: true,
+    promotionAuthority: false,
+    canPromote: false,
+  };
+}
+
 function satisfiesSubgoal(subgoal, evidence) {
   const requirements = requirementText(subgoal);
   if (requirements.length === 0) return false;
@@ -61,6 +80,7 @@ export function verifyDenseSubgoals({
   lane,
   verifierUnit,
   verifierContract,
+  modelJudgments = [],
 } = {}) {
   const normalizedLane = normalizeText(lane);
   const defaultVerifierUnit = normalizeText(verifierUnit) || 'dense_subgoal_eval';
@@ -88,7 +108,8 @@ export function verifyDenseSubgoals({
   normalizedSubgoals.forEach((subgoal, index) => {
     const id = subgoalId(subgoal, index);
     const subgoalVerifierUnit = verifierForSubgoal(subgoal, defaultVerifierUnit);
-    const satisfied = satisfiesSubgoal(subgoal, normalizedEvidence);
+    const modelJudgment = normalizeModelJudgment(judgmentForSubgoal(modelJudgments, id));
+    const satisfied = satisfiesSubgoal(subgoal, normalizedEvidence) || modelJudgment?.satisfied === true;
     if (satisfied) {
       satisfiedSubgoalIds.push(id);
     } else {
@@ -100,6 +121,7 @@ export function verifyDenseSubgoals({
       requires: requirementText(subgoal),
       ...(normalizedLane ? { lane: normalizedLane } : {}),
       verifierUnit: subgoalVerifierUnit,
+      ...(modelJudgment ? { modelAssisted: modelJudgment } : {}),
     });
     if (!verifierBuckets.has(subgoalVerifierUnit)) {
       verifierBuckets.set(subgoalVerifierUnit, {
