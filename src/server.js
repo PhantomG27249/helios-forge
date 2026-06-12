@@ -533,6 +533,34 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify(result));
         break;
       }
+      case 'harness_production_evidence_get': {
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const evidenceTypes = Array.isArray(msg.evidenceTypes) && msg.evidenceTypes.length
+          ? msg.evidenceTypes
+          : [
+            'heldOutSuites',
+            'replayCycles',
+            'operatorDashboards',
+            'visualSuites',
+            'a2aStatus',
+            'modelCouncilCalibration',
+            'endpointCapacity',
+            'autonomyRollback',
+          ];
+        const reports = {};
+        for (const evidenceType of evidenceTypes) {
+          reports[evidenceType] = await harness.client.getProductionEvidence(evidenceType);
+        }
+        ws.send(JSON.stringify({
+          type: 'harness_production_evidence',
+          data: {
+            evidenceOnly: true,
+            canPromote: false,
+            reports,
+          },
+        }));
+        break;
+      }
       case 'harness_skill_candidates_get': {
         await ensureHarnessRunning(harness, pi, feedback);
         const result = await harness.client.listSkillCandidates({

@@ -73,7 +73,18 @@ let harnessState = {
   },
   capabilityGoals: null,
   passK: null,
+  productionEvidence: {},
 };
+const PRODUCTION_EVIDENCE_TYPES = [
+  ['heldOutSuites', 'Held-out suites'],
+  ['replayCycles', 'Replay cycles'],
+  ['operatorDashboards', 'Operator dashboards'],
+  ['visualSuites', 'Visual suites'],
+  ['a2aStatus', 'A2A status'],
+  ['modelCouncilCalibration', 'Council calibration'],
+  ['endpointCapacity', 'Endpoint capacity'],
+  ['autonomyRollback', 'Autonomy and rollback'],
+];
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
   { id: 'mcp', label: 'MCPs' },
@@ -325,6 +336,8 @@ const harnessAdaptiveMode = $('#harness-adaptive-mode');
 const harnessAdaptiveReward = $('#harness-adaptive-reward');
 const harnessAdaptiveArmBalance = $('#harness-adaptive-arm-balance');
 const harnessAdaptiveNote = $('#harness-adaptive-note');
+const harnessProductionEvidenceStatus = $('#harness-production-evidence-status');
+const harnessProductionEvidenceRows = $('#harness-production-evidence-rows');
 const harnessSkillCandidatesEl = $('#harness-skill-candidates');
 const harnessAbMctsReplayStatus = $('#harness-abmcts-replay-status');
 const harnessAbMctsDecisions = $('#harness-abmcts-decisions');
@@ -666,6 +679,10 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_model_council_passk_eval') {
     handleHarnessModelCouncilPassKEval(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_production_evidence') {
+    handleHarnessProductionEvidence(msg.data || msg);
     return;
   }
   if (msg.type === 'harness_skill_candidates') {
@@ -1369,6 +1386,7 @@ function renderHarnessPanel() {
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
   renderHarnessVerifierEvolution();
   renderHarnessAdaptiveSearch();
+  renderHarnessProductionEvidence();
   renderHarnessSkillCandidates();
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
@@ -1556,6 +1574,47 @@ function requestHarnessModelCouncilPassKEval() {
     type: 'harness_model_council_passk_eval_prepare',
     workspaceRoot: getSelectedWorkspacePath() || undefined,
   });
+}
+
+function requestHarnessProductionEvidence() {
+  if (harnessProductionEvidenceStatus) harnessProductionEvidenceStatus.textContent = 'Refreshing production evidence...';
+  send({
+    type: 'harness_production_evidence_get',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
+    evidenceTypes: PRODUCTION_EVIDENCE_TYPES.map(([type]) => type),
+  });
+}
+
+function handleHarnessProductionEvidence(payload = {}) {
+  const reports = payload.reports || payload.productionEvidence || payload;
+  harnessState.productionEvidence = { ...(harnessState.productionEvidence || {}), ...(reports || {}) };
+  renderHarnessProductionEvidence();
+}
+
+function renderHarnessProductionEvidence() {
+  if (!harnessProductionEvidenceRows) return;
+  const reports = harnessState.productionEvidence || {};
+  const loadedCount = Object.keys(reports).length;
+  if (harnessProductionEvidenceStatus) {
+    harnessProductionEvidenceStatus.textContent = loadedCount
+      ? `${loadedCount} evidence surface${loadedCount === 1 ? '' : 's'} loaded`
+      : 'No production evidence loaded';
+  }
+  harnessProductionEvidenceRows.innerHTML = PRODUCTION_EVIDENCE_TYPES.map(([type, label]) => {
+    const report = reports[type] || {};
+    const gate = report.gate || {};
+    const itemCount = report.summary?.itemCount ?? 0;
+    const mode = [gate.enabled ? 'enabled' : 'disabled', gate.mode || 'offline'].join(' | ');
+    return `
+      <div class="harness-list-row">
+        <div>
+          <strong>${esc(label)}</strong>
+          <span>${esc(mode)}</span>
+        </div>
+        <span>${esc(String(itemCount))} item${itemCount === 1 ? '' : 's'} | evidence_only</span>
+      </div>
+    `;
+  }).join('');
 }
 
 function requestHarnessSkillCandidates() {
@@ -3801,6 +3860,7 @@ $('#btn-harness-run').addEventListener('click', runHarnessTask);
 if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick);
 $('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
 $('#btn-harness-adaptive-refresh')?.addEventListener('click', requestHarnessAdaptiveSearchStatus);
+$('#btn-harness-production-evidence-refresh')?.addEventListener('click', requestHarnessProductionEvidence);
 $('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
 $('#btn-harness-skill-candidates-refresh')?.addEventListener('click', requestHarnessSkillCandidates);
 $('#btn-capability-search')?.addEventListener('click', requestSmitherySearch);

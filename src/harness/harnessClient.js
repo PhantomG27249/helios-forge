@@ -79,6 +79,20 @@ export class HarnessClient {
     });
   }
 
+  async getProductionEvidence(type) {
+    const routes = {
+      heldOutSuites: '/v1/evidence/held-out-suites',
+      replayCycles: '/v1/evidence/replay-cycles',
+      operatorDashboards: '/v1/evidence/operator-dashboards',
+      visualSuites: '/v1/evidence/visual-suites',
+      a2aStatus: '/v1/evidence/a2a-status',
+      modelCouncilCalibration: '/v1/evidence/model-council-calibration',
+      endpointCapacity: '/v1/evidence/endpoint-capacity',
+      autonomyRollback: '/v1/evidence/autonomy-rollback',
+    };
+    return this.getJson(routes[type] || routes.heldOutSuites);
+  }
+
   async listSkillCandidates({ limit } = {}) {
     const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
     return this.getJson(`/v1/skill-candidates${query}`);

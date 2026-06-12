@@ -140,6 +140,38 @@ test('harness adaptive status surface displays model council pass@k uplift', asy
   assert.match(serverJs, /prepareModelCouncilPassKEval/);
 });
 
+test('harness panel surfaces production evidence dashboards without apply controls', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+  const serverJs = await readFile('src/server.js', 'utf8');
+  const harnessClientJs = await readFile('src/harness/harnessClient.js', 'utf8');
+
+  assert.match(html, /id="harness-production-evidence"/);
+  assert.match(html, /id="btn-harness-production-evidence-refresh"/);
+  assert.match(html, /id="harness-production-evidence-rows"/);
+  assert.match(appJs, /productionEvidence/);
+  assert.match(appJs, /harness_production_evidence_get/);
+  assert.match(appJs, /harness_production_evidence/);
+  assert.match(appJs, /renderHarnessProductionEvidence/);
+  assert.match(appJs, /heldOutSuites/);
+  assert.match(appJs, /replayCycles/);
+  assert.match(appJs, /operatorDashboards/);
+  assert.match(appJs, /visualSuites/);
+  assert.match(appJs, /a2aStatus/);
+  assert.match(appJs, /modelCouncilCalibration/);
+  assert.match(appJs, /endpointCapacity/);
+  assert.match(appJs, /autonomyRollback/);
+  assert.match(serverJs, /case 'harness_production_evidence_get'/);
+  assert.match(harnessClientJs, /async getProductionEvidence/);
+  assert.match(harnessClientJs, /\/v1\/evidence\/held-out-suites/);
+
+  const productionEvidenceStart = html.indexOf('id="harness-production-evidence"');
+  const productionEvidenceEnd = html.indexOf('</section>', productionEvidenceStart);
+  const productionEvidenceHtml = html.slice(productionEvidenceStart, productionEvidenceEnd);
+  assert.doesNotMatch(productionEvidenceHtml, /apply|promote/i);
+  assert.doesNotMatch(appJs, /harness_production_evidence_(?:apply|promote)/);
+});
+
 test('harness tools live in a persistent left side panel outside the chat feed', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const css = await readFile('public/app.css', 'utf8');
