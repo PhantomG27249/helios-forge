@@ -95,6 +95,10 @@ export function proposeVisualPolicies({
     },
     vlmRouting: buildVlmRouting({ hardCases, baselinePolicy }),
     status: 'shadow_only',
+    visualEvidenceRequired: true,
+    evidenceOnly: true,
+    authority: 'visual_evidence_only',
+    canPromote: false,
     sourceCaseIds: hardCases.map((traceCase, index) => traceCase.caseId || traceCase.traceId || `case_${index + 1}`),
     hardCaseReasons: unique(hardCases.map((traceCase) => traceCase.reason)),
   }].slice(0, maxCandidates);
