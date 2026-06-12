@@ -183,13 +183,13 @@ export function buildModelCouncilRuntime({ harnessConfig = {}, fallbackModel = {
 }
 
 function fallbackRoute({ council = {}, attempt = {}, role } = {}) {
-  const modelProfile = boundedText(
+  const modelProfile = safeVisibleText(
     attempt.profile?.modelProfile || council.fallbackProfileName || '',
     96,
   );
   if (!modelProfile) return null;
   return {
-    role: boundedText(role || attempt.profile?.role || 'implementer', 96) || 'implementer',
+    role: safeVisibleText(role || attempt.profile?.role || 'implementer', 96) || 'implementer',
     modelProfile,
     authority: 'evidence_only',
     canPromote: false,
@@ -228,6 +228,10 @@ function unique(values = []) {
   return [...new Set(values.filter(Boolean).map(String))];
 }
 
+function uniqueSafe(values = [], limit = 160) {
+  return unique(values.map((value) => safeVisibleText(value, limit)).filter(Boolean));
+}
+
 function scoreRange(attempts = []) {
   const scores = attempts
     .map((attempt) => Number(attempt.score))
@@ -262,11 +266,11 @@ export function summarizeModelCouncil({ council, attempts = [], champion = null 
       canPromote: false,
     };
   }
-  const modelProfiles = unique(attempts.map((attempt) => (
+  const modelProfiles = uniqueSafe(attempts.map((attempt) => (
     attempt.model?.route?.modelProfile || attempt.model?.profileName
-  )));
-  const endpointProfiles = unique(attempts.map((attempt) => attempt.model?.route?.endpointProfile));
-  const roles = unique(attempts.map((attempt) => attempt.role || attempt.profile?.id || attempt.profile?.role));
+  )), 256);
+  const endpointProfiles = uniqueSafe(attempts.map((attempt) => attempt.model?.route?.endpointProfile), 96);
+  const roles = uniqueSafe(attempts.map((attempt) => attempt.role || attempt.profile?.id || attempt.profile?.role), 96);
   const supportingAttemptIds = attempts
     .filter((attempt) => attempt.verifierPassed === true)
     .map((attempt) => attempt.attemptId)
@@ -296,8 +300,8 @@ export function summarizeModelCouncil({ council, attempts = [], champion = null 
     championSupport: champion
       ? {
         attemptId: champion.attemptId,
-        modelProfile: championRoute?.modelProfile || champion.model?.profileName || null,
-        endpointProfile: championRoute?.endpointProfile || null,
+        modelProfile: safeVisibleText(championRoute?.modelProfile || champion.model?.profileName || '', 256) || null,
+        endpointProfile: safeVisibleText(championRoute?.endpointProfile || '', 96) || null,
         verifierPassed: champion.verifierPassed === true,
       }
       : null,

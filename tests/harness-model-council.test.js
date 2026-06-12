@@ -218,6 +218,66 @@ test('resolves attempt model routes with role fallback and disabled council safe
   assert.equal(resolveAttemptModelRoute({ council, attempt: {}, role: 'unknown' }).modelProfile, 'implementer_model');
 });
 
+test('model council fallback routes and summaries redact unsafe attempt labels', () => {
+  const council = buildModelCouncilRuntime({
+    harnessConfig: {
+      features: { multiModelSwarm: false },
+      modelCouncil: { enabled: false },
+    },
+  });
+  const route = resolveAttemptModelRoute({
+    council,
+    role: 'C:\\Users\\jackj\\role.json',
+    attempt: {
+      profile: {
+        role: 'ghp_role_should_not_leak',
+        modelProfile: 'sk-model-secret',
+      },
+    },
+  });
+
+  assert.equal(JSON.stringify(route).includes('Users'), false);
+  assert.equal(JSON.stringify(route).includes('ghp_role_should_not_leak'), false);
+  assert.equal(JSON.stringify(route).includes('sk-model-secret'), false);
+
+  const summary = summarizeModelCouncil({
+    council: {
+      enabled: true,
+      diversityRequired: 1,
+      roleRoutes: {},
+      disagreementThreshold: 0.35,
+    },
+    attempts: [{
+      attemptId: 'attempt-secret',
+      role: 'ghp_role_should_not_leak',
+      profile: { id: 'ghp_profile_should_not_leak' },
+      model: {
+        route: {
+          modelProfile: 'sk-model-secret',
+          endpointProfile: 'ghp_endpoint_should_not_leak',
+        },
+      },
+      verifierPassed: true,
+    }],
+    champion: {
+      attemptId: 'attempt-secret',
+      model: {
+        route: {
+          modelProfile: 'sk-model-secret',
+          endpointProfile: 'ghp_endpoint_should_not_leak',
+        },
+      },
+      verifierPassed: true,
+    },
+  });
+  const visible = JSON.stringify(summary);
+
+  assert.equal(visible.includes('ghp_role_should_not_leak'), false);
+  assert.equal(visible.includes('ghp_profile_should_not_leak'), false);
+  assert.equal(visible.includes('sk-model-secret'), false);
+  assert.equal(visible.includes('ghp_endpoint_should_not_leak'), false);
+});
+
 test('summarizes model council diversity and disagreement as evidence only', () => {
   const council = buildModelCouncilRuntime({
     harnessConfig: {
