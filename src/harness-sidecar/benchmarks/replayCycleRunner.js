@@ -86,7 +86,30 @@ function stringifyReason(reason) {
   }
 }
 
+function structuredReasonValue(reason) {
+  if (reason && typeof reason === 'object') return reason;
+  if (typeof reason !== 'string') return null;
+
+  const trimmed = reason.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeRegressionReason(reason) {
+  const structuredReason = structuredReasonValue(reason);
+  if (structuredReason) {
+    const quarantined = quarantineModelVisiblePayload(structuredReason, { maxStringLength: 600 });
+    return {
+      reason: JSON.stringify(quarantined.value),
+      quarantineReasons: [...quarantined.reasons].sort(),
+    };
+  }
+
   const quarantined = quarantineModelVisiblePayload({ reason: stringifyReason(reason) }, { maxStringLength: 600 });
   const quarantineReasons = new Set(quarantined.reasons);
   let sanitized = String(quarantined.value?.reason ?? '');
@@ -220,6 +243,15 @@ function assertUniqueCandidateIds(normalizedCandidates) {
   }
 }
 
+function assertUniqueCaseIds(replayCases) {
+  const seen = new Set();
+  for (const replayCase of replayCases) {
+    const id = safeId(replayCase?.id, 'case');
+    if (seen.has(id)) throw new Error(`duplicate case id: ${id}`);
+    seen.add(id);
+  }
+}
+
 export async function runReplayCycle({
   suite,
   candidates = [],
@@ -233,6 +265,7 @@ export async function runReplayCycle({
 
   const suiteId = safeId(suite.id, 'suite');
   const replayCases = asArray(suite.cases);
+  assertUniqueCaseIds(replayCases);
   const normalizedCandidates = asArray(candidates)
     .map((candidate, index) => ({
       candidate,

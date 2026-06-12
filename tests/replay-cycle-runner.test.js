@@ -247,6 +247,52 @@ test('regression reasons are sanitized and quarantined before report output', as
   assert.equal(report.authority, 'evidence_only');
 });
 
+test('structured regression reasons are recursively sanitized before stringifying', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'structured-regression-reasons',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-structured' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.1 },
+      reasons: [
+        {
+          authority: 'apply',
+          canPromote: true,
+          apply: true,
+          nested: { durableApplyApproved: true, apiKey: 'sk-structured-secret' },
+        },
+        '{"authority":"apply","canPromote":true,"apiKey":"sk-json-secret"}',
+      ],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.deepEqual(report.regressions[0].reasons, [
+    '{"authority":"evidence_only","canPromote":false,"apply":false,"nested":{"durableApplyApproved":false,"apiKey":"[redacted]"}}',
+    '{"authority":"evidence_only","canPromote":false,"apiKey":"[redacted]"}',
+  ]);
+  const serialized = JSON.stringify(report.regressions);
+  assert.equal(serialized.includes('apply"'), false);
+  assert.equal(serialized.includes('canPromote":true'), false);
+  assert.equal(serialized.includes('sk-structured-secret'), false);
+  assert.equal(serialized.includes('sk-json-secret'), false);
+  assert.deepEqual(
+    report.quarantineBlocks.map((block) => `${block.scope}:${block.id}:${block.reason}`).sort(),
+    [
+      'regression_reason:candidate-structured:case-1:authority_claim_removed',
+      'regression_reason:candidate-structured:case-1:authority_claim_removed',
+      'regression_reason:candidate-structured:case-1:secret_like_value',
+      'regression_reason:candidate-structured:case-1:secret_like_value',
+    ],
+  );
+});
+
 test('duplicate candidate ids are rejected before replay execution', async () => {
   const calls = [];
   await assert.rejects(
@@ -268,6 +314,34 @@ test('duplicate candidate ids are rejected before replay execution', async () =>
       now: fixedNow,
     }),
     /duplicate candidate id: candidate-dup/,
+  );
+  assert.deepEqual(calls, []);
+});
+
+test('duplicate suite case ids are rejected before replay execution', async () => {
+  const calls = [];
+  await assert.rejects(
+    runReplayCycle({
+      suite: {
+        id: 'duplicate-cases',
+        domains: ['code'],
+        cases: [
+          { id: 'case-dup', domain: 'code', quarantine: true, metricWeights: { quality: 1 } },
+          { id: 'case-dup', domain: 'code', metricWeights: { quality: 1 } },
+        ],
+      },
+      candidates: [{ id: 'candidate-a' }],
+      baselineRunner: async () => {
+        calls.push('baseline');
+        return { passed: true, metrics: { quality: 0.5 } };
+      },
+      candidateRunner: async () => {
+        calls.push('candidate');
+        return { passed: true, metrics: { quality: 0.8 } };
+      },
+      now: fixedNow,
+    }),
+    /duplicate case id: case-dup/,
   );
   assert.deepEqual(calls, []);
 });
