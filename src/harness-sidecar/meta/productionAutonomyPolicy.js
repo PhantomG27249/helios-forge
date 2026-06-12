@@ -124,13 +124,8 @@ function rollbackEvidence(candidate = {}, evidence = {}) {
     && (rollback.restoreVerified === true || rollback.rollbackVerified === true)
     && Array.isArray(rollback.artifacts)
     && rollback.artifacts.length > 0;
-  const reversible = !redacted && (
-    drillPassed || (
-      (rollback.reversible === true || rollback.available === true)
-      && rollback.status !== 'failed'
-      && (drillBacked ? rollback.restoreVerified !== false && rollback.rollbackVerified !== false : true)
-    )
-  );
+  const legacyReversible = !drillBacked && (rollback.reversible === true || rollback.available === true);
+  const reversible = !redacted && (drillBacked ? drillPassed : legacyReversible);
   return {
     required: true,
     available: reversible,

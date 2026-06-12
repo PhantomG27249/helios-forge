@@ -29,7 +29,12 @@ function completeEvidence(overrides = {}) {
     replay: { passed: true },
     verifier: { passed: true },
     provenance: { traceId: 'trace-1' },
-    rollback: { reversible: true, drillId: 'rollback-1' },
+    rollback: {
+      reversible: true,
+      drillId: 'rollback-1',
+      restoreVerified: true,
+      artifacts: [{ artifactId: 'rollback-log', path: '.harness/rollback/log.json', hash: 'sha256:rollback' }],
+    },
     ...overrides,
   };
 }
@@ -233,7 +238,12 @@ test('governance passes separate rollback evidence into top-level production aut
       baselinePassed: true,
       rollback: {},
     },
-    rollback: { reversible: true, drillId: 'rollback-separate-1' },
+    rollback: {
+      reversible: true,
+      drillId: 'rollback-separate-1',
+      restoreVerified: true,
+      artifacts: [{ artifactId: 'rollback-log', path: '.harness/rollback/log.json', hash: 'sha256:rollback' }],
+    },
     policy: {
       productionAutonomyPolicy: {
         enabled: true,

@@ -120,3 +120,29 @@ test('failed rollback drills do not satisfy production rollback evidence', async
   assert.equal(autonomy.blockers.includes('rollback_required'), true);
   assert.equal(autonomy.promotionEligible, false);
 });
+
+test('drill-backed rollback evidence requires artifacts even when marked reversible', () => {
+  const autonomy = evaluateProductionAutonomy({
+    candidate: {
+      candidateId: 'config-incomplete-drill',
+      candidateType: 'config',
+      risk: 'low',
+      changeType: 'local_config',
+      writeScope: 'workspace_local',
+    },
+    evidence: {
+      rollback: {
+        drillId: 'rollback-incomplete',
+        status: 'passed',
+        reversible: true,
+        restoreVerified: true,
+        artifacts: [],
+      },
+    },
+    operatorPolicy: enabledPolicy,
+  });
+
+  assert.equal(autonomy.rollbackPolicy.available, false);
+  assert.equal(autonomy.blockers.includes('rollback_required'), true);
+  assert.equal(autonomy.promotionEligible, false);
+});
