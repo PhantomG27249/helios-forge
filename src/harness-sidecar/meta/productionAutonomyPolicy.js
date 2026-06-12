@@ -22,6 +22,47 @@ const CANDIDATE_TYPES = Object.freeze({
   memory_policy: { type: 'memory_policy_change', maxAutonomyLevel: 0 },
 });
 
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+export function listProductionAutonomyCandidateTypes() {
+  const grouped = new Map();
+  for (const [alias, definition] of Object.entries(CANDIDATE_TYPES)) {
+    const row = grouped.get(definition.type) || {
+      candidateType: definition.type,
+      aliases: [],
+      maxAutonomyLevel: definition.maxAutonomyLevel,
+      rollbackRequired: true,
+      externalEvidenceVerifiedRequired: true,
+      visualEvidenceRequired: definition.type === 'visual_policy_change',
+      authority: 'evidence_only',
+      canApply: false,
+      directApplyAllowed: false,
+    };
+    row.aliases.push(alias);
+    grouped.set(definition.type, row);
+  }
+  return [...grouped.values()]
+    .map((row) => ({ ...row, aliases: unique(row.aliases).sort() }))
+    .sort((left, right) => left.candidateType.localeCompare(right.candidateType));
+}
+
+export function resolveProductionAutonomyCandidateType(candidate = {}) {
+  const { type: candidateType, maxAutonomyLevel } = normalizeCandidateType(candidate);
+  return listProductionAutonomyCandidateTypes().find((row) => row.candidateType === candidateType) || {
+    candidateType,
+    aliases: [],
+    maxAutonomyLevel,
+    rollbackRequired: true,
+    externalEvidenceVerifiedRequired: true,
+    visualEvidenceRequired: false,
+    authority: 'evidence_only',
+    canApply: false,
+    directApplyAllowed: false,
+  };
+}
+
 function asObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -268,6 +309,8 @@ export function evaluateProductionAutonomy({
       approvedBy: override?.approvedBy || null,
       reason: override?.reason || null,
       authority: 'audit_only',
+      trustKernelBypass: false,
+      canApply: false,
     },
     modelVisibleSummary: {
       value: quarantined.value,

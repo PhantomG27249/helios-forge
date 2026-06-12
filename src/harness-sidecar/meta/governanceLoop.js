@@ -313,19 +313,26 @@ export function decideGovernanceAction({
       : null
   );
   if (override?.approvedBy) {
-    const reasons = [override.reason || 'operator_override'];
+    const productionReasons = productionAutonomy?.blockers?.length
+      ? [...productionAutonomy.blockers]
+      : [override.reason || 'operator_override'];
     return {
-      decision: 'override_approved',
+      decision: 'override_audited',
       autonomy,
       productionAutonomy,
-      reasons,
+      reasons: productionReasons,
       auditEvent: auditEvent({
         type: 'governance.override',
         actor,
         candidate,
-        reasons,
-        decision: 'override_approved',
-        override,
+        reasons: productionReasons,
+        decision: 'override_audited',
+        override: {
+          ...override,
+          authority: 'audit_only',
+          trustKernelBypass: false,
+          canApply: false,
+        },
       }),
     };
   }
