@@ -91,32 +91,54 @@ function isEvidenceMetadataStringKey(key) {
     normalized === 'status' ||
     normalized === 'source' ||
     normalized === 'target' ||
-    normalized === 'reason' ||
-    normalized === 'quarantinereason' ||
     normalized === 'authority' ||
     normalized === 'preferred';
 }
 
 function isEvidenceMetadataStringArrayKey(key) {
   const normalized = normalizeKey(key);
-  return normalized === 'reasons' ||
-    normalized === 'blockingevidence' ||
+  return normalized === 'blockingevidence' ||
     normalized === 'promotionevidence' ||
     normalized === 'failuremodes';
+}
+
+function isReasonStringKey(key) {
+  const normalized = normalizeKey(key);
+  return normalized === 'reason' || normalized === 'quarantinereason';
+}
+
+function isReasonStringArrayKey(key) {
+  return normalizeKey(key) === 'reasons';
+}
+
+function isSafeReasonCode(value) {
+  return /^[a-z][a-z0-9_]{0,79}$/.test(value);
+}
+
+function redactReasonString(value) {
+  if (value.length === 0) return value;
+  return isSafeReasonCode(value) ? value : '[redacted]';
 }
 
 export function redactQuarantinedTextFields(value, { parentKey = '', redactPrimitiveStrings = false } = {}) {
   if (Array.isArray(value)) {
     return value.map((entry) => redactQuarantinedTextFields(entry, {
       parentKey,
-      redactPrimitiveStrings: !isEvidenceMetadataStringArrayKey(parentKey),
+      redactPrimitiveStrings: isReasonStringArrayKey(parentKey) || !isEvidenceMetadataStringArrayKey(parentKey),
     }));
   }
-  if (typeof value === 'string') return redactPrimitiveStrings && value.length > 0 ? '[redacted]' : value;
+  if (typeof value === 'string') {
+    if (isReasonStringArrayKey(parentKey)) return redactReasonString(value);
+    return redactPrimitiveStrings && value.length > 0 ? '[redacted]' : value;
+  }
   if (!isPlainObject(value)) return value;
 
   const redacted = {};
   for (const [key, child] of Object.entries(value)) {
+    if (isReasonStringKey(key) && typeof child === 'string') {
+      redacted[key] = redactReasonString(child);
+      continue;
+    }
     if (isQuarantinedTextKey(key) && typeof child === 'string' && child.length > 0) {
       redacted[key] = '[redacted]';
       continue;
