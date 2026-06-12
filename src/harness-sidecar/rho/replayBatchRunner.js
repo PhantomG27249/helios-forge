@@ -15,13 +15,29 @@ function normalizeKey(key) {
   return String(key).replace(/[^A-Za-z0-9]/g, '').toLowerCase();
 }
 
-function isAuthorityBooleanKey(key) {
+function isAllowlistedAuthorityShape(key) {
   const normalized = normalizeKey(key);
-  return normalized === 'apply' ||
+  return normalized === 'promotionevidence' ||
+    normalized === 'promotionevidenceeligible';
+}
+
+function isAuthorityShapedKey(key) {
+  if (isAllowlistedAuthorityShape(key)) return false;
+  const normalized = normalizeKey(key);
+  return normalized === 'verified' ||
+    normalized === 'apply' ||
     normalized === 'approved' ||
+    normalized === 'authority' ||
     normalized === 'canpromote' ||
     normalized === 'promotionallowed' ||
-    normalized === 'verified';
+    normalized === 'verifierbypass' ||
+    normalized.includes('apply') ||
+    normalized.includes('approval') ||
+    normalized.includes('approved') ||
+    normalized.includes('authority') ||
+    normalized.includes('promote') ||
+    normalized.includes('promotion') ||
+    normalized.includes('bypass');
 }
 
 function sanitizeEvidenceOnlyValue(value) {
@@ -30,12 +46,12 @@ function sanitizeEvidenceOnlyValue(value) {
 
   const sanitized = {};
   for (const [key, child] of Object.entries(value)) {
-    if (isAuthorityBooleanKey(key) && child === true) {
-      sanitized[key] = false;
+    if (normalizeKey(key) === 'authority' && child !== 'evidence_only') {
+      sanitized[key] = 'evidence_only';
       continue;
     }
-    if (normalizeKey(key) === 'authority' && typeof child === 'string' && child !== 'evidence_only') {
-      sanitized[key] = 'evidence_only';
+    if (isAuthorityShapedKey(key)) {
+      sanitized[key] = false;
       continue;
     }
     sanitized[key] = sanitizeEvidenceOnlyValue(child);

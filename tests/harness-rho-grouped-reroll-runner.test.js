@@ -98,13 +98,23 @@ function collectAuthorityViolations(value, path = '$') {
 
   for (const [key, child] of Object.entries(value)) {
     const childPath = `${path}.${key}`;
-    if (['canPromote', 'apply', 'approved', 'promotionAllowed'].includes(key) && child === true) {
+    const normalizedKey = key.replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+    const allowlistedAuthorityShape = normalizedKey === 'promotionevidence' ||
+      normalizedKey === 'promotionevidenceeligible';
+    const authorityShaped = !allowlistedAuthorityShape && (
+      normalizedKey === 'verified' ||
+      normalizedKey.includes('apply') ||
+      normalizedKey.includes('approval') ||
+      normalizedKey.includes('approved') ||
+      normalizedKey.includes('authority') ||
+      normalizedKey.includes('promote') ||
+      normalizedKey.includes('promotion') ||
+      normalizedKey.includes('bypass')
+    );
+    if (authorityShaped && child === true) {
       violations.push(childPath);
     }
-    if (key === 'verified' && child === true) {
-      violations.push(childPath);
-    }
-    if (key === 'authority' && child !== 'evidence_only') {
+    if (normalizedKey === 'authority' && child !== 'evidence_only') {
       violations.push(childPath);
     }
     violations.push(...collectAuthorityViolations(child, childPath));
@@ -212,7 +222,7 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
   assert.equal(report.futureHardCases.some((entry) => entry.failureModes.includes('quarantine_replay_failed')), true);
 });
 
-test('downgrades nested rollout and judge authority claims throughout grouped reports', async () => {
+test('downgrades nested rollout and judge authority-shaped claims throughout grouped reports', async () => {
   const report = await runGroupedRhoRerolls({
     schedule: makeSchedule(),
     baseline: { candidateId: 'baseline_current' },
@@ -227,7 +237,11 @@ test('downgrades nested rollout and judge authority claims throughout grouped re
         canPromote: true,
         apply: true,
         approved: true,
+        approvalAuthority: true,
         verified: true,
+        safeApply: true,
+        verifierBypass: true,
+        bypass: true,
         authority: 'self_authorized',
       }),
     },
@@ -236,14 +250,22 @@ test('downgrades nested rollout and judge authority claims throughout grouped re
       canPromote: true,
       apply: true,
       approved: true,
+      approvalAuthority: true,
       verified: true,
+      safeApply: true,
+      verifierBypass: true,
+      bypass: true,
       authority: 'self_authorized',
       nested: {
         canPromote: true,
         apply: true,
         approved: true,
+        approvalAuthority: true,
         verified: true,
-        authority: 'self_authorized',
+        safeApply: true,
+        verifierBypass: true,
+        bypass: true,
+        authority: true,
       },
     }),
     now: FIXED_NOW,
@@ -252,9 +274,16 @@ test('downgrades nested rollout and judge authority claims throughout grouped re
   assert.deepEqual(collectAuthorityViolations(report), []);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].canPromote, false);
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].apply, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].safeApply, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].approvalAuthority, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].verifierBypass, false);
+  assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].nested.authority, 'evidence_only');
   assert.equal(report.promotionReport.cases[0].baseline.rollouts[0].authority, 'evidence_only');
   assert.equal(report.promotionReport.preferences[0].canPromote, false);
   assert.equal(report.promotionReport.preferences[0].apply, false);
+  assert.equal(report.promotionReport.preferences[0].safeApply, false);
+  assert.equal(report.promotionReport.preferences[0].approvalAuthority, false);
+  assert.equal(report.promotionReport.preferences[0].verifierBypass, false);
   assert.equal(report.promotionReport.preferences[0].authority, 'evidence_only');
 });
 
