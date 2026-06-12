@@ -517,6 +517,28 @@ test('recomputes allowed persisted classification from evidence', () => {
   assert.equal(summary.classificationCounts.improvement, 0);
 });
 
+test('recomputes nested persisted domain drift classification from delta evidence', () => {
+  const summary = summarizeRhoImprovementTrends([
+    {
+      recordedAt: '2026-06-12T00:00:00.000Z',
+      reportId: 'rho-poisoned-domain-drift',
+      suiteId: 'classification-suite',
+      candidateId: 'candidate-domain-drift',
+      aggregateScore: 0.6,
+      aggregateDelta: null,
+      domainScores: { code: 0.6 },
+      domainDrift: {
+        code: { previous: 0.8, current: 0.6, delta: -0.2, classification: 'improvement' },
+      },
+    },
+  ]);
+
+  assert.equal(summary.dashboardRows[0].domainDrift.code.classification, 'regression');
+  assert.equal(summary.dashboardRows[0].classification, 'regression');
+  assert.equal(summary.classificationCounts.regression, 1);
+  assert.equal(summary.classificationCounts.improvement, 0);
+});
+
 test('skips null persisted history tombstones', () => {
   const summary = summarizeRhoImprovementTrends([null]);
 

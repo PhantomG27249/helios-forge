@@ -37,8 +37,6 @@ function isRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-const CLASSIFICATIONS = Object.freeze(['improvement', 'mixed', 'new', 'regression', 'unchanged']);
-
 function candidateIdFor(replayReport = {}, promotedCandidate = {}) {
   return stableString(
     promotedCandidate.candidateId ??
@@ -190,9 +188,9 @@ function normalizeDomainDriftEntry(entry = {}) {
   const previous = roundMetric(entry.previous);
   const current = roundMetric(entry.current);
   const delta = entry.delta === undefined ? roundMetric(current - previous) : roundMetric(entry.delta);
-  const classification = CLASSIFICATIONS.includes(entry.classification)
-    ? entry.classification
-    : (delta > 0 ? 'improvement' : delta < 0 ? 'regression' : 'unchanged');
+  let classification = 'unchanged';
+  if (delta > 0) classification = 'improvement';
+  if (delta < 0) classification = 'regression';
   const normalized = {
     previous,
     current,
