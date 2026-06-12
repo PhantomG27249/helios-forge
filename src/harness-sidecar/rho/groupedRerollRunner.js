@@ -238,7 +238,7 @@ function sanitizeQuarantineBlocks({ schedule = {}, quarantineReport = {} } = {})
       candidateFamily: replayCase?.candidateFamily,
       preferences: replayCase?.preferences,
     });
-    const safeBlock = sanitizeEvidenceOnlyValue(block);
+    const safeBlock = redactQuarantinedTextFields(sanitizeEvidenceOnlyValue(block));
     return {
       ...safeBlock,
       promotionEvidenceEligible: false,

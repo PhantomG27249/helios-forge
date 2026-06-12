@@ -68,7 +68,13 @@ function isQuarantinedTextKey(key) {
     normalized === 'majoritysummary' ||
     normalized === 'note' ||
     normalized === 'text' ||
-    normalized === 'description';
+    normalized === 'description' ||
+    normalized === 'message' ||
+    normalized === 'content' ||
+    normalized === 'details' ||
+    normalized === 'stdout' ||
+    normalized === 'stderr' ||
+    normalized === 'error';
 }
 
 export function redactQuarantinedTextFields(value) {
