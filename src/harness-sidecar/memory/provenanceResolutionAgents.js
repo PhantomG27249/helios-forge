@@ -67,6 +67,11 @@ function sanitizeProvenanceRef(ref) {
   };
 }
 
+function provenanceRefReasons(reason, ref) {
+  const sanitizedRef = sanitizeProvenanceRef(ref);
+  return [`${reason}:${sanitizedRef.ref}`, ...sanitizedRef.reasons];
+}
+
 function staleStatus(value = {}) {
   return value.stale === true
     || value.superseded === true
@@ -147,11 +152,11 @@ export function normalizeResolutionEvidence(input, { knownProvenanceRefs = [], b
   const provenanceRefs = [];
   for (const ref of rawRefs) {
     if (blocked.has(ref)) {
-      reasons.push(`stale_provenance_ref:${ref}`);
+      reasons.push(...provenanceRefReasons('stale_provenance_ref', ref));
       continue;
     }
     if (!known.has(ref)) {
-      reasons.push(`unknown_provenance_ref:${ref}`);
+      reasons.push(...provenanceRefReasons('unknown_provenance_ref', ref));
       continue;
     }
     const sanitizedRef = sanitizeProvenanceRef(ref);
@@ -229,7 +234,7 @@ export async function runProvenanceResolutionAgents({
 
   const runnerReasons = [
     ...(quarantinedPayload.reasons || []),
-    ...staleRefs.map((ref) => `stale_provenance_ref:${ref}`),
+    ...staleRefs.flatMap((ref) => provenanceRefReasons('stale_provenance_ref', ref)),
   ];
 
   return {

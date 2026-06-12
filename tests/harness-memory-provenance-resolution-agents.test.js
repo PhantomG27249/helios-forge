@@ -95,6 +95,24 @@ test('redacts secret and path shaped provenance refs while preserving safe refs'
   assert.equal(evidence.reasons.includes('secret_like_value'), true);
 });
 
+test('redacts unknown path and token shaped provenance refs in reasons', () => {
+  const unsafePath = 'C:\\Users\\jackj\\Github\\helios-forge\\.env';
+  const unsafeSecret = 'token=abc123';
+  const evidence = normalizeResolutionEvidence({
+    verdict: 'supported',
+    confidence: 0.8,
+    provenanceRefs: [unsafePath, unsafeSecret],
+    reasons: ['Unknown refs must not leak through reason text.'],
+  }, { knownProvenanceRefs: ['passage-safe'] });
+
+  const joinedReasons = evidence.reasons.join(' ');
+  assert.equal(joinedReasons.includes('C:\\Users\\jackj'), false);
+  assert.equal(joinedReasons.includes('abc123'), false);
+  assert.equal(joinedReasons.includes('[redacted'), true);
+  assert.equal(evidence.reasons.includes('unsafe_path_value'), true);
+  assert.equal(evidence.reasons.includes('secret_like_value'), true);
+});
+
 test('runs supported, contradicted, conflicted, and insufficient evidence verdicts', async () => {
   const passages = [
     { id: 'passage-new', text: 'The verifier.command equals node --test tests/harness-memory.test.js.' },
@@ -148,6 +166,33 @@ test('runs supported, contradicted, conflicted, and insufficient evidence verdic
   assert.equal(insufficient.verdict, 'insufficient_evidence');
   assert.equal(supported.modelEvidenceOnly, true);
   assert.equal(supported.promotionAllowed, false);
+});
+
+test('redacts stale path and token shaped provenance refs in runner reasons', async () => {
+  const unsafePath = 'C:\\Users\\jackj\\Github\\helios-forge\\.env';
+  const unsafeSecret = 'token=abc123';
+  const result = await runProvenanceResolutionAgents({
+    conflict,
+    provenancePassages: [
+      { id: 'passage-new', text: 'Fresh source supports node --test tests/harness-memory.test.js.' },
+      { id: unsafePath, text: 'Stale path ref must not leak.', stale: true },
+      { id: unsafeSecret, text: 'Stale token ref must not leak.', sourceStatus: 'stale' },
+    ],
+    modelResolver: async () => ({
+      verdict: 'supported',
+      confidence: 0.8,
+      provenanceRefs: ['passage-new', unsafePath, unsafeSecret],
+      reasons: ['Stale unsafe refs must not leak through runner reasons.'],
+    }),
+  });
+
+  const joinedReasons = result.reasons.join(' ');
+  assert.equal(result.provenanceRefs.includes('passage-new'), true);
+  assert.equal(joinedReasons.includes('C:\\Users\\jackj'), false);
+  assert.equal(joinedReasons.includes('abc123'), false);
+  assert.equal(joinedReasons.includes('[redacted'), true);
+  assert.equal(result.reasons.includes('unsafe_path_value'), true);
+  assert.equal(result.reasons.includes('secret_like_value'), true);
 });
 
 test('ignores stale source passages unless policy allows stale evidence', async () => {
