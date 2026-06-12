@@ -155,7 +155,7 @@ export function buildModelDebatePrompt({
   });
 
   return {
-    debateId: boundedText(debateId, 96),
+    debateId: safeModelVisibleId(debateId, 96, quarantineReasons),
     taskId,
     participant: normalizedParticipant,
     messages: [
@@ -224,8 +224,8 @@ export function buildModelDebateEvidence({
   for (const reason of unsafeFieldReasons(rawNestedRecords)) quarantineReasons.add(reason);
 
   return {
-    debateId: boundedText(debateId, 96),
-    taskId: boundedText(taskId, 96),
+    debateId: safeModelVisibleId(debateId, 96, quarantineReasons),
+    taskId: safeModelVisibleId(taskId, 96, quarantineReasons),
     participants: normalizedParticipants,
     claims: normalizedClaims,
     critiques: normalizedCritiques,

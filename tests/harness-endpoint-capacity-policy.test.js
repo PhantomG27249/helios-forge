@@ -97,6 +97,30 @@ test('does not preserve token-shaped health reasons as reason codes', () => {
   assert.deepEqual(report.routeRecommendations.implementer.blockedReasons, ['health_probe_failed']);
 });
 
+test('redacts token-shaped endpoint model and capability metadata', () => {
+  const report = recommendEndpointCapacityActions({
+    endpoints: {
+      primary: {
+        baseUrl: 'https://primary.example.test/v1',
+        modelId: 'sk-proj-model-secret',
+        capabilities: ['text', 'token=ghp_capability_secret'],
+        supportsVision: true,
+      },
+    },
+    policy: {
+      requiredModelProfiles: ['ghp_required_secret'],
+      routes: { implementer: 'primary' },
+    },
+  });
+  const visible = JSON.stringify(report);
+
+  assert.equal(visible.includes('sk-proj-model-secret'), false);
+  assert.equal(visible.includes('ghp_capability_secret'), false);
+  assert.equal(visible.includes('ghp_required_secret'), false);
+  assert.equal(report.endpoints.primary.modelId, '[redacted]');
+  assert.equal(report.actions.find((action) => action.type === 'model_endpoint.missing_model_profile').modelProfile, '[redacted]');
+});
+
 test('flags missing specialist routes and missing model profiles as capacity gaps', () => {
   const report = recommendEndpointCapacityActions({
     endpoints: {

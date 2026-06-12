@@ -1,5 +1,6 @@
 import { normalizeEndpointProfiles } from './modelEndpointProfiles.js';
 import { normalizeVllmHealthSnapshot } from './vllmHealthController.js';
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 const AUTHORITY = 'evidence_only';
 const SAFE_REASON_CODES = new Set([
@@ -39,6 +40,18 @@ function uniqueStrings(values = [], limit = 96) {
   return [...new Set(values
     .map((value) => boundedString(value, limit))
     .filter(Boolean))];
+}
+
+function safeEvidenceString(value, limit = 160) {
+  return quarantineModelVisiblePayload(boundedString(value, limit), { maxStringLength: limit }).value;
+}
+
+function safeEvidenceList(values = [], limit = 96) {
+  if (!Array.isArray(values)) return undefined;
+  const safe = [...new Set(values
+    .map((value) => safeEvidenceString(value, limit))
+    .filter(Boolean))];
+  return safe.length ? safe : undefined;
 }
 
 function endpointEntries(endpoints) {
@@ -93,14 +106,14 @@ function sanitizeHealthSnapshot(snapshot = {}) {
 function endpointSummary(endpoint = {}) {
   return {
     endpointProfile: endpoint.endpointProfile,
-    modelId: endpoint.modelId,
+    modelId: safeEvidenceString(endpoint.modelId, 256),
     supportsVision: endpoint.supportsVision,
     healthEnabled: endpoint.healthEnabled,
     estimatedCostUsdPer1kTokens: endpoint.estimatedCostUsdPer1kTokens,
     targetLatencyMs: endpoint.targetLatencyMs,
     maxContextTokens: endpoint.maxContextTokens,
     recommendedConcurrency: endpoint.recommendedConcurrency,
-    capabilities: Array.isArray(endpoint.capabilities) ? [...endpoint.capabilities] : undefined,
+    capabilities: safeEvidenceList(endpoint.capabilities),
   };
 }
 
@@ -210,7 +223,7 @@ export function recommendEndpointCapacityActions({
         type: 'endpoint.degraded',
         action: 'reduce_or_pause_endpoint',
         endpointProfile,
-        modelId: endpoint.modelId,
+        modelId: safeEvidenceString(endpoint.modelId, 256),
         reason,
         evidence: health,
       }));
@@ -262,7 +275,7 @@ export function recommendEndpointCapacityActions({
           action: 'recommend_downshift_or_manual_budget_review',
           role,
           endpointProfile,
-          modelId: endpoint.modelId,
+          modelId: safeEvidenceString(endpoint.modelId, 256),
           observedCostUsdPer1kTokens: endpoint.estimatedCostUsdPer1kTokens,
           ceilingUsdPer1kTokens: maxCost,
           reason: 'cost_ceiling_exceeded',
@@ -277,7 +290,7 @@ export function recommendEndpointCapacityActions({
           action: 'recommend_lower_latency_endpoint',
           role,
           endpointProfile,
-          modelId: endpoint.modelId,
+          modelId: safeEvidenceString(endpoint.modelId, 256),
           observedP95LatencyMs: observedLatency,
           ceilingP95LatencyMs: maxLatency,
           reason: 'latency_ceiling_exceeded',
@@ -291,7 +304,7 @@ export function recommendEndpointCapacityActions({
           action: 'recommend_vision_capable_endpoint',
           role,
           endpointProfile,
-          modelId: endpoint.modelId,
+          modelId: safeEvidenceString(endpoint.modelId, 256),
           reason: 'vision_capability_mismatch',
         }));
       }
@@ -306,7 +319,7 @@ export function recommendEndpointCapacityActions({
       actions.push(action({
         type: 'model_endpoint.missing_model_profile',
         action: 'recommend_model_profile_capacity_review',
-        modelProfile,
+        modelProfile: safeEvidenceString(modelProfile, 256),
         reason: 'missing_model_profile',
       }));
     }

@@ -153,10 +153,10 @@ test('model council runtime redacts secret-like endpoint metadata in evidence su
       modelCouncil: {
         enabled: true,
         roles: {
-          implementer: { modelProfile: 'ghp_should_not_leak', endpointProfile: 'fast' },
+          ghp_role_should_not_leak: { modelProfile: 'ghp_should_not_leak', endpointProfile: 'ghp_endpoint_should_not_leak' },
         },
         endpointProfiles: {
-          fast: {
+          ghp_endpoint_should_not_leak: {
             baseUrl: 'https://example.com/v1?api_key=sk-secret',
             modelId: 'ghp_should_not_leak',
             healthUrl: 'https://example.com/health?token=secret',
@@ -169,7 +169,11 @@ test('model council runtime redacts secret-like endpoint metadata in evidence su
 
   assert.equal(visible.includes('sk-secret'), false);
   assert.equal(visible.includes('ghp_should_not_leak'), false);
+  assert.equal(visible.includes('ghp_role_should_not_leak'), false);
+  assert.equal(visible.includes('ghp_endpoint_should_not_leak'), false);
   assert.equal(visible.includes('token=secret'), false);
+  assert.equal(council.profileOverrides['[redacted]'].baseUrl, 'https://example.com/v1?api_key=sk-secret');
+  assert.equal(JSON.stringify(council).includes('profileOverrides'), false);
 });
 
 test('resolves attempt model routes with role fallback and disabled council safety', () => {

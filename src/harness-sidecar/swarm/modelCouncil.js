@@ -27,6 +27,11 @@ function safeVisibleText(value, maxLength = 160) {
   return quarantineModelVisiblePayload(boundedText(value, maxLength), { maxStringLength: maxLength }).value;
 }
 
+function safeMapKey(value, fallback) {
+  const safe = safeVisibleText(value, 96);
+  return safe || fallback;
+}
+
 function numericSetting(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -35,7 +40,7 @@ function numericSetting(value, fallback) {
 function safeEndpointMetadata(endpoint = {}) {
   if (!endpoint?.baseUrl || !endpoint?.modelId) return null;
   const metadata = {
-    endpointProfile: boundedText(endpoint.endpointProfile, 96) || undefined,
+    endpointProfile: safeVisibleText(endpoint.endpointProfile, 96) || undefined,
     modelId: safeVisibleText(endpoint.modelId, 256),
   };
   if (typeof endpoint.supportsVision === 'boolean') metadata.supportsVision = endpoint.supportsVision;
@@ -60,12 +65,14 @@ function disabledCouncil() {
 }
 
 function buildRoleRoute({ role, routeConfig = {}, endpointProfiles, fallbackModel }) {
+  const rawModelProfile = boundedText(routeConfig.modelProfile || fallbackModel.profileName, 96);
+  const rawEndpointProfile = boundedText(routeConfig.endpointProfile, 96);
   const modelProfile = safeVisibleText(routeConfig.modelProfile || fallbackModel.profileName, 96);
   if (!modelProfile) return null;
   const endpointProfile = safeVisibleText(routeConfig.endpointProfile, 96);
   const endpoint = resolveEndpointProfile({
     endpointProfiles,
-    endpointProfileId: endpointProfile,
+    endpointProfileId: rawEndpointProfile,
     fallback: fallbackModel,
   });
   const route = {
@@ -77,6 +84,20 @@ function buildRoleRoute({ role, routeConfig = {}, endpointProfiles, fallbackMode
   if (endpointProfile) route.endpointProfile = endpointProfile;
   const endpointMetadata = safeEndpointMetadata(endpoint);
   if (endpointMetadata) route.endpoint = endpointMetadata;
+  route.privateEndpointOverride = endpointProfileToOverride({
+    ...endpoint,
+    endpointProfile: rawEndpointProfile,
+  });
+  Object.defineProperty(route, 'privateEndpointOverride', {
+    value: route.privateEndpointOverride,
+    enumerable: false,
+    configurable: true,
+  });
+  Object.defineProperty(route, 'rawModelProfile', {
+    value: rawModelProfile,
+    enumerable: false,
+    configurable: true,
+  });
   return route;
 }
 
@@ -116,7 +137,7 @@ export function buildModelCouncilRuntime({ harnessConfig = {}, fallbackModel = {
   const roleRoutes = {};
   for (const [rawRole, routeConfig] of Object.entries(roleConfigs)) {
     if (!isPlainObject(routeConfig)) continue;
-    const role = boundedText(rawRole, 96);
+    const role = safeMapKey(rawRole, `role_${Object.keys(roleRoutes).length + 1}`);
     if (!role) continue;
     const route = buildRoleRoute({
       role,
@@ -129,11 +150,8 @@ export function buildModelCouncilRuntime({ harnessConfig = {}, fallbackModel = {
 
   const profileOverrides = {};
   for (const route of Object.values(roleRoutes)) {
-    if (!route.modelProfile || !route.endpoint) continue;
-    profileOverrides[route.modelProfile] = endpointProfileToOverride({
-      ...route.endpoint,
-      endpointProfile: route.endpointProfile,
-    });
+    if (!route.modelProfile || !route.privateEndpointOverride) continue;
+    profileOverrides[route.modelProfile] = route.privateEndpointOverride;
   }
 
   const council = {
@@ -148,14 +166,18 @@ export function buildModelCouncilRuntime({ harnessConfig = {}, fallbackModel = {
       DEFAULT_DISAGREEMENT_THRESHOLD,
     )),
     roleRoutes,
-    endpointProfiles: Object.fromEntries(Object.entries(endpointProfiles).map(([profileId, endpoint]) => [
-      profileId,
-      safeEndpointMetadata(endpoint) || { endpointProfile: profileId },
+    endpointProfiles: Object.fromEntries(Object.entries(endpointProfiles).map(([profileId, endpoint], index) => [
+      safeMapKey(profileId, `endpoint_${index + 1}`),
+      safeEndpointMetadata(endpoint) || { endpointProfile: safeMapKey(profileId, `endpoint_${index + 1}`) },
     ])),
-    profileOverrides,
     authority: 'evidence_only',
     canPromote: false,
   };
+  Object.defineProperty(council, 'profileOverrides', {
+    value: profileOverrides,
+    enumerable: false,
+    configurable: true,
+  });
   council.bridgeHints = bridgeHintsForCouncil(council);
   return council;
 }

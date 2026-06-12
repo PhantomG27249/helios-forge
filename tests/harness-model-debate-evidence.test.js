@@ -123,9 +123,9 @@ test('normalizes critique outputs, agreement, disagreement, confidence, and quar
 
 test('redacts model-visible debate prompts claims and critiques', () => {
   const prompt = buildModelDebatePrompt({
-    debateId: 'debate-secret',
+    debateId: 'api_key=sk-secret-debate',
     task: {
-      taskId: 'C:\\Users\\jackj\\secret\\task.json',
+      taskId: 'api_key=sk-secret-task',
       goal: 'Review C:\\Users\\jackj\\secret\\trace.json with api_key=sk-test-secret',
       constraints: ['Do not leak ghp_should_not_leak'],
     },
@@ -139,14 +139,16 @@ test('redacts model-visible debate prompts claims and critiques', () => {
   const promptText = JSON.stringify(prompt);
 
   assert.equal(promptText.includes('sk-test-secret'), false);
+  assert.equal(promptText.includes('sk-secret-debate'), false);
+  assert.equal(promptText.includes('sk-secret-task'), false);
   assert.equal(promptText.includes('sk-model-secret'), false);
   assert.equal(promptText.includes('ghp_should_not_leak'), false);
   assert.equal(promptText.includes('ghp_participant_secret'), false);
-  assert.equal(promptText.includes('C:\\Users\\jackj'), false);
+  assert.equal(promptText.includes('Users'), false);
 
   const evidence = buildModelDebateEvidence({
-    debateId: 'debate-secret',
-    taskId: 'C:\\Users\\jackj\\secret\\task.json',
+    debateId: 'api_key=sk-secret-debate',
+    taskId: 'api_key=sk-secret-task',
     participants: [{ id: 'ghp_participant_secret', role: 'C:\\Users\\jackj\\role.json', modelProfile: 'sk-model-secret' }],
     outputs: [{
       participantId: 'C:\\Users\\jackj\\participant.json',
@@ -165,10 +167,12 @@ test('redacts model-visible debate prompts claims and critiques', () => {
   const visible = JSON.stringify(evidence);
 
   assert.equal(visible.includes('sk-test-secret'), false);
+  assert.equal(visible.includes('sk-secret-debate'), false);
+  assert.equal(visible.includes('sk-secret-task'), false);
   assert.equal(visible.includes('sk-model-secret'), false);
   assert.equal(visible.includes('ghp_should_not_leak'), false);
   assert.equal(visible.includes('ghp_participant_secret'), false);
-  assert.equal(visible.includes('C:\\Users\\jackj'), false);
+  assert.equal(visible.includes('Users'), false);
   assert.equal(evidence.quarantine.required, true);
   assert.equal(evidence.quarantine.reasons.includes('secret_like_value'), true);
   assert.equal(evidence.quarantine.reasons.includes('unsafe_path_value'), true);
