@@ -77,8 +77,42 @@ function isQuarantinedTextKey(key) {
     normalized === 'error';
 }
 
-export function redactQuarantinedTextFields(value) {
-  if (Array.isArray(value)) return value.map(redactQuarantinedTextFields);
+function isEvidenceMetadataStringKey(key) {
+  const normalized = normalizeKey(key);
+  return normalized === 'id' ||
+    normalized === 'caseid' ||
+    normalized === 'taskid' ||
+    normalized === 'variantid' ||
+    normalized === 'heldoutvariantid' ||
+    normalized === 'candidateid' ||
+    normalized === 'baselineid' ||
+    normalized === 'domain' ||
+    normalized === 'kind' ||
+    normalized === 'status' ||
+    normalized === 'source' ||
+    normalized === 'target' ||
+    normalized === 'reason' ||
+    normalized === 'quarantinereason' ||
+    normalized === 'authority' ||
+    normalized === 'preferred';
+}
+
+function isEvidenceMetadataStringArrayKey(key) {
+  const normalized = normalizeKey(key);
+  return normalized === 'reasons' ||
+    normalized === 'blockingevidence' ||
+    normalized === 'promotionevidence' ||
+    normalized === 'failuremodes';
+}
+
+export function redactQuarantinedTextFields(value, { parentKey = '', redactPrimitiveStrings = false } = {}) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactQuarantinedTextFields(entry, {
+      parentKey,
+      redactPrimitiveStrings: !isEvidenceMetadataStringArrayKey(parentKey),
+    }));
+  }
+  if (typeof value === 'string') return redactPrimitiveStrings && value.length > 0 ? '[redacted]' : value;
   if (!isPlainObject(value)) return value;
 
   const redacted = {};
@@ -87,7 +121,11 @@ export function redactQuarantinedTextFields(value) {
       redacted[key] = '[redacted]';
       continue;
     }
-    redacted[key] = redactQuarantinedTextFields(child);
+    if (typeof child === 'string' && child.length > 0 && !isEvidenceMetadataStringKey(key)) {
+      redacted[key] = '[redacted]';
+      continue;
+    }
+    redacted[key] = redactQuarantinedTextFields(child, { parentKey: key });
   }
   return redacted;
 }

@@ -5,6 +5,7 @@ import { runGroupedRhoRerolls } from '../src/harness-sidecar/rho/groupedRerollRu
 
 const FIXED_NOW = new Date('2026-06-12T12:00:00.000Z');
 const ORDINARY_QUARANTINE_SENTINEL = 'ordinary-quarantine-sentinel';
+const ORDINARY_QUARANTINE_ARRAY_SENTINEL = 'ordinary-quarantine-sentinel-array';
 
 function makeSchedule() {
   return {
@@ -228,10 +229,25 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
           status: 'failed',
           compactHandoff: {
             summary: `unsafe path C:\\Users\\jackj\\secret ${context.item.prompt}`,
-            testsRun: [{ command: 'node --test focused.test.js', status: 'failed', passed: false }],
+            testsRun: [
+              { command: 'node --test focused.test.js', status: 'failed', passed: false },
+              ORDINARY_QUARANTINE_ARRAY_SENTINEL,
+            ],
           },
-          verifierEvidence: [{ passed: false }],
+          verifierEvidence: [{
+            passed: false,
+            notes: [ORDINARY_QUARANTINE_ARRAY_SENTINEL],
+            metadata: {
+              unlistedTraceLabel: ORDINARY_QUARANTINE_ARRAY_SENTINEL,
+            },
+          }],
           metrics: { quality: 0.1, safety: 0 },
+          metadata: {
+            unlistedNested: {
+              rawTraceLabel: ORDINARY_QUARANTINE_ARRAY_SENTINEL,
+              tags: [ORDINARY_QUARANTINE_ARRAY_SENTINEL],
+            },
+          },
           message: ORDINARY_QUARANTINE_SENTINEL,
           content: ORDINARY_QUARANTINE_SENTINEL,
           details: ORDINARY_QUARANTINE_SENTINEL,
@@ -260,6 +276,8 @@ test('keeps quarantine replay separate from promotion evidence and emits future 
   assert.deepEqual(collectUnsafeText(report.quarantineBlocks), []);
   assert.equal(JSON.stringify(report.quarantineReport).includes(ORDINARY_QUARANTINE_SENTINEL), false);
   assert.equal(JSON.stringify(report.quarantineBlocks).includes(ORDINARY_QUARANTINE_SENTINEL), false);
+  assert.equal(JSON.stringify(report.quarantineReport).includes(ORDINARY_QUARANTINE_ARRAY_SENTINEL), false);
+  assert.equal(JSON.stringify(report.quarantineBlocks).includes(ORDINARY_QUARANTINE_ARRAY_SENTINEL), false);
   assert.equal(JSON.stringify(report.quarantineReport).includes('external unverified trace contains'), false);
   assert.deepEqual(collectAuthorityViolations(report.quarantineBlocks), []);
   assert.equal(report.quarantineBlocks[0].safeApply, false);
