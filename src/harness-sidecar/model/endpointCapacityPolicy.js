@@ -2,6 +2,21 @@ import { normalizeEndpointProfiles } from './modelEndpointProfiles.js';
 import { normalizeVllmHealthSnapshot } from './vllmHealthController.js';
 
 const AUTHORITY = 'evidence_only';
+const SAFE_REASON_CODES = new Set([
+  'at_max_concurrency',
+  'auto_procurement_disabled',
+  'cost_ceiling_exceeded',
+  'health_probe_failed',
+  'healthy_capacity_available',
+  'latency_ceiling_exceeded',
+  'latency_high',
+  'missing_base_url',
+  'missing_model_profile',
+  'missing_specialist_endpoint',
+  'missing_specialist_route',
+  'timeout',
+  'vision_capability_mismatch',
+]);
 
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -63,7 +78,7 @@ function normalizeHealthByEndpoint(routerHealth = {}) {
 
 function safeReasonCode(value, fallback = 'health_probe_failed') {
   const text = boundedString(value, 96).toLowerCase();
-  if (/^[a-z0-9_.:-]+$/.test(text)) return text;
+  if (SAFE_REASON_CODES.has(text)) return text;
   return fallback;
 }
 

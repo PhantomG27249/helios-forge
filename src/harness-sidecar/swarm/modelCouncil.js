@@ -3,6 +3,7 @@ import {
   normalizeEndpointProfiles,
   resolveEndpointProfile,
 } from '../model/modelEndpointProfiles.js';
+import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 export {
   buildModelDebateEvidence,
   buildModelDebatePrompt,
@@ -22,6 +23,10 @@ function boundedText(value, maxLength = 160) {
   return String(value).trim().slice(0, maxLength);
 }
 
+function safeVisibleText(value, maxLength = 160) {
+  return quarantineModelVisiblePayload(boundedText(value, maxLength), { maxStringLength: maxLength }).value;
+}
+
 function numericSetting(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -30,17 +35,16 @@ function numericSetting(value, fallback) {
 function safeEndpointMetadata(endpoint = {}) {
   if (!endpoint?.baseUrl || !endpoint?.modelId) return null;
   const metadata = {
-    baseUrl: endpoint.baseUrl,
-    modelId: endpoint.modelId,
+    endpointProfile: boundedText(endpoint.endpointProfile, 96) || undefined,
+    modelId: safeVisibleText(endpoint.modelId, 256),
   };
   if (typeof endpoint.supportsVision === 'boolean') metadata.supportsVision = endpoint.supportsVision;
   if (typeof endpoint.healthEnabled === 'boolean') metadata.healthEnabled = endpoint.healthEnabled;
-  if (endpoint.healthUrl) metadata.healthUrl = boundedText(endpoint.healthUrl, 512);
   if (typeof endpoint.healthy === 'boolean') metadata.healthy = endpoint.healthy;
   if (Number.isFinite(Number(endpoint.recommendedConcurrency))) {
     metadata.recommendedConcurrency = Math.max(1, Math.floor(Number(endpoint.recommendedConcurrency)));
   }
-  return metadata;
+  return Object.fromEntries(Object.entries(metadata).filter(([, value]) => value !== undefined && value !== ''));
 }
 
 function disabledCouncil() {
@@ -56,9 +60,9 @@ function disabledCouncil() {
 }
 
 function buildRoleRoute({ role, routeConfig = {}, endpointProfiles, fallbackModel }) {
-  const modelProfile = boundedText(routeConfig.modelProfile || fallbackModel.profileName, 96);
+  const modelProfile = safeVisibleText(routeConfig.modelProfile || fallbackModel.profileName, 96);
   if (!modelProfile) return null;
-  const endpointProfile = boundedText(routeConfig.endpointProfile, 96);
+  const endpointProfile = safeVisibleText(routeConfig.endpointProfile, 96);
   const endpoint = resolveEndpointProfile({
     endpointProfiles,
     endpointProfileId: endpointProfile,
@@ -144,7 +148,10 @@ export function buildModelCouncilRuntime({ harnessConfig = {}, fallbackModel = {
       DEFAULT_DISAGREEMENT_THRESHOLD,
     )),
     roleRoutes,
-    endpointProfiles,
+    endpointProfiles: Object.fromEntries(Object.entries(endpointProfiles).map(([profileId, endpoint]) => [
+      profileId,
+      safeEndpointMetadata(endpoint) || { endpointProfile: profileId },
+    ])),
     profileOverrides,
     authority: 'evidence_only',
     canPromote: false,

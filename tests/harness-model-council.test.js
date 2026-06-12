@@ -138,12 +138,38 @@ test('builds evidence-only role routes when multi-model council is enabled', () 
     role: 'implementer',
     modelProfile: 'alphahelion_ebft5',
     endpointProfile: 'fast',
-    endpoint: { baseUrl: 'http://model.test/v1', modelId: 'fast-model', supportsVision: true },
+    endpoint: { endpointProfile: 'fast', modelId: 'fast-model', supportsVision: true },
     authority: 'evidence_only',
     canPromote: false,
   });
   assert.equal(council.roleRoutes.reviewer.endpoint.modelId, 'critic-model');
   assert.equal(council.roleRoutes.researcher.modelProfile, 'qwen36_vlm_deep');
+});
+
+test('model council runtime redacts secret-like endpoint metadata in evidence surfaces', () => {
+  const council = buildModelCouncilRuntime({
+    harnessConfig: {
+      features: { multiModelSwarm: true },
+      modelCouncil: {
+        enabled: true,
+        roles: {
+          implementer: { modelProfile: 'ghp_should_not_leak', endpointProfile: 'fast' },
+        },
+        endpointProfiles: {
+          fast: {
+            baseUrl: 'https://example.com/v1?api_key=sk-secret',
+            modelId: 'ghp_should_not_leak',
+            healthUrl: 'https://example.com/health?token=secret',
+          },
+        },
+      },
+    },
+  });
+  const visible = JSON.stringify(council);
+
+  assert.equal(visible.includes('sk-secret'), false);
+  assert.equal(visible.includes('ghp_should_not_leak'), false);
+  assert.equal(visible.includes('token=secret'), false);
 });
 
 test('resolves attempt model routes with role fallback and disabled council safety', () => {

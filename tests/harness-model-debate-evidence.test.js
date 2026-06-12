@@ -125,35 +125,38 @@ test('redacts model-visible debate prompts claims and critiques', () => {
   const prompt = buildModelDebatePrompt({
     debateId: 'debate-secret',
     task: {
-      taskId: 'task-secret',
+      taskId: 'C:\\Users\\jackj\\secret\\task.json',
       goal: 'Review C:\\Users\\jackj\\secret\\trace.json with api_key=sk-test-secret',
       constraints: ['Do not leak ghp_should_not_leak'],
     },
-    participant: { id: 'critic' },
+    participant: { id: 'ghp_participant_secret', role: 'C:\\Users\\jackj\\role.json', modelProfile: 'sk-model-secret' },
     claims: [{
-      id: 'claim-secret',
+      id: 'ghp_should_not_leak',
+      participantId: 'C:\\Users\\jackj\\participant.json',
       text: 'Claim references token=ghp_should_not_leak and C:\\Users\\jackj\\secret\\trace.json',
     }],
   });
-  const promptText = JSON.stringify(prompt.messages);
+  const promptText = JSON.stringify(prompt);
 
   assert.equal(promptText.includes('sk-test-secret'), false);
+  assert.equal(promptText.includes('sk-model-secret'), false);
   assert.equal(promptText.includes('ghp_should_not_leak'), false);
+  assert.equal(promptText.includes('ghp_participant_secret'), false);
   assert.equal(promptText.includes('C:\\Users\\jackj'), false);
 
   const evidence = buildModelDebateEvidence({
     debateId: 'debate-secret',
-    taskId: 'task-secret',
-    participants: [{ id: 'critic' }],
+    taskId: 'C:\\Users\\jackj\\secret\\task.json',
+    participants: [{ id: 'ghp_participant_secret', role: 'C:\\Users\\jackj\\role.json', modelProfile: 'sk-model-secret' }],
     outputs: [{
-      participantId: 'critic',
+      participantId: 'C:\\Users\\jackj\\participant.json',
       claims: [{
-        id: 'claim-secret',
+        id: 'ghp_should_not_leak',
         text: 'Claim includes api_key=sk-test-secret',
       }],
       critiques: [{
-        id: 'critique-secret',
-        claimId: 'claim-secret',
+        id: 'C:\\Users\\jackj\\critique.json',
+        claimId: 'ghp_should_not_leak',
         verdict: 'concern',
         summary: 'Critique includes C:\\Users\\jackj\\secret\\trace.json and ghp_should_not_leak',
       }],
@@ -162,7 +165,9 @@ test('redacts model-visible debate prompts claims and critiques', () => {
   const visible = JSON.stringify(evidence);
 
   assert.equal(visible.includes('sk-test-secret'), false);
+  assert.equal(visible.includes('sk-model-secret'), false);
   assert.equal(visible.includes('ghp_should_not_leak'), false);
+  assert.equal(visible.includes('ghp_participant_secret'), false);
   assert.equal(visible.includes('C:\\Users\\jackj'), false);
   assert.equal(evidence.quarantine.required, true);
   assert.equal(evidence.quarantine.reasons.includes('secret_like_value'), true);

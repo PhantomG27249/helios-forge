@@ -73,6 +73,30 @@ test('redacts health reasons and returns model-safe endpoint summaries', () => {
   assert.equal(report.actions[0].evidence.reason, 'health_probe_failed');
 });
 
+test('does not preserve token-shaped health reasons as reason codes', () => {
+  const report = recommendEndpointCapacityActions({
+    endpoints: {
+      primary: {
+        baseUrl: 'https://primary.example.test/v1',
+        modelId: 'primary-model',
+      },
+    },
+    routerHealth: {
+      primary: {
+        healthy: false,
+        reason: 'sk-proj-abc123',
+      },
+    },
+    policy: {
+      routes: { implementer: 'primary' },
+    },
+  });
+
+  assert.equal(JSON.stringify(report).includes('sk-proj-abc123'), false);
+  assert.equal(report.actions[0].reason, 'health_probe_failed');
+  assert.deepEqual(report.routeRecommendations.implementer.blockedReasons, ['health_probe_failed']);
+});
+
 test('flags missing specialist routes and missing model profiles as capacity gaps', () => {
   const report = recommendEndpointCapacityActions({
     endpoints: {

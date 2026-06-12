@@ -15,6 +15,10 @@ function safeModelVisibleText(value, maxLength = 240, reasons = null) {
   return quarantined.value;
 }
 
+function safeModelVisibleId(value, maxLength = 96, reasons = null) {
+  return safeModelVisibleText(value, maxLength, reasons);
+}
+
 function clamp01(value, fallback = DEFAULT_CONFIDENCE) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -58,21 +62,21 @@ function unsafeFieldReasons(records = []) {
   return reasons;
 }
 
-function normalizeParticipant(participant = {}, index = 0) {
-  const id = boundedText(participant.id || participant.participantId || `participant-${index + 1}`, 96);
+function normalizeParticipant(participant = {}, index = 0, quarantineReasons = null) {
+  const id = safeModelVisibleId(participant.id || participant.participantId || `participant-${index + 1}`, 96, quarantineReasons);
   return {
     id,
-    role: boundedText(participant.role || 'debater', 96) || 'debater',
-    modelProfile: boundedText(participant.modelProfile || participant.profileName, 96) || null,
+    role: safeModelVisibleId(participant.role || 'debater', 96, quarantineReasons) || 'debater',
+    modelProfile: safeModelVisibleId(participant.modelProfile || participant.profileName, 96, quarantineReasons) || null,
     ...safetyFields(),
   };
 }
 
 function normalizeClaim(claim = {}, { participantId, index, quarantineReasons = null } = {}) {
-  const claimId = boundedText(claim.claimId || claim.id || `${participantId || 'participant'}-claim-${index + 1}`, 96);
+  const claimId = safeModelVisibleId(claim.claimId || claim.id || `${participantId || 'participant'}-claim-${index + 1}`, 96, quarantineReasons);
   return {
     claimId,
-    participantId: boundedText(claim.participantId || participantId, 96) || null,
+    participantId: safeModelVisibleId(claim.participantId || participantId, 96, quarantineReasons) || null,
     text: safeModelVisibleText(claim.text || claim.summary || claim.claim, 512, quarantineReasons),
     confidence: roundMetric(claim.confidence),
     ...safetyFields(),
@@ -82,9 +86,9 @@ function normalizeClaim(claim = {}, { participantId, index, quarantineReasons = 
 function normalizeCritique(critique = {}, { participantId, index, quarantineReasons = null } = {}) {
   const verdict = boundedText(critique.verdict || critique.status || 'concern', 48).toLowerCase();
   return {
-    critiqueId: boundedText(critique.critiqueId || critique.id || `${participantId || 'participant'}-critique-${index + 1}`, 96),
-    participantId: boundedText(critique.participantId || participantId, 96) || null,
-    targetClaimId: boundedText(critique.targetClaimId || critique.claimId, 96) || null,
+    critiqueId: safeModelVisibleId(critique.critiqueId || critique.id || `${participantId || 'participant'}-critique-${index + 1}`, 96, quarantineReasons),
+    participantId: safeModelVisibleId(critique.participantId || participantId, 96, quarantineReasons) || null,
+    targetClaimId: safeModelVisibleId(critique.targetClaimId || critique.claimId, 96, quarantineReasons) || null,
     verdict: ['agree', 'disagree', 'concern', 'uncertain'].includes(verdict) ? verdict : 'concern',
     summary: safeModelVisibleText(critique.summary || critique.text || critique.reason, 512, quarantineReasons),
     confidence: roundMetric(critique.confidence),
@@ -138,9 +142,9 @@ export function buildModelDebatePrompt({
   participant = {},
   claims = [],
 } = {}) {
-  const normalizedParticipant = normalizeParticipant(participant);
-  const taskId = boundedText(task.taskId || task.id, 96);
   const quarantineReasons = new Set();
+  const normalizedParticipant = normalizeParticipant(participant, 0, quarantineReasons);
+  const taskId = safeModelVisibleId(task.taskId || task.id, 96, quarantineReasons);
   const goal = safeModelVisibleText(task.goal || task.task || task.prompt, 1024, quarantineReasons);
   const constraints = Array.isArray(task.constraints)
     ? task.constraints.map((constraint) => safeModelVisibleText(constraint, 240, quarantineReasons)).filter(Boolean)
@@ -191,13 +195,17 @@ export function buildModelDebateEvidence({
   participants = [],
   outputs = [],
 } = {}) {
-  const normalizedParticipants = participants.map(normalizeParticipant);
+  const quarantineReasons = new Set();
+  const normalizedParticipants = participants.map((participant, index) => normalizeParticipant(
+    participant,
+    index,
+    quarantineReasons,
+  ));
   const normalizedClaims = [];
   const normalizedCritiques = [];
-  const quarantineReasons = new Set();
 
   for (const [outputIndex, output] of outputs.entries()) {
-    const participantId = boundedText(output?.participantId || normalizedParticipants[outputIndex]?.id, 96);
+    const participantId = safeModelVisibleId(output?.participantId || normalizedParticipants[outputIndex]?.id, 96, quarantineReasons);
     const outputClaims = Array.isArray(output?.claims) ? output.claims : [];
     const outputCritiques = Array.isArray(output?.critiques) ? output.critiques : [];
     outputClaims.forEach((claim, index) => {

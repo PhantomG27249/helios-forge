@@ -23,13 +23,18 @@ function roundMetric(value) {
   return Number(finiteNumber(value).toFixed(6));
 }
 
+function safeEvidenceId(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value).trim().slice(0, 128);
+}
+
 function sourceEvidenceIds(record = {}, targetOptimizer) {
   const ids = [
     record.evidenceId,
     record.runId,
     record.traceId,
     ...(Array.isArray(record.sourceEvidenceIds) ? record.sourceEvidenceIds : []),
-  ].filter(Boolean);
+  ].map(safeEvidenceId).filter(Boolean);
   return ids.length ? [...new Set(ids)] : [`${targetOptimizer}_evidence_unavailable`];
 }
 

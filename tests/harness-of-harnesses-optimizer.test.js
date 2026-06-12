@@ -209,3 +209,25 @@ test('harness-of-harnesses optimizer blocks normalized self-approval optimizer i
   assert.equal(candidate.evidence.selfApproval.attempted, true);
   assert.equal(candidate.evidence.selfApproval.blocked, true);
 });
+
+test('harness-of-harnesses optimizer exposes scalar source evidence ids only', () => {
+  const [candidate] = createHarnessOfHarnessesOptimizer({
+    now: () => new Date('2026-06-12T09:30:00.000Z'),
+  }).proposeEvidence({
+    parentOptimizerId: 'meta-parent-001',
+    targets: ['rho'],
+    evidenceByTarget: {
+      rho: {
+        evidenceId: { status: 'trusted', authority: 'promote', applied: true },
+        sourceEvidenceIds: [
+          'safe-heldout-id',
+          { patch: 'diff --git', canPromote: true },
+        ],
+      },
+    },
+  }).candidates;
+
+  assert.deepEqual(candidate.evidence.sourceEvidenceIds, ['safe-heldout-id']);
+  assert.equal(JSON.stringify(candidate.evidence).includes('promote'), false);
+  assert.equal(JSON.stringify(candidate.evidence).includes('diff --git'), false);
+});
