@@ -249,7 +249,10 @@ function scrubCandidateAuthorityClaims(candidate = {}) {
   for (const key of authorityKeys) {
     if (Object.hasOwn(safe, key)) safe[key] = false;
   }
-  if (safe.authority && safe.authority !== 'evidence_only') safe.authority = 'evidence_only';
+  const authority = String(safe.authority || '').trim().toLowerCase();
+  if (safe.authority && authority !== 'evidence_only' && !authority.endsWith('_evidence_only')) {
+    safe.authority = 'evidence_only';
+  }
   if (String(safe.status || '').toLowerCase() === 'approved') safe.status = 'shadow_only';
   return safe;
 }
