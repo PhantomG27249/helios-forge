@@ -26,19 +26,22 @@ function normalizeMetrics(report = {}) {
   };
 }
 
-function normalizeEntry({ replayReport = {}, now = () => new Date() }) {
-  const hardCases = asArray(replayReport.hardCases).map((hardCase) => quarantineModelVisiblePayload({
+function normalizeHardCases(hardCases = []) {
+  return asArray(hardCases).map((hardCase) => quarantineModelVisiblePayload({
     ...hardCase,
     visualEvidenceRequired: true,
     evidenceOnly: true,
     canPromote: false,
   }).value);
+}
+
+function normalizeEntry({ replayReport = {}, now = () => new Date() }) {
   return {
     suiteId: sanitizeCandidateId(replayReport.suiteId || 'visual-suite'),
     candidateId: sanitizeCandidateId(replayReport.candidateId || 'candidate'),
     recordedAt: replayReport.recordedAt || now().toISOString(),
     metrics: normalizeMetrics(replayReport),
-    hardCases,
+    hardCases: normalizeHardCases(replayReport.hardCases),
     visualEvidenceRequired: true,
     evidenceOnly: true,
     canPromote: false,
@@ -69,6 +72,7 @@ export function updateVisualFrontier({
       candidateId: sanitizeCandidateId(entry.candidateId),
       suiteId: sanitizeCandidateId(entry.suiteId || candidate.suiteId),
       metrics: normalizeMetrics(entry),
+      hardCases: normalizeHardCases(entry.hardCases),
       visualEvidenceRequired: true,
       evidenceOnly: true,
       canPromote: false,
@@ -93,12 +97,7 @@ export function summarizeVisualFrontier(frontier = []) {
     ...entry,
     candidateId: sanitizeCandidateId(entry.candidateId),
     metrics: normalizeMetrics(entry),
-    hardCases: asArray(entry.hardCases).map((hardCase) => quarantineModelVisiblePayload({
-      ...hardCase,
-      visualEvidenceRequired: true,
-      evidenceOnly: true,
-      canPromote: false,
-    }).value),
+    hardCases: normalizeHardCases(entry.hardCases),
     visualEvidenceRequired: true,
     evidenceOnly: true,
     canPromote: false,

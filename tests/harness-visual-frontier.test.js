@@ -58,6 +58,33 @@ test('visual frontier quarantines hard cases before dashboard summaries', () => 
   assert.equal(summary.frontier[0].hardCases[0].note, 'api_key=[redacted]');
 });
 
+test('visual frontier quarantines hard cases from existing frontier entries', () => {
+  const frontier = updateVisualFrontier({
+    frontier: [{
+      suiteId: 'visual-prod',
+      candidateId: 'candidate-existing',
+      metrics: { averageScore: 0.9, averageConfidence: 0.9, failedEvidenceCount: 0 },
+      hardCases: [{
+        caseId: 'existing-unsafe',
+        artifactPath: 'C:\\Users\\jackj\\secret.png',
+        note: 'api_key=sk-frontier-secret',
+      }],
+    }],
+    replayReport: {
+      suiteId: 'visual-prod',
+      candidateId: 'candidate-new',
+      summary: { averageScore: 0.3, averageConfidence: 0.3, failedEvidenceCount: 2 },
+      hardCases: [],
+    },
+  });
+  const visible = JSON.stringify(frontier);
+
+  assert.equal(visible.includes('C:\\Users'), false);
+  assert.equal(visible.includes('sk-frontier-secret'), false);
+  assert.equal(frontier[0].hardCases[0].artifactPath, '[redacted:path]');
+  assert.equal(frontier[0].hardCases[0].note, 'api_key=[redacted]');
+});
+
 test('visual frontier replaces dominated candidates and feeds policy evolution hard cases', () => {
   const first = updateVisualFrontier({
     frontier: [],
