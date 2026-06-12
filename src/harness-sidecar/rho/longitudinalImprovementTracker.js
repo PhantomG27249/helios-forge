@@ -37,6 +37,8 @@ function isRecord(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+const CLASSIFICATIONS = Object.freeze(['improvement', 'mixed', 'new', 'regression', 'unchanged']);
+
 function candidateIdFor(replayReport = {}, promotedCandidate = {}) {
   return stableString(
     promotedCandidate.candidateId ??
@@ -154,8 +156,11 @@ function domainDrift(current = {}, previous = null) {
     ...Object.keys(current.domainScores ?? {}),
   ])].sort();
   return Object.fromEntries(domains.map((domain) => {
-    const previousScore = roundMetric(previous.domainScores?.[domain]);
-    const currentScore = roundMetric(current.domainScores?.[domain]);
+    const rawPrevious = previous.domainScores?.[domain];
+    const rawCurrent = current.domainScores?.[domain];
+    if (!Number.isFinite(Number(rawPrevious)) || !Number.isFinite(Number(rawCurrent))) return null;
+    const previousScore = roundMetric(rawPrevious);
+    const currentScore = roundMetric(rawCurrent);
     const delta = roundMetric(currentScore - previousScore);
     let classification = 'unchanged';
     if (delta > 0) classification = 'improvement';
@@ -166,7 +171,7 @@ function domainDrift(current = {}, previous = null) {
       delta,
       classification,
     }];
-  }));
+  }).filter(Boolean));
 }
 
 function hasAuthorityShapedFields(entry = {}) {
@@ -185,7 +190,7 @@ function normalizeDomainDriftEntry(entry = {}) {
   const previous = roundMetric(entry.previous);
   const current = roundMetric(entry.current);
   const delta = entry.delta === undefined ? roundMetric(current - previous) : roundMetric(entry.delta);
-  const classification = ['improvement', 'mixed', 'new', 'regression', 'unchanged'].includes(entry.classification)
+  const classification = CLASSIFICATIONS.includes(entry.classification)
     ? entry.classification
     : (delta > 0 ? 'improvement' : delta < 0 ? 'regression' : 'unchanged');
   const normalized = {
@@ -220,6 +225,11 @@ function classifyRecord({ aggregateDelta, regressions = [], drift = {} } = {}) {
   if (aggregateDelta === null) return hasImprovement ? 'improvement' : 'new';
   if (hasImprovement) return 'improvement';
   return 'unchanged';
+}
+
+function normalizeClassification(classification, evidence) {
+  if (CLASSIFICATIONS.includes(classification)) return classification;
+  return classifyRecord(evidence);
 }
 
 function normalizeRegression(regression = {}, suiteId) {
@@ -268,37 +278,46 @@ function followUpFor(promotedCandidate = {}) {
 }
 
 function normalizeHistory(history = []) {
-  return asArray(history).map((entry, index) => ({
-    schemaVersion: 1,
-    recordedAt: stableString(entry.recordedAt, new Date(0).toISOString()),
-    reportId: stableString(entry.reportId, `rho_report_${index + 1}`),
-    suiteId: stableString(entry.suiteId, 'unknown_suite'),
-    candidateId: stableString(entry.candidateId, 'unknown_candidate'),
-    aggregateScore: roundMetric(entry.aggregateScore),
-    aggregateDelta: entry.aggregateDelta === null ? null : roundMetric(entry.aggregateDelta),
-    previousReportId: entry.previousReportId ?? null,
-    classification: stableString(entry.classification, 'new'),
-    domainScores: normalizeDomainScores(entry.domainScores),
-    domainDrift: normalizeDomainDrift(entry.domainDrift),
-    oldSuite: entry.oldSuite === true,
-    oldSuiteRegressions: asArray(entry.oldSuiteRegressions)
+  return asArray(history).filter(isRecord).map((entry, index) => {
+    const aggregateDelta = entry.aggregateDelta === null ? null : roundMetric(entry.aggregateDelta);
+    const normalizedDomainDrift = normalizeDomainDrift(entry.domainDrift);
+    const oldSuiteRegressions = asArray(entry.oldSuiteRegressions)
       .map((regression) => normalizeRegression(regression, entry.suiteId))
-      .filter(Boolean),
-    followUp: {
-      required: entry.followUp?.required === true,
-      candidateId: entry.followUp?.candidateId ?? null,
-      promotedAt: entry.followUp?.promotedAt ?? null,
-      suites: asArray(entry.followUp?.suites).map((suite) => stableString(suite)).filter(Boolean),
-      reason: entry.followUp?.reason ?? null,
+      .filter(Boolean);
+    return {
+      schemaVersion: 1,
+      recordedAt: stableString(entry.recordedAt, new Date(0).toISOString()),
+      reportId: stableString(entry.reportId, `rho_report_${index + 1}`),
+      suiteId: stableString(entry.suiteId, 'unknown_suite'),
+      candidateId: stableString(entry.candidateId, 'unknown_candidate'),
+      aggregateScore: roundMetric(entry.aggregateScore),
+      aggregateDelta,
+      previousReportId: entry.previousReportId ?? null,
+      classification: normalizeClassification(entry.classification, {
+        aggregateDelta,
+        regressions: oldSuiteRegressions,
+        drift: normalizedDomainDrift,
+      }),
+      domainScores: normalizeDomainScores(entry.domainScores),
+      domainDrift: normalizedDomainDrift,
+      oldSuite: entry.oldSuite === true,
+      oldSuiteRegressions,
+      followUp: {
+        required: entry.followUp?.required === true,
+        candidateId: entry.followUp?.candidateId ?? null,
+        promotedAt: entry.followUp?.promotedAt ?? null,
+        suites: asArray(entry.followUp?.suites).map((suite) => stableString(suite)).filter(Boolean),
+        reason: entry.followUp?.reason ?? null,
+        authority: 'evidence_only',
+        canPromote: false,
+      },
+      budget: normalizeBudget(entry.budget),
       authority: 'evidence_only',
+      evidenceOnly: true,
       canPromote: false,
-    },
-    budget: normalizeBudget(entry.budget),
-    authority: 'evidence_only',
-    evidenceOnly: true,
-    canPromote: false,
-    promotionAllowed: false,
-  }));
+      promotionAllowed: false,
+    };
+  });
 }
 
 export function updateRhoImprovementHistory({

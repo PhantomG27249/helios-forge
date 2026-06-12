@@ -174,6 +174,43 @@ test('captures domain-specific drift between longitudinal RHO reports', () => {
   assert.equal(second[1].domainDrift.visual.current, 0.55);
 });
 
+test('does not infer positive drift from missing historical domain scores', () => {
+  const first = updateRhoImprovementHistory({
+    replayReport: {
+      reportId: 'rho-missing-domain-001',
+      suiteId: 'missing-domain-suite',
+      candidateIds: ['candidate-missing-domain'],
+      aggregateScore: 0.9,
+      domainScores: null,
+      budget: { casesRun: 1 },
+    },
+    now: '2026-06-12T00:00:00.000Z',
+  });
+
+  const second = updateRhoImprovementHistory({
+    history: first,
+    replayReport: {
+      reportId: 'rho-missing-domain-002',
+      suiteId: 'missing-domain-suite',
+      candidateIds: ['candidate-missing-domain'],
+      aggregateScore: 0.8,
+      domainScores: { code: 0.8 },
+      regressions: [
+        { caseId: 'missing-domain-case', domain: 'code', baselineScore: 0.9, candidateScore: 0.8, delta: -0.1 },
+      ],
+      budget: { casesRun: 1 },
+    },
+    now: '2026-06-13T00:00:00.000Z',
+  });
+
+  assert.deepEqual(second[1].domainDrift, {});
+  assert.equal(second[1].classification, 'regression');
+
+  const summary = summarizeRhoImprovementTrends(second);
+  assert.equal(summary.classificationCounts.regression, 1);
+  assert.equal(summary.classificationCounts.mixed, 0);
+});
+
 test('normalizes budget accounting for longitudinal RHO reports', () => {
   const history = updateRhoImprovementHistory({
     replayReport: {
@@ -437,6 +474,39 @@ test('normalizes nullable persisted fields as empty evidence', () => {
   assert.equal(summary.dashboardRows[0].oldSuiteRegressionCount, 0);
   assert.equal(summary.dashboardRows[0].canPromote, false);
   assert.equal(summary.dashboardRows[0].authority, 'evidence_only');
+});
+
+test('canonicalizes persisted classification before dashboard exposure', () => {
+  const summary = summarizeRhoImprovementTrends([
+    {
+      recordedAt: '2026-06-12T00:00:00.000Z',
+      reportId: 'rho-unsafe-classification',
+      suiteId: 'classification-suite',
+      candidateId: 'candidate-classification',
+      aggregateScore: 0.5,
+      aggregateDelta: null,
+      classification: 'trusted_apply',
+      domainScores: { code: 0.5 },
+    },
+  ]);
+
+  assert.equal(summary.dashboardRows[0].classification, 'new');
+  assert.equal(summary.classificationCounts.new, 1);
+  assert.equal(Object.hasOwn(summary.classificationCounts, 'trusted_apply'), false);
+});
+
+test('skips null persisted history tombstones', () => {
+  const summary = summarizeRhoImprovementTrends([null]);
+
+  assert.equal(summary.recordCount, 0);
+  assert.deepEqual(summary.dashboardRows, []);
+  assert.deepEqual(summary.classificationCounts, {
+    improvement: 0,
+    mixed: 0,
+    new: 0,
+    regression: 0,
+    unchanged: 0,
+  });
 });
 
 test('summarizes dashboard-ready RHO trend rows', () => {
