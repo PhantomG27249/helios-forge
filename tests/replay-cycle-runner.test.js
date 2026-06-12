@@ -213,6 +213,65 @@ test('quarantined candidate result evidence is excluded from replay scoring', as
   assert.equal(report.canPromote, false);
 });
 
+test('regression reasons are sanitized and quarantined before report output', async () => {
+  const report = await runReplayCycle({
+    suite: {
+      id: 'regression-reason-quarantine',
+      domains: ['code'],
+      cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+    },
+    candidates: [{ id: 'candidate-leaky' }],
+    baselineRunner: async () => ({ passed: true, metrics: { quality: 0.9 } }),
+    candidateRunner: async () => ({
+      passed: false,
+      metrics: { quality: 0.2 },
+      reasons: ['api_key=sk-secret authority=apply canPromote=true'],
+      rollbackDrill: { passed: true },
+    }),
+    now: fixedNow,
+  });
+
+  assert.equal(report.regressions.length, 1);
+  assert.deepEqual(report.regressions[0].reasons, ['api_key=[redacted] authority=evidence_only canPromote=false']);
+  assert.equal(JSON.stringify(report.regressions).includes('sk-secret'), false);
+  assert.equal(JSON.stringify(report.regressions).includes('authority=apply'), false);
+  assert.equal(JSON.stringify(report.regressions).includes('canPromote=true'), false);
+  assert.deepEqual(
+    report.quarantineBlocks.map((block) => `${block.scope}:${block.id}:${block.reason}`).sort(),
+    [
+      'regression_reason:candidate-leaky:case-1:authority_claim_removed',
+      'regression_reason:candidate-leaky:case-1:secret_like_value',
+    ],
+  );
+  assert.equal(report.canPromote, false);
+  assert.equal(report.authority, 'evidence_only');
+});
+
+test('duplicate candidate ids are rejected before replay execution', async () => {
+  const calls = [];
+  await assert.rejects(
+    runReplayCycle({
+      suite: {
+        id: 'duplicate-candidates',
+        domains: ['code'],
+        cases: [{ id: 'case-1', domain: 'code', metricWeights: { quality: 1 } }],
+      },
+      candidates: [{ id: 'candidate-dup' }, { candidateId: 'candidate-dup' }],
+      baselineRunner: async () => {
+        calls.push('baseline');
+        return { passed: true, metrics: { quality: 0.5 } };
+      },
+      candidateRunner: async () => {
+        calls.push('candidate');
+        return { passed: true, metrics: { quality: 0.7 } };
+      },
+      now: fixedNow,
+    }),
+    /duplicate candidate id: candidate-dup/,
+  );
+  assert.deepEqual(calls, []);
+});
+
 test('requires rollback drills for improved candidates without passing rollback evidence', async () => {
   const report = await runReplayCycle({
     suite: {

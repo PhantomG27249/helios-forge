@@ -1,5 +1,8 @@
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
+const AUTHORITY_ASSIGNMENT_PATTERN = /\bauthority\s*[:=]\s*(?!evidence_only\b|advisory\b|none\b)[^\s,;'"<>]+/gi;
+const CAN_PROMOTE_TRUE_PATTERN = /\bcanPromote\s*[:=]\s*true\b/gi;
+
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -72,6 +75,51 @@ function addQuarantineBlocks(blocks, { scope, id, quarantine }) {
     });
   }
   return true;
+}
+
+function stringifyReason(reason) {
+  if (typeof reason === 'string') return reason;
+  try {
+    return JSON.stringify(reason);
+  } catch {
+    return String(reason);
+  }
+}
+
+function sanitizeRegressionReason(reason) {
+  const quarantined = quarantineModelVisiblePayload({ reason: stringifyReason(reason) }, { maxStringLength: 600 });
+  const quarantineReasons = new Set(quarantined.reasons);
+  let sanitized = String(quarantined.value?.reason ?? '');
+
+  sanitized = sanitized.replace(AUTHORITY_ASSIGNMENT_PATTERN, (match) => {
+    quarantineReasons.add('authority_claim_removed');
+    const separator = match.includes(':') ? ':' : '=';
+    return `authority${separator}evidence_only`;
+  });
+  sanitized = sanitized.replace(CAN_PROMOTE_TRUE_PATTERN, (match) => {
+    quarantineReasons.add('authority_claim_removed');
+    const separator = match.includes(':') ? ':' : '=';
+    return `canPromote${separator}false`;
+  });
+
+  return {
+    reason: sanitized || 'regression_reason_quarantined',
+    quarantineReasons: [...quarantineReasons].sort(),
+  };
+}
+
+function sanitizeRegressionReasons(reasons, { quarantineBlocks, candidateId: id, caseId }) {
+  return asArray(reasons).map((reason) => {
+    const sanitized = sanitizeRegressionReason(reason);
+    if (sanitized.quarantineReasons.length > 0) {
+      addQuarantineBlocks(quarantineBlocks, {
+        scope: 'regression_reason',
+        id: `${id}:${caseId}`,
+        quarantine: { quarantined: true, reasons: sanitized.quarantineReasons },
+      });
+    }
+    return sanitized.reason;
+  });
 }
 
 function metricWeightsFor(replayCase = {}, suite = {}, metrics = {}) {
@@ -164,6 +212,14 @@ function buildReportId({ suiteId, candidateIds, now }) {
   return `replay-cycle-${reportIdPart(suiteId, 'suite')}-${candidatePart}-${safeTimestamp}`;
 }
 
+function assertUniqueCandidateIds(normalizedCandidates) {
+  const seen = new Set();
+  for (const { id } of normalizedCandidates) {
+    if (seen.has(id)) throw new Error(`duplicate candidate id: ${id}`);
+    seen.add(id);
+  }
+}
+
 export async function runReplayCycle({
   suite,
   candidates = [],
@@ -184,6 +240,7 @@ export async function runReplayCycle({
       index,
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  assertUniqueCandidateIds(normalizedCandidates);
   if (normalizedCandidates.length > 0 && typeof candidateRunner !== 'function') {
     throw new Error('candidateRunner is required when candidates are provided');
   }
@@ -291,8 +348,10 @@ export async function runReplayCycle({
           domain,
           baselineScore,
           candidateScore: score,
-          reasons: asArray(result.reasons ?? result.failures ?? (result.passed === false ? 'candidate_failed' : 'score_regression'))
-            .map((reason) => String(reason)),
+          reasons: sanitizeRegressionReasons(
+            result.reasons ?? result.failures ?? (result.passed === false ? 'candidate_failed' : 'score_regression'),
+            { quarantineBlocks, candidateId: id, caseId },
+          ),
         });
       }
 
