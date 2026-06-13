@@ -1,5 +1,6 @@
 import { normalizeEvolutionLevelRefs } from '../souls/evolutionLevels.js';
 import { normalizeSoulRefList } from '../souls/soulEvidence.js';
+import { sanitizeIcrEvidenceForDashboard } from '../icr/icrEvidence.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -115,6 +116,21 @@ export function sanitizeModelRouterEvidence(modelRouter) {
   return sanitized;
 }
 
+function sanitizeIcrLaneEvidence(icrEvidence) {
+  if (!icrEvidence || typeof icrEvidence !== 'object') return null;
+  const sanitized = sanitizeIcrEvidenceForDashboard(icrEvidence);
+  return {
+    branchCount: sanitized.branchCount,
+    iterationCount: sanitized.iterationCount,
+    solutionPoolCount: sanitized.solutionPoolCount,
+    pqfKeptCount: sanitized.pqfKeptCount,
+    pqfReplacedCount: sanitized.pqfReplacedCount,
+    finalCandidateId: sanitized.finalCandidateId,
+    evidenceOnly: sanitized.evidenceOnly !== false,
+    promotionAllowed: sanitized.promotionAllowed === true,
+  };
+}
+
 export function normalizeLaneEvidence({
   domain,
   rho,
@@ -130,6 +146,7 @@ export function normalizeLaneEvidence({
   memoryGraph,
   externalPolicyEvidence,
   modelRouter,
+  icrEvidence,
   soulRefs,
   evolutionLevelRefs,
   extraSources = [],
@@ -152,9 +169,11 @@ export function normalizeLaneEvidence({
   if (isPresent(memoryGraph)) sources.add('memory_graph');
   if (isPresent(externalPolicyEvidence)) sources.add('external_policy_evidence');
   if (isPresent(modelRouter)) sources.add('model_router');
+  if (isPresent(icrEvidence)) sources.add('icr_evidence');
   if (normalizedSoulRefs.length > 0) sources.add('soul_refs');
   if (normalizedEvolutionLevelRefs.length > 0) sources.add('evolution_level_refs');
   const sanitizedModelRouter = sanitizeModelRouterEvidence(modelRouter);
+  const sanitizedIcrEvidence = sanitizeIcrLaneEvidence(icrEvidence);
 
   const normalizedSources = [...sources].sort((left, right) => left.localeCompare(right));
   const evidenceOnlySources = new Set(['evolution_level_refs', 'soul_refs']);
@@ -177,6 +196,7 @@ export function normalizeLaneEvidence({
       modelRouterDecisionIds: sanitizedModelRouter?.decisionIds || [],
       modelRouterRewardUpdateIds: sanitizedModelRouter?.rewardUpdateIds || [],
       modelRouterPassKEvalRefs: sanitizedModelRouter?.passKEvalRefs || [],
+      ...(sanitizedIcrEvidence ? { icr: sanitizedIcrEvidence } : {}),
       soulRefCount: normalizedSoulRefs.length,
       evolutionLevelRefCount: normalizedEvolutionLevelRefs.length,
     },

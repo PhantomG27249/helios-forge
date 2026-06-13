@@ -77,6 +77,18 @@ const LANE_CONTRACTS = Object.freeze({
     verifierUnit: 'harness_experiment_eval',
     artifacts: Object.freeze(['routing_policy', 'coordination_policy', 'frontier_record']),
   }),
+  icr: Object.freeze({
+    lane: 'icr',
+    candidateUnit: 'test_time_compute_policy',
+    verifierUnit: 'icr_eval',
+    artifacts: Object.freeze([
+      'branch_trace',
+      'hypothesis_packet',
+      'solution_pool',
+      'pqf_record',
+      'blind_judgment',
+    ]),
+  }),
 });
 
 const CHAMPION_EVIDENCE_HOOKS = Object.freeze(['champion_archive', 'frontier']);
@@ -94,6 +106,7 @@ const LANE_FUSION_KIND = Object.freeze({
   visual: 'artifact_verdict_fusion',
   mcp_trust: 'capability_trust_fusion',
   harness: 'experiment_frontier_fusion',
+  icr: 'icr_branch_fusion',
 });
 
 function buildFusionMetadata(contract) {

@@ -273,6 +273,25 @@ export function decideGovernanceAction({
 } = {}) {
   const autonomy = normalizeAutonomyLevel(autonomyLevel);
   if (override?.approvedBy) {
+    const boundary = trust.boundary || trust.trustKernel || trust.trustKernelBoundary || null;
+    if (boundary?.allowed === false) {
+      const reasons = [`trust_kernel_blocked:${boundary.reason || 'boundary_rejected'}`];
+      return {
+        decision: 'escalated',
+        autonomy,
+        evidenceOnly: true,
+        canPromote: false,
+        reasons,
+        auditEvent: auditEvent({
+          type: 'governance.override',
+          actor,
+          candidate,
+          reasons,
+          decision: 'escalated',
+          override,
+        }),
+      };
+    }
     const reasons = [override.reason || 'operator_override'];
     return {
       decision: 'override_approved',

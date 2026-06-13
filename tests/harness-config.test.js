@@ -51,6 +51,8 @@ test('config loader returns safe defaults when no config file exists', async () 
     assert.equal(config.modelRouter.rewardWeights.cost, 0.05);
     assert.equal(config.modelRouter.persistence.enabled, false);
     assert.equal(config.modelRouter.persistence.path, '.harness/model-router-state.json');
+    assert.equal(config.icr.enabled, false);
+    assert.equal(config.icr.mode, 'evidence_only');
   });
 });
 
@@ -83,6 +85,9 @@ test('config loader reads harness yaml overrides', async () => {
         '  mode: enabled',
         '  maxActionsPerTask: 3',
         '  allowProfileSwitching: false',
+        'icr:',
+        '  enabled: true',
+        '  mode: shadow',
         '',
       ].join('\n'),
       'utf8',
@@ -103,5 +108,7 @@ test('config loader reads harness yaml overrides', async () => {
     assert.equal(config.adaptiveSearch.mode, 'enabled');
     assert.equal(config.adaptiveSearch.maxActionsPerTask, 3);
     assert.equal(config.adaptiveSearch.allowProfileSwitching, false);
+    assert.equal(config.icr.enabled, true);
+    assert.equal(config.icr.mode, 'shadow');
   });
 });

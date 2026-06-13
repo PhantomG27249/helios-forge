@@ -4,6 +4,8 @@ const VISUAL_HARD_CASE_REASONS = new Set([
   'vlm_missed_artifact',
   'ocr_failure',
   'screenshot_diff_failure',
+  'visual_evidence_failed',
+  'prompt_injection_quarantined',
 ]);
 
 import { runBesLaneRuntime } from '../bes/laneRuntime.js';
@@ -95,6 +97,9 @@ export function proposeVisualPolicies({
     },
     vlmRouting: buildVlmRouting({ hardCases, baselinePolicy }),
     status: 'shadow_only',
+    visualEvidenceRequired: true,
+    evidenceOnly: true,
+    canPromote: false,
     sourceCaseIds: hardCases.map((traceCase, index) => traceCase.caseId || traceCase.traceId || `case_${index + 1}`),
     hardCaseReasons: unique(hardCases.map((traceCase) => traceCase.reason)),
   }].slice(0, maxCandidates);

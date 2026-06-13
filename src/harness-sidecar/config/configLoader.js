@@ -62,6 +62,10 @@ export const DEFAULT_HARNESS_CONFIG = {
     maxActionsPerTask: 8,
     allowProfileSwitching: true,
   },
+  icr: {
+    enabled: false,
+    mode: 'evidence_only',
+  },
 };
 
 function parseScalar(value) {

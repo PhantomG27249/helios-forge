@@ -11,6 +11,11 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function boundedString(value, limit = 160) {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value).trim().slice(0, limit);
+}
+
 function p95(values) {
   if (!values.length) return null;
   const sorted = [...values].sort((left, right) => left - right);
@@ -28,6 +33,26 @@ function stripOpenAIPath(baseUrl) {
   url.search = '';
   url.hash = '';
   return url.toString().replace(/\/+$/, '');
+}
+
+export function normalizeVllmHealthSnapshot(snapshot = {}) {
+  const healthy = typeof snapshot?.healthy === 'boolean' ? snapshot.healthy : undefined;
+  const concurrency = finiteNumber(snapshot?.concurrency, null);
+  const p95LatencyMs = finiteNumber(snapshot?.p95LatencyMs, null);
+  const failureCount = finiteNumber(snapshot?.failureCount, null);
+  const sampleCount = finiteNumber(snapshot?.sampleCount, null);
+  const normalized = {
+    healthy,
+    reason: boundedString(snapshot?.reason || (healthy === false ? 'health_probe_failed' : ''), 96) || undefined,
+    concurrency: concurrency !== null ? Math.max(1, Math.floor(concurrency)) : undefined,
+    p95LatencyMs: p95LatencyMs !== null ? Math.max(0, p95LatencyMs) : undefined,
+    failureCount: failureCount !== null ? Math.max(0, Math.floor(failureCount)) : undefined,
+    sampleCount: sampleCount !== null ? Math.max(0, Math.floor(sampleCount)) : undefined,
+    checkedAt: boundedString(snapshot?.checkedAt, 64) || undefined,
+  };
+  return Object.fromEntries(
+    Object.entries(normalized).filter(([, value]) => value !== undefined),
+  );
 }
 
 export function buildVllmHealthUrls(baseUrl) {
