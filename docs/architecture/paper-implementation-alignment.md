@@ -1,5 +1,9 @@
 # Paper Implementation Alignment
 
+Current-state note, 2026-06-12:
+
+This document remains useful for paper-by-paper background, but the freshest implementation status is now the code-audited report at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md` and the paper-grounded report at `docs/architecture/2026-06-12-paper-grounded-current-state-report.md`. Treat the older sections below as historical context where they conflict with the 2026-06-12 code audit. The current audited framing is: Helios has a Level 4-capable engine substrate, while the Level 4 evaluation record remains production-gated and unpopulated by repeated held-out evidence.
+
 This note compares the current Helios Forge implementation against four papers that shaped the architecture:
 
 - MemGraphRAG: Memory-based Multi-Agent System for Graph Retrieval-Augmented Generation, `https://arxiv.org/pdf/2606.00610`

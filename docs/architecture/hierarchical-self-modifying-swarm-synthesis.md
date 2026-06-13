@@ -1,5 +1,9 @@
 # Hierarchical Self-Modifying Swarm Synthesis
 
+Current-state note, 2026-06-12:
+
+This document is the architectural synthesis and target shape. For current implementation status, use the code-audited report at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md`. Current audited framing: the recursive engine substrate is implemented across SwarmCell/local meta/global meta/RHO/BES/memory/A2A/VLM/trust surfaces, but repeated production evaluation evidence is still required before calling the system Level 4-ready or proven Level 4.
+
 This document merges the Helios Forge architecture discussion with the remaining implementation gaps from the papers that inspired the system.
 
 Reference papers:

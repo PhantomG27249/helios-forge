@@ -1,5 +1,9 @@
 # Evolutionary Agentic Organism Gap Map
 
+Current-state note, 2026-06-12:
+
+The freshest implementation status is the code-audited report at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md`. This gap map is still useful for the target architecture, but older maturity language should be read through the 2026-06-12 audit. Current audited framing: the Level 4-capable engine substrate is broadly implemented; the Level 4 evaluation record remains production-gated until repeated held-out cycles populate replay reports, dashboard snapshots, frontier trends, dense judgment reports, external peer evidence, and rollback/autonomy history.
+
 This document is the single later-reference map for turning Helios Forge from a broad paper-inspired agent harness into a cohesive evolutionary agentic organism: a swarm of swarms, harnesses of harnesses, shared Memory Graph RAG, A2A-linked evidence flow, multimodal perception, and guarded self-improvement over time.
 
 The target is not an unrestricted autonomous system. The target is a self-evolving, non-self-authorizing system:
@@ -23,8 +27,8 @@ Approximate level:
 
 | Stage | Current Read |
 | --- | --- |
-| Current implementation | Level 3.9: self-improving swarm harness with unified evolution envelopes, deterministic recursive meta-harness capability spine, and improvement governance |
-| After scale/continuity hardening | Level 4-ready candidate: production-gated network-of-networks harness with persisted dashboard evidence |
+| Current implementation | Level 4-capable engine substrate: self-improving swarm harness with unified evolution envelopes, deterministic recursive meta-harness capability spine, dashboard/evidence surfaces, and improvement governance |
+| After scale/continuity hardening | Level 4-ready candidate: production-gated network-of-networks harness with repeated held-out evidence and populated dashboard/frontier records |
 | Target architecture | Level 4: network-of-networks harness |
 | Paper-grade autonomous research system | Level 5: long-running governed research organism |
 
