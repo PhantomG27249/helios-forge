@@ -124,6 +124,10 @@ export const DEFAULT_HARNESS_CONFIG = {
       authority: 'evidence_only',
     },
   },
+  icr: {
+    enabled: false,
+    mode: 'evidence_only',
+  },
 };
 
 function parseScalar(value) {

@@ -1,3 +1,5 @@
+import { sanitizeIcrEvidenceForDashboard } from '../icr/icrEvidence.js';
+
 export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
   {
     goalId: 'benchmark_spine',
@@ -25,6 +27,19 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     productionGate: 'modelBackedRhoEmbeddings',
     productionEvidenceRequired: ['production_grouped_reroll_report', 'longitudinal_improvement_trend'],
     paperGradeAutonomyGaps: ['production_grouped_rerolls', 'model_backed_embedding_scale'],
+  },
+  {
+    goalId: 'icr_test_time_compute',
+    label: 'ICR test-time compute evidence',
+    requiredEvidence: [
+      'icr_branch_trace_evidence',
+      'icr_blind_judge_evidence',
+      'icr_bes_lane_evidence',
+      'icr_cost_gate',
+      'icr_production_replay',
+      'icr_rho_uplift_report',
+      'icr_dashboard_snapshot',
+    ],
   },
   {
     goalId: 'memgraphrag_depth',
@@ -131,6 +146,8 @@ function normalizeSignal(signal = {}) {
     blockers: normalizeEvidence(signal.blockers || signal.blockedReasons),
     notes: asArray(signal.notes).filter(Boolean),
     updatedAt: signal.updatedAt || null,
+    level4ReadyCandidate: signal.level4ReadyCandidate === true,
+    persistedProductionEvidence: signal.persistedProductionEvidence === true,
   };
 }
 
@@ -144,15 +161,187 @@ function classifyGoal(definition, signal) {
   return 'missing';
 }
 
+function mergeSignals(signals = []) {
+  const signalByGoal = new Map();
+  for (const signal of asArray(signals)) {
+    const normalized = normalizeSignal(signal);
+    if (!normalized.goalId) continue;
+    const previous = signalByGoal.get(normalized.goalId);
+    signalByGoal.set(normalized.goalId, previous ? {
+      goalId: normalized.goalId,
+      evidence: normalizeEvidence([...previous.evidence, ...normalized.evidence]),
+      productionEvidence: normalizeEvidence([...previous.productionEvidence, ...normalized.productionEvidence]),
+      blockers: normalizeEvidence([...previous.blockers, ...normalized.blockers]),
+      notes: [...previous.notes, ...normalized.notes],
+      updatedAt: normalized.updatedAt || previous.updatedAt,
+      level4ReadyCandidate: previous.level4ReadyCandidate || normalized.level4ReadyCandidate,
+      persistedProductionEvidence: previous.persistedProductionEvidence || normalized.persistedProductionEvidence,
+    } : normalized);
+  }
+  return signalByGoal;
+}
+
+function hasBranchTraceEvidence(record = {}, dashboardRow = {}) {
+  if (dashboardRow.branchCount > 0 || dashboardRow.branchIds?.length > 0) return true;
+  return asArray(record.branches ?? record.branchTraces ?? record.traces)
+    .some((branch) => branch?.kind === 'icr_branch_trace' || branch?.branchId || branch?.id);
+}
+
+function hasBlindJudgeEvidence(record = {}, dashboardRow = {}) {
+  const packet = record.finalJudgePacket ?? record.blindJudgePacket ?? record.final_judge_packet;
+  if (packet?.kind === 'icr_blind_final_judge_packet' && asArray(packet.candidates).length > 0) return true;
+  if (asArray(packet?.candidates).length > 0) return true;
+  return Boolean(dashboardRow.finalCandidateId);
+}
+
+function hasBesLaneEvidence(record = {}) {
+  return Boolean(record.besLaneEvidence
+    || record.besLaneResult
+    || record.besFusionEvidence
+    || record.artifacts?.besLaneEvidence
+    || asArray(record.artifacts).some((artifact) => artifact?.type === 'bes_lane_evidence' || artifact?.lane === 'icr'));
+}
+
+const REQUIRED_ICR_RHO_METRICS = Object.freeze([
+  'repeated_sampling_baseline',
+  'static_council_baseline',
+  'icr_branch_family',
+  'icr_bes_lane_fusion',
+]);
+
+function hasCompleteIcrRhoUpliftMetrics(report = {}) {
+  const metrics = report.upliftMetrics ?? report.metricsByLabel ?? {};
+  if (!REQUIRED_ICR_RHO_METRICS.every((label) => metrics[label])) return false;
+  return ['icr_branch_family', 'icr_bes_lane_fusion'].every((label) => {
+    const entry = metrics[label];
+    return entry?.beatsBestSingle === true
+      && Number(entry.scoreDelta ?? 0) > 0
+      && asArray(entry.cheaperBaselineLosses).length === 0;
+  });
+}
+
+function hasRhoUpliftReport(record = {}) {
+  const report = record.rhoUpliftReport
+    || record.rhoReplayComparison
+    || record.rhoReplayReport
+    || record.upliftReport
+    || record.artifacts?.rhoUpliftReport
+    || asArray(record.artifacts).find((artifact) => artifact?.type === 'rho_uplift_report');
+  if (!report || typeof report !== 'object') return false;
+  const regressions = asArray(report.regressions);
+  if (regressions.length > 0) return false;
+  return hasCompleteIcrRhoUpliftMetrics(report);
+}
+
+function hasRhoRegression(record = {}) {
+  const report = record.rhoUpliftReport
+    || record.rhoReplayComparison
+    || record.rhoReplayReport
+    || record.upliftReport
+    || record.artifacts?.rhoUpliftReport
+    || asArray(record.artifacts).find((artifact) => artifact?.type === 'rho_uplift_report');
+  if (!report || typeof report !== 'object') return false;
+  if (asArray(report.regressions).length > 0) return true;
+  if (report.upliftOverBaselines === false || report.heldoutUpliftProven === false) return true;
+  const metrics = [report.upliftMetrics?.icr_branch_family, report.upliftMetrics?.icr_bes_lane_fusion]
+    .filter(Boolean);
+  return metrics.some((entry) => (
+    entry.beatsBestSingle === false
+      || asArray(entry.cheaperBaselineLosses).length > 0
+      || Number(entry.scoreDelta ?? 0) < 0
+  ));
+}
+
+function hasProductionReplayEvidence(record = {}) {
+  const productionReplay = record.productionReplay
+    ?? record.productionReplayEvidence
+    ?? record.persistedProductionEvidence
+    ?? record.artifacts?.productionReplay;
+  if (productionReplay === true) return true;
+  if (productionReplay && typeof productionReplay === 'object') {
+    return productionReplay.persisted === true || productionReplay.persistedProductionEvidence === true;
+  }
+  return asArray(record.artifacts).some((artifact) => (
+    artifact?.type === 'production_replay'
+      && (artifact.persisted === true || artifact.persistedProductionEvidence === true)
+  ));
+}
+
+function deriveIcrCapabilitySignal(records = [], config = {}) {
+  const dashboardRows = asArray(records)
+    .filter((record) => record && typeof record === 'object')
+    .map((record) => sanitizeIcrEvidenceForDashboard(record, config));
+
+  if (dashboardRows.length === 0) {
+    return { signal: null, dashboardRows };
+  }
+
+  const evidence = new Set(['icr_dashboard_snapshot']);
+  const blockers = new Set();
+  let productionReady = false;
+
+  for (const [index, record] of asArray(records).entries()) {
+    if (!record || typeof record !== 'object') continue;
+    const dashboardRow = dashboardRows[index] || {};
+
+    if (hasBranchTraceEvidence(record, dashboardRow)) {
+      evidence.add('icr_branch_trace_evidence');
+    } else {
+      blockers.add('missing_icr_branch_trace_evidence');
+    }
+
+    if (hasBlindJudgeEvidence(record, dashboardRow)) {
+      evidence.add('icr_blind_judge_evidence');
+    } else {
+      blockers.add('missing_icr_blind_judge_evidence');
+    }
+
+    if (hasBesLaneEvidence(record)) evidence.add('icr_bes_lane_evidence');
+
+    if (hasRhoUpliftReport(record)) {
+      evidence.add('icr_rho_uplift_report');
+    } else {
+      blockers.add('missing_icr_rho_uplift_report');
+      if (hasRhoRegression(record)) blockers.add('icr_rho_regression_detected');
+    }
+
+    if (dashboardRow.costGateStatus === 'within_limit') {
+      evidence.add('icr_cost_gate');
+    } else {
+      blockers.add('icr_cost_gate_unproven');
+    }
+
+    if (dashboardRow.contextOverflowRisk === true) blockers.add('icr_context_overflow_risk');
+
+    if (hasProductionReplayEvidence(record)) {
+      evidence.add('icr_production_replay');
+      productionReady = true;
+    } else {
+      blockers.add('icr_production_replay_missing');
+    }
+  }
+
+  return {
+    dashboardRows,
+    signal: {
+      goalId: 'icr_test_time_compute',
+      evidence: [...evidence],
+      blockers: [...blockers],
+      level4ReadyCandidate: productionReady && blockers.size === 0,
+      persistedProductionEvidence: productionReady,
+    },
+  };
+}
+
 export function summarizeCapabilityGoalStatus({
   definitions = CAPABILITY_GOAL_DEFINITIONS,
   signals = [],
+  icrEvidence = [],
+  icrConfig = {},
 } = {}) {
   const normalizedDefinitions = asArray(definitions).map(normalizeDefinition).filter((entry) => entry.goalId);
-  const signalByGoal = new Map(asArray(signals).map((signal) => {
-    const normalized = normalizeSignal(signal);
-    return [normalized.goalId, normalized];
-  }).filter(([goalId]) => goalId));
+  const { signal: icrSignal, dashboardRows: icrDashboardRows } = deriveIcrCapabilitySignal(icrEvidence, icrConfig);
+  const signalByGoal = mergeSignals(icrSignal ? [...asArray(signals), icrSignal] : signals);
 
   const goals = normalizedDefinitions.map((definition) => {
     const signal = signalByGoal.get(definition.goalId);
@@ -182,10 +371,15 @@ export function summarizeCapabilityGoalStatus({
       blockers: signal?.blockers || [],
       notes: signal?.notes || [],
       updatedAt: signal?.updatedAt || null,
-      level4ReadyCandidate,
       level4Proven: false,
       authority: 'status_evidence_only',
       canPromote: false,
+      level4ReadyCandidate: definition.goalId === 'icr_test_time_compute'
+        ? signal?.level4ReadyCandidate === true
+          && signal?.persistedProductionEvidence === true
+          && missingEvidence.length === 0
+          && (signal?.blockers || []).length === 0
+        : level4ReadyCandidate,
     };
   });
 
@@ -208,5 +402,6 @@ export function summarizeCapabilityGoalStatus({
     implementedCount: counts.implemented,
     openCount: goals.length - counts.implemented,
     goals,
+    icrDashboardRows,
   };
 }

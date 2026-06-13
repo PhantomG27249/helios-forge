@@ -20,14 +20,14 @@ function redactSecretText(value = '') {
     .replace(/\b(password|passwd|token|secret|credential|authorization|api[_-]?key|[A-Z0-9_]*API[_-]?KEY)\s*[:=]\s*[^\s,;]+/gi, '$1=[redacted]');
 }
 
-function sanitizeDurableState(value) {
+export function sanitizeA2ADurableState(value) {
   if (typeof value === 'string') return redactSecretText(value);
-  if (Array.isArray(value)) return value.map((item) => sanitizeDurableState(item));
+  if (Array.isArray(value)) return value.map((item) => sanitizeA2ADurableState(item));
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(redactSecrets(value)).map(([key, nestedValue]) => [
         key,
-        sanitizeDurableState(nestedValue),
+        sanitizeA2ADurableState(nestedValue),
       ]),
     );
   }
@@ -109,7 +109,7 @@ export function createJsonFileA2ADurableStore({ path, root } = {}) {
       if (root) {
         assertRealParentInsideRoot(root, storePath);
       }
-      const sanitizedState = sanitizeDurableState(state || {});
+      const sanitizedState = sanitizeA2ADurableState(state || {});
       const temporaryPath = `${storePath}.tmp`;
       writeFileSync(temporaryPath, `${JSON.stringify(sanitizedState, null, 2)}\n`, 'utf8');
       renameSync(temporaryPath, storePath);

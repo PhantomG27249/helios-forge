@@ -1,54 +1,110 @@
-function readStoreSecret(store, key) {
-  if (!store) return undefined;
-  if (typeof store === 'function') return store(key);
-  if (typeof store.loadIssuerSecret === 'function') return store.loadIssuerSecret(key);
-  if (typeof store.get === 'function') return store.get(key);
-  if (typeof store.load === 'function') return store.load(key);
-  if (typeof store.issuerSecret === 'string') return store.issuerSecret;
+function normalizeLookup({ keyRef, issuerId } = {}) {
+  return {
+    keyRef: keyRef ? String(keyRef).trim() : '',
+    issuerId: issuerId ? String(issuerId).trim() : '',
+  };
+}
+
+function normalizeEnvKey(value = '') {
+  const suffix = String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+  return suffix ? `HELIOS_A2A_ISSUER_SECRET_${suffix}` : '';
+}
+
+function firstString(values = []) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
   return undefined;
 }
 
-function stableString(value) {
-  const text = String(value ?? '').trim();
-  return text || null;
+function lookupFromSecretStore(secretStore, lookup) {
+  if (!secretStore) return undefined;
+  if (typeof secretStore === 'function') return secretStore(lookup);
+  if (typeof secretStore.loadIssuerSecret === 'function') {
+    return secretStore.loadIssuerSecret(lookup);
+  }
+  if (typeof secretStore.load === 'function') return secretStore.load(lookup);
+  if (typeof secretStore.get === 'function') {
+    return firstString([
+      lookup.keyRef ? secretStore.get(lookup.keyRef) : undefined,
+      lookup.issuerId ? secretStore.get(lookup.issuerId) : undefined,
+      secretStore.get('issuerSecret'),
+      secretStore.get('default'),
+    ]);
+  }
+  if (secretStore && typeof secretStore === 'object') {
+    const issuerSecrets = secretStore.issuerSecrets && typeof secretStore.issuerSecrets === 'object'
+      ? secretStore.issuerSecrets
+      : {};
+    return firstString([
+      lookup.keyRef ? issuerSecrets[lookup.keyRef] : undefined,
+      lookup.issuerId ? issuerSecrets[lookup.issuerId] : undefined,
+      lookup.keyRef ? secretStore[lookup.keyRef] : undefined,
+      lookup.issuerId ? secretStore[lookup.issuerId] : undefined,
+      secretStore.issuerSecret,
+      secretStore.default,
+    ]);
+  }
+  return undefined;
 }
 
-export function createA2AIssuerSecretProvider({
-  issuerSecret,
-  issuerKeyRef = 'helios.local.a2a',
-  env = globalThis.process?.env || {},
-  envKey = 'HELIOS_A2A_ISSUER_SECRET',
-  store,
-  requireStable = false,
-} = {}) {
-  const keyRef = stableString(issuerKeyRef) || 'helios.local.a2a';
+function lookupFromEnv(env = {}, lookup) {
+  if (!env || typeof env !== 'object') return undefined;
+  return firstString([
+    lookup.keyRef ? env[normalizeEnvKey(lookup.keyRef)] : undefined,
+    lookup.issuerId ? env[normalizeEnvKey(lookup.issuerId)] : undefined,
+    lookup.keyRef ? undefined : env.HELIOS_A2A_ISSUER_SECRET,
+  ]);
+}
 
-  function resolve() {
-    const explicit = stableString(issuerSecret);
-    if (explicit) return { secret: explicit, source: 'explicit' };
-    const envSecret = stableString(env?.[envKey]);
-    if (envSecret) return { secret: envSecret, source: 'env' };
-    const storeSecret = stableString(readStoreSecret(store, keyRef) ?? readStoreSecret(store, 'issuerSecret'));
-    if (storeSecret) return { secret: storeSecret, source: 'store' };
-    if (requireStable) throw new Error('stable A2A issuer secret is required');
-    return { secret: undefined, source: 'missing' };
+function lookupFallback(fallback, lookup) {
+  if (typeof fallback === 'function') return fallback(lookup);
+  return typeof fallback === 'string' && fallback.length > 0 ? fallback : undefined;
+}
+
+function sourceFor({ secretStore, env, fallback, lookup }) {
+  if (lookupFromSecretStore(secretStore, lookup)) return 'secretStore';
+  if (lookupFromEnv(env, lookup)) return 'env';
+  if (lookupFallback(fallback, lookup)) return 'fallback';
+  return 'missing';
+}
+
+export function createIssuerSecretProvider({ env = {}, secretStore, fallback } = {}) {
+  function getIssuerSecret(options = {}) {
+    const lookup = normalizeLookup(options);
+    return firstString([
+      lookupFromSecretStore(secretStore, lookup),
+      lookupFromEnv(env, lookup),
+      lookupFallback(fallback, lookup),
+    ]);
+  }
+
+  function hasIssuerSecret(options = {}) {
+    return Boolean(getIssuerSecret(options));
+  }
+
+  function describe(options = {}) {
+    const lookup = normalizeLookup(options);
+    return {
+      type: 'a2a_issuer_secret_provider',
+      keyRef: lookup.keyRef || undefined,
+      issuerId: lookup.issuerId || undefined,
+      available: hasIssuerSecret(lookup),
+      source: sourceFor({ secretStore, env, fallback, lookup }),
+      redacted: true,
+    };
   }
 
   return {
-    loadIssuerSecret() {
-      return resolve().secret;
-    },
-    get(key) {
-      if (String(key || '') === keyRef || String(key || '') === 'issuerSecret') return resolve().secret;
-      return undefined;
-    },
-    describe() {
-      const resolved = resolve();
-      return {
-        issuerKeyRef: keyRef,
-        source: resolved.source,
-        stable: Boolean(resolved.secret),
-      };
-    },
+    getIssuerSecret,
+    loadIssuerSecret: getIssuerSecret,
+    hasIssuerSecret,
+    describe,
+    toJSON: () => describe(),
+    toString: () => '[IssuerSecretProvider redacted]',
   };
 }

@@ -432,6 +432,7 @@ export async function runBesLaneRuntime({
       verifierGenome: candidate.verifierGenome ?? verifierGenome,
       externalPolicyEvidence: candidateExternalPolicyEvidence,
       modelRouter,
+      icrEvidence: candidate.icrEvidence,
       a2a,
       memoryGraph,
       soulRefs,

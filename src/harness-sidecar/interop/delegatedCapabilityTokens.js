@@ -20,28 +20,38 @@ function canonicalTokenPayload(token) {
     scopes: normalizeList(token.scopes).sort(),
     mode: String(token.mode || 'read'),
     issuedBy: String(token.issuedBy || ''),
+    issuerKeyRef: String(token.issuerKeyRef || ''),
     issuedAt: Number(token.issuedAt || 0),
     expiresAt: Number(token.expiresAt || 0),
   });
+}
+
+function resolveIssuerSecret({
+  issuerSecret,
+  issuerSecretProvider,
+  issuerKeyRef,
+  issuedBy,
+  agentId,
+} = {}) {
+  if (issuerSecret !== undefined && issuerSecret !== null) return issuerSecret;
+  const lookup = {
+    keyRef: issuerKeyRef,
+    issuerId: issuedBy || agentId,
+  };
+  if (issuerSecretProvider && typeof issuerSecretProvider.getIssuerSecret === 'function') {
+    return issuerSecretProvider.getIssuerSecret(lookup);
+  }
+  if (issuerSecretProvider && typeof issuerSecretProvider.loadIssuerSecret === 'function') {
+    return issuerSecretProvider.loadIssuerSecret(lookup);
+  }
+  if (typeof issuerSecretProvider === 'function') return issuerSecretProvider(lookup);
+  return undefined;
 }
 
 function signTokenPayload(token, issuerSecret) {
   return createHmac('sha256', String(issuerSecret || DEFAULT_ISSUER_SECRET))
     .update(canonicalTokenPayload(token))
     .digest('hex');
-}
-
-function resolveIssuerSecret({ issuerSecret, issuerSecretProvider } = {}) {
-  if (issuerSecret !== undefined && issuerSecret !== null && String(issuerSecret) !== '') {
-    return issuerSecret;
-  }
-  if (!issuerSecretProvider) return undefined;
-  if (typeof issuerSecretProvider === 'function') return issuerSecretProvider();
-  if (typeof issuerSecretProvider.loadIssuerSecret === 'function') return issuerSecretProvider.loadIssuerSecret();
-  if (typeof issuerSecretProvider.get === 'function') return issuerSecretProvider.get('issuerSecret');
-  if (typeof issuerSecretProvider.load === 'function') return issuerSecretProvider.load();
-  if (typeof issuerSecretProvider.issuerSecret === 'string') return issuerSecretProvider.issuerSecret;
-  return undefined;
 }
 
 function signaturesMatch(left, right) {
@@ -59,6 +69,7 @@ export function createDelegatedCapabilityToken({
   scopes = [],
   mode = 'read',
   issuedBy,
+  issuerKeyRef,
   ttlMs = 5 * 60 * 1000,
   now = Date.now(),
   issuerSecret,
@@ -74,12 +85,20 @@ export function createDelegatedCapabilityToken({
     scopes: normalizeList(scopes),
     mode: String(mode || 'read'),
     issuedBy: String(issuedBy || ''),
+    issuerKeyRef: String(issuerKeyRef || ''),
     issuedAt,
     expiresAt: issuedAt + (Number.isFinite(ttl) && ttl > 0 ? ttl : 0),
   };
+  const resolvedIssuerSecret = resolveIssuerSecret({
+    issuerSecret,
+    issuerSecretProvider,
+    issuerKeyRef: token.issuerKeyRef,
+    issuedBy: token.issuedBy,
+    agentId: token.agentId,
+  });
   return {
     ...token,
-    signature: signTokenPayload(token, resolveIssuerSecret({ issuerSecret, issuerSecretProvider })),
+    signature: signTokenPayload(token, resolvedIssuerSecret),
   };
 }
 
@@ -92,6 +111,7 @@ export function verifyDelegatedCapabilityToken(token, {
   now = Date.now(),
   issuerSecret,
   issuerSecretProvider,
+  issuerKeyRef,
 } = {}) {
   const reasons = [];
   if (!token) {
@@ -99,7 +119,13 @@ export function verifyDelegatedCapabilityToken(token, {
   }
 
   const timestamp = Number(now);
-  const expectedSignature = signTokenPayload(token, resolveIssuerSecret({ issuerSecret, issuerSecretProvider }));
+  const expectedSignature = signTokenPayload(token, resolveIssuerSecret({
+    issuerSecret,
+    issuerSecretProvider,
+    issuerKeyRef: issuerKeyRef || token.issuerKeyRef,
+    issuedBy: token.issuedBy,
+    agentId: token.agentId,
+  }));
   if (!signaturesMatch(token.signature, expectedSignature)) reasons.push('invalid_signature');
   if (String(token.taskId || '') !== String(taskId || '')) reasons.push('task_mismatch');
   if (String(token.agentId || '') !== String(agentId || '')) reasons.push('agent_mismatch');
