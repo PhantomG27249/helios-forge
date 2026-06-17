@@ -87,6 +87,15 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     paperGradeAutonomyGaps: ['repeated_autonomy_dashboard_evidence', 'human_reviewed_escalation_history'],
   },
   {
+    goalId: 'background_evolution',
+    label: 'Background recursive evolution worker',
+    requiredEvidence: ['background_tick_record', 'recursive_replay_evidence', 'recursive_campaign_evidence'],
+    maturityStage: 'production_gated',
+    productionGate: 'backgroundEvolution',
+    productionEvidenceRequired: ['background_tick_record'],
+    paperGradeAutonomyGaps: ['repeated_background_evolution_cycles'],
+  },
+  {
     goalId: 'soul_coverage',
     label: 'Soul coverage and advisory evidence',
     requiredEvidence: ['soul_records', 'runtime_store', 'prompt_adapter'],

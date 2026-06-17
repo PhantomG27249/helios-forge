@@ -50,6 +50,7 @@ import { decideReflectionGate } from './memory/reflectionGate.js';
 import { writeMemoryCandidate } from './memory/memoryWriter.js';
 import { scoreMemoryCorpus } from './memory/memoryEvals.js';
 import { createChangeProposal } from './meta/changeProposal.js';
+import { createBackgroundEvolutionWorker } from './meta/backgroundEvolutionWorker.js';
 import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { BesMetaOptimizer } from './meta/besMetaOptimizer.js';
@@ -369,6 +370,7 @@ export function createHarnessSidecar({
   const taskStates = new Map();
   const vllmHealthControllers = new Map();
   let mountedMcpRuntime = mcpRuntime || null;
+  let backgroundEvolutionWorker = null;
   let server = null;
   let actualPort = port;
 
@@ -3224,6 +3226,36 @@ export function createHarnessSidecar({
         }),
       });
     }
+    if (type === 'backgroundEvolution') {
+      const gate = await productionGate('backgroundEvolution');
+      const workerStatus = backgroundEvolutionWorker?.getStatus() ?? {
+        running: false,
+        lastTickAt: null,
+        lastResult: null,
+        intervalMs: null,
+      };
+      const gateEnabled = gate.enabled === true;
+      const autonomyEvidence = gateEnabled
+        ? await readJsonFileIfPresent(path.join('.harness', 'meta', 'autonomy-evidence.json'))
+        : null;
+      return {
+        type,
+        evidenceOnly: true,
+        canPromote: false,
+        gate: {
+          name: 'backgroundEvolution',
+          enabled: gateEnabled,
+          mode: gate.mode || 'offline',
+          authority: 'evidence_only',
+        },
+        worker: workerStatus,
+        summary: {
+          itemCount: autonomyEvidence ? 1 : 0,
+          available: autonomyEvidence !== null,
+        },
+        items: autonomyEvidence ? [autonomyEvidence] : [],
+      };
+    }
     throw new Error(`Unknown production evidence type: ${type}`);
   }
 
@@ -3383,6 +3415,7 @@ export function createHarnessSidecar({
         ['/v1/evidence/model-council-calibration', 'modelCouncilCalibration'],
         ['/v1/evidence/endpoint-capacity', 'endpointCapacity'],
         ['/v1/evidence/autonomy-rollback', 'autonomyRollback'],
+        ['/v1/evidence/background-evolution', 'backgroundEvolution'],
       ]);
       if (req.method === 'GET' && evidenceRoutes.has(url.pathname)) {
         try {
@@ -3527,9 +3560,19 @@ export function createHarnessSidecar({
           resolve();
         });
       });
+      backgroundEvolutionWorker = createBackgroundEvolutionWorker({
+        workspaceRoot: resolvedWorkspaceRoot,
+        loadHarnessConfig: () => loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot }),
+        emitEvent,
+      });
+      backgroundEvolutionWorker.start();
     },
 
     async stop() {
+      if (backgroundEvolutionWorker) {
+        await backgroundEvolutionWorker.stop();
+        backgroundEvolutionWorker = null;
+      }
       if (!server) return;
       const closingServer = server;
       server = null;

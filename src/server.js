@@ -645,9 +645,10 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       }
       case 'harness_evidence_refresh': {
         await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
-        const [replayCycles, operatorDashboards] = await Promise.all([
+        const [replayCycles, operatorDashboards, backgroundEvolution] = await Promise.all([
           harness.client.getProductionEvidence('replayCycles'),
           harness.client.getProductionEvidence('operatorDashboards'),
+          harness.client.getProductionEvidence('backgroundEvolution'),
         ]);
         ws.send(JSON.stringify({
           type: 'harness_evidence_refresh',
@@ -656,6 +657,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
             canPromote: false,
             replayCycles,
             operatorDashboards,
+            backgroundEvolution,
           },
         }));
         break;

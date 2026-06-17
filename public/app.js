@@ -1851,6 +1851,7 @@ function handleHarnessRecursiveEvolutionEvidence(payload = {}) {
     canPromote: payload.canPromote === true,
     replayCycles: payload.replayCycles || null,
     operatorDashboards: payload.operatorDashboards || null,
+    backgroundEvolution: payload.backgroundEvolution || null,
   };
   renderHarnessRecursiveEvolutionEvidence();
 }
@@ -1869,13 +1870,17 @@ function renderHarnessRecursiveEvolutionEvidence() {
 
   const replayCount = evidence.replayCycles?.summary?.itemCount ?? 0;
   const dashboardCount = evidence.operatorDashboards?.summary?.itemCount ?? 0;
+  const background = evidence.backgroundEvolution?.worker || evidence.backgroundEvolution?.items?.[0] || null;
+  const backgroundRunning = background?.running === true ? 'running' : 'idle';
+  const lastTick = background?.lastTickAt ? `last tick ${background.lastTickAt}` : 'no background ticks yet';
   const badge = evidence.evidenceOnly === false ? 'mixed authority' : 'evidence_only';
   if (harnessRecursiveEvolutionEvidenceStatus) {
-    harnessRecursiveEvolutionEvidenceStatus.textContent = `${replayCount + dashboardCount} evidence snapshot${replayCount + dashboardCount === 1 ? '' : 's'} loaded | ${badge}`;
+    harnessRecursiveEvolutionEvidenceStatus.textContent = `${replayCount + dashboardCount} evidence snapshot${replayCount + dashboardCount === 1 ? '' : 's'} loaded | background ${backgroundRunning} | ${badge}`;
   }
   harnessRecursiveEvolutionEvidenceRows.innerHTML = [
     ['Replay cycles', replayCount],
     ['Operator dashboards', dashboardCount],
+    ['Background worker', `${backgroundRunning} (${lastTick})`],
   ].map(([label, itemCount]) => `
     <div class="harness-list-row">
       <strong>${esc(label)}</strong>

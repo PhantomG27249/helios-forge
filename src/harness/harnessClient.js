@@ -89,6 +89,7 @@ export class HarnessClient {
       modelCouncilCalibration: '/v1/evidence/model-council-calibration',
       endpointCapacity: '/v1/evidence/endpoint-capacity',
       autonomyRollback: '/v1/evidence/autonomy-rollback',
+      backgroundEvolution: '/v1/evidence/background-evolution',
     };
     return this.getJson(routes[type] || routes.heldOutSuites);
   }
