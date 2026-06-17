@@ -27,7 +27,7 @@ test('installer preserves BOM handling, normalizes image input, and installs bun
             Zeus: {
               models: [
                 {
-                  id: 'example/ebft-model',
+                  id: 'selimaktas/ebft-5',
                   input: ['text'],
                   args: '--reasoning-parser qwen3 --chat-template-kwargs \'{"enable_thinking":false}\'',
                 },

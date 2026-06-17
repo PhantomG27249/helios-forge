@@ -25,7 +25,7 @@ test('model profiles expose qwen vision defaults and critic profile', () => {
   assert.equal(deep.supportsVision, true);
   assert.equal(deep.maxContextTokens, 262000);
   assert.equal(critic.defaultTemperature, 0.1);
-  assert.equal(ebft5.model, 'example/ebft-model');
+  assert.equal(ebft5.model, 'selimaktas/ebft-5');
   assert.equal(ebft5.maxContextTokens, 262144);
   assert.equal(ebft5.chatTemplateKwargs.enable_thinking, false);
 });
@@ -87,7 +87,7 @@ test('model gateway applies local profile overrides without changing baked profi
 
   assert.equal(result.profile.model, 'local/private-model');
   assert.equal(result.profile.supportsVision, true);
-  assert.equal(getModelProfile('alphahelion_ebft5').model, 'example/ebft-model');
+  assert.equal(getModelProfile('alphahelion_ebft5').model, 'selimaktas/ebft-5');
 });
 
 test('OpenAI-compatible provider posts chat completions and extracts visible content', async () => {
@@ -113,7 +113,7 @@ test('OpenAI-compatible provider posts chat completions and extracts visible con
   });
 
   assert.equal(requests[0].url, 'http://model.test/v1/chat/completions');
-  assert.equal(JSON.parse(requests[0].request.body).model, 'example/ebft-model');
+  assert.equal(JSON.parse(requests[0].request.body).model, 'selimaktas/ebft-5');
   assert.equal(JSON.parse(requests[0].request.body).chat_template_kwargs.enable_thinking, false);
   assert.equal(response.text, 'FINAL: HELIOS_OK');
   assert.deepEqual(response.usage, { inputTokens: 10, outputTokens: 4 });

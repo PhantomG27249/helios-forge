@@ -1,5 +1,5 @@
 ﻿export const DEFAULT_VISION_MODELS = [
-  { provider: 'Zeus', modelId: 'example/ebft-model' },
+  { provider: 'Zeus', modelId: 'selimaktas/ebft-5' },
 ];
 
 function normalizeInput(input) {

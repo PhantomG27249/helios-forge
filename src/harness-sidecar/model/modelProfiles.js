@@ -23,7 +23,7 @@
   alphahelion_ebft5: {
     name: 'alphahelion_ebft5',
     provider: 'Zeus',
-    model: 'example/ebft-model',
+    model: 'selimaktas/ebft-5',
     baseUrl: null,
     maxContextTokens: 262144,
     supportsVision: false,
