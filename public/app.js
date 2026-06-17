@@ -31,7 +31,25 @@ const DEFAULT_HARNESS_BUDGET = { maxToolCalls: 20, maxWallMinutes: 15 };
 const HARNESS_MAX_SUBAGENTS = 50;
 const STORAGE_SERVER_URL = 'helios_server_url';
 const STORAGE_WORKSPACE_PATH = 'helios_workspace_path';
+const STORAGE_SMITHERY_KEY = 'helios_smithery_key';
+const STORAGE_PINNED_SESSIONS = 'helios_pinned_sessions';
 const LS_AUTO_HARNESS = 'helios_auto_harness';
+const KNOWN_MODEL_PROFILES = [
+  'qwen36_vlm_fast',
+  'qwen36_vlm_deep',
+  'critic_low_temp',
+  'alphahelion_ebft5',
+];
+const SWARM_FEATURE_TOGGLES = [
+  ['swarm', 'Swarm'],
+  ['modelDrivenSwarm', 'Model-driven swarm'],
+  ['piNativeSwarm', 'Pi-native swarm'],
+  ['multiModelSwarm', 'Multi-model swarm'],
+  ['deepResearch', 'Deep research'],
+  ['adaptiveSearch', 'Adaptive search'],
+  ['experiments', 'Experiments'],
+  ['verifierEvolution', 'Verifier evolution'],
+];
 let harnessRenderScheduled = false;
 let harnessState = {
   status: 'unknown',
@@ -137,7 +155,13 @@ let settingsState = {
   harnessConfig: null,
   workplaceStatus: null,
   connectionTestSocket: null,
+  endpointTests: {},
+  piModelsSummary: null,
+  configDriftDismissed: false,
 };
+let activeAppMode = 'chat';
+let sessionSearchQuery = '';
+let capabilitiesAdvancedMode = false;
 
 // ═══════════════════════════════════════════════════════════
 // Debug
@@ -414,17 +438,42 @@ const harnessCapabilityGoalsImplemented = $('#harness-capability-goals-implement
 const harnessCapabilityGoalsOpen = $('#harness-capability-goals-open');
 const harnessCapabilityGoalRows = $('#harness-capability-goal-rows');
 const workspaceInput = document.getElementById('workspace-input');
+const workspaceBreadcrumb = document.getElementById('workspace-breadcrumb');
+const sessionSearchInput = document.getElementById('session-search');
+const sessionTitleBar = document.getElementById('session-title-bar');
+const sessionTitleInput = document.getElementById('session-title-input');
+const modeNav = document.getElementById('mode-nav');
+const configDriftBanner = document.getElementById('config-drift-banner');
+const configDriftText = document.getElementById('config-drift-text');
+const cdnOfflineBanner = document.getElementById('cdn-offline-banner');
+const harnessSwarmConfigBanner = document.getElementById('harness-swarm-config-banner');
+const harnessSwarmConfigBannerText = document.getElementById('harness-swarm-config-banner-text');
+const capabilityViewMode = document.getElementById('capability-view-mode');
+const capabilityInstallSection = document.getElementById('harness-capability-install');
+const settingsPiModelsSummary = document.getElementById('settings-pi-models-summary');
+const settingsSmitheryKey = document.getElementById('settings-smithery-key');
 
 // ═══════════════════════════════════════════════════════════
 // Workspace Input Handler
 // ═══════════════════════════════════════════════════════════
+function truncatePath(path, maxLen = 28) {
+  const value = String(path || '').trim();
+  if (!value) return 'workspace';
+  if (value.length <= maxLen) return value;
+  return '…' + value.slice(-(maxLen - 1));
+}
+
 function syncWorkspaceInputs(path) {
   if (workspacePathInput) workspacePathInput.value = path || '';
   if (workspaceInput) workspaceInput.value = path || '';
+  if (workspaceBreadcrumb) workspaceBreadcrumb.textContent = truncatePath(path);
+  const settingsPathEl = document.getElementById('settings-workspace-path');
+  if (settingsPathEl) settingsPathEl.value = path || '';
 }
 
 function getSelectedWorkspacePath() {
-  const latest = workspaceInput?.value?.trim()
+  const latest = settingsWorkspacePathInput?.value?.trim()
+    || workspaceInput?.value?.trim()
     || workspacePathInput?.value?.trim()
     || workspacePath
     || '';
@@ -632,6 +681,10 @@ function handleMessage(msg) {
         send({ type: 'get_models' });
         send({ type: 'get_session_files' });
         send({ type: 'harness_status' });
+        getHarnessConfig();
+        loadStoredSmitheryKey();
+        setCapabilitiesViewMode(false);
+        checkCdnOffline();
         if (!messagesEl.children.length) showWelcome();
         break;
       case 'pi_disconnected':
@@ -649,8 +702,12 @@ function handleMessage(msg) {
   // Meta responses
   if (msg.type === 'models' && msg.data?.models) { models = msg.data.models; return; }
   if (msg.type === 'model_changed' && msg.data) {
-    currentModel = msg.data; updateHeader(); closeDropdowns();
-    toast(`Model: ${currentModel.name || currentModel.id}`, 'success'); return;
+    currentModel = msg.data;
+    settingsState.configDriftDismissed = false;
+    updateHeader();
+    closeDropdowns();
+    toast(`Model: ${currentModel.name || currentModel.id}`, 'success');
+    return;
   }
   if (msg.type === 'thinking_changed' && msg.success) { send({ type: 'get_state' }); return; }
   if (msg.type === 'state' && msg.data) {
@@ -807,6 +864,18 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_config_reloaded') {
     handleHarnessConfigReloaded(msg.data || {});
+    return;
+  }
+  if (msg.type === 'harness_workplace_repaired' && msg.data) {
+    handleHarnessWorkplaceRepaired(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_endpoint_test_result' && msg.data) {
+    handleHarnessEndpointTestResult(msg.data);
+    return;
+  }
+  if (msg.type === 'pi_models_summary' && msg.data) {
+    handlePiModelsSummary(msg.data);
     return;
   }
 
@@ -1493,6 +1562,7 @@ function renderHarnessPanel() {
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
   renderHarnessSwarm();
+  renderHarnessSwarmConfigBanner();
   renderCapabilityGoalRows();
   renderHarnessHierarchyFeedback();
   renderHarnessTraces();
@@ -1859,12 +1929,15 @@ function renderHarnessAbMctsReplay() {
 function switchHarnessTab(tabId) {
   activeHarnessTab = tabId || 'run';
   document.querySelectorAll('.harness-tab').forEach(tab => {
-    tab.classList.toggle('active', tab.dataset.harnessTab === activeHarnessTab);
+    const active = tab.dataset.harnessTab === activeHarnessTab;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   document.querySelectorAll('.harness-tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `harness-tab-${activeHarnessTab}`);
   });
   updateHarnessPanelFooterVisibility();
+  renderHarnessSwarmConfigBanner();
   if (activeHarnessTab === 'capabilities' && !harnessCapabilitiesLoaded) {
     requestHarnessCapabilities();
   }
@@ -3707,6 +3780,7 @@ function updateHeader() {
   modelDisplay.textContent = currentModel?.name || currentModel?.id || '—';
   thinkingDisplay.textContent = currentThinking ? currentThinking.charAt(0).toUpperCase() + currentThinking.slice(1) : '—';
   renderSettingsPiSection();
+  renderConfigDriftBanner();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3761,10 +3835,14 @@ function openSettings(tab = settingsState.activeTab || 'connection') {
   renderSettingsTabs();
   renderSettingsPiSection();
   renderSettingsEndpointsList();
+  renderSettingsRouterSection();
+  renderSettingsSwarmSection();
+  loadStoredSmitheryKey();
   openModal('settings');
   if (ws?.readyState === WebSocket.OPEN) {
     requestWorkplaceStatus();
     getHarnessConfig();
+    if (tab === 'pi') requestPiModelsSummary();
   }
 }
 
@@ -3779,7 +3857,9 @@ function syncSettingsFormFromState() {
 
 function renderSettingsTabs() {
   document.querySelectorAll('.settings-tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.settingsTab === settingsState.activeTab);
+    const active = tab.dataset.settingsTab === settingsState.activeTab;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   document.querySelectorAll('.settings-panel').forEach((panel) => {
     panel.classList.toggle('active', panel.id === `settings-tab-${settingsState.activeTab}`);
@@ -3811,12 +3891,19 @@ function renderSettingsEndpointsList() {
   settingsEndpointsList.innerHTML = entries.map(([profileId, profile]) => {
     const baseUrl = esc(profile?.baseUrl || '—');
     const modelId = esc(profile?.modelId || '—');
+    const test = settingsState.endpointTests[profileId];
+    const testClass = test?.healthy === true ? 'ok' : test?.healthy === false ? 'error' : '';
+    const testLabel = test
+      ? (test.healthy ? `OK (${esc(test.reason || 'healthy')})` : `Fail (${esc(test.reason || 'unhealthy')})`)
+      : '';
     return `
       <div class="settings-endpoint-item">
         <div class="settings-endpoint-item-main">
           <div class="settings-endpoint-item-id">${esc(profileId)}</div>
           <div class="settings-endpoint-item-meta">${modelId} · ${baseUrl}</div>
+          ${testLabel ? `<div class="settings-endpoint-test-result ${testClass}">${testLabel}</div>` : ''}
         </div>
+        <button class="settings-btn settings-endpoint-test-btn" type="button" data-endpoint-test="${escAttr(profileId)}">Test</button>
       </div>`;
   }).join('');
 }
@@ -3893,6 +3980,10 @@ function handleHarnessWorkplaceInitialized(data) {
 function handleHarnessConfig(data) {
   settingsState.harnessConfig = data?.config || data || null;
   renderSettingsEndpointsList();
+  renderSettingsRouterSection();
+  renderSettingsSwarmSection();
+  renderConfigDriftBanner();
+  renderHarnessSwarmConfigBanner();
   if (settingsHarnessStatus && data?.presetId) {
     settingsHarnessStatus.textContent = `Active preset: ${data.presetId}`;
   }
@@ -3901,14 +3992,423 @@ function handleHarnessConfig(data) {
 function handleHarnessConfigUpdated(data) {
   if (data?.config) settingsState.harnessConfig = data.config;
   renderSettingsEndpointsList();
+  renderSettingsRouterSection();
+  renderSettingsSwarmSection();
+  renderConfigDriftBanner();
+  renderHarnessSwarmConfigBanner();
   toast(data?.message || 'Harness config updated', data?.success === false ? 'error' : 'success');
 }
 
 function handleHarnessConfigReloaded(data) {
   if (data?.config) settingsState.harnessConfig = data.config;
   renderSettingsEndpointsList();
+  renderSettingsRouterSection();
+  renderSettingsSwarmSection();
+  renderConfigDriftBanner();
+  renderHarnessSwarmConfigBanner();
   toast(data?.message || 'Harness config reloaded', 'success');
   send({ type: 'harness_status' });
+}
+
+function handleHarnessWorkplaceRepaired(data) {
+  toast(data?.message || 'Workplace repair complete', data?.success === false ? 'error' : 'success');
+  requestWorkplaceStatus();
+  getHarnessConfig();
+}
+
+function handleHarnessEndpointTestResult(data) {
+  const profileId = data?.profileId;
+  if (profileId) settingsState.endpointTests[profileId] = data;
+  renderSettingsEndpointsList();
+  toast(
+    data?.healthy ? `Endpoint ${profileId} is healthy` : `Endpoint ${profileId} failed: ${data?.reason || 'unknown'}`,
+    data?.healthy ? 'success' : 'error',
+  );
+}
+
+function handlePiModelsSummary(data) {
+  settingsState.piModelsSummary = data || null;
+  renderSettingsPiModelsSummary();
+}
+
+function repairWorkplace() {
+  send({ type: 'harness_workplace_repair', workspaceRoot: settingsWorkspaceRoot() });
+}
+
+function testEndpointProfile(profileId) {
+  const profiles = settingsState.harnessConfig?.modelCouncil?.endpointProfiles || {};
+  const profile = profiles[profileId];
+  if (!profile) {
+    toast(`Unknown endpoint profile: ${profileId}`, 'error');
+    return;
+  }
+  send({ type: 'harness_endpoint_test', profileId, profile });
+}
+
+function requestPiModelsSummary() {
+  send({ type: 'pi_models_get' });
+}
+
+function renderSettingsPiModelsSummary() {
+  if (!settingsPiModelsSummary) return;
+  const data = settingsState.piModelsSummary;
+  if (!data) {
+    settingsPiModelsSummary.innerHTML = '<div class="settings-hint">Open this tab while connected to load models.</div>';
+    return;
+  }
+  if (data.parseError) {
+    settingsPiModelsSummary.innerHTML = `<div class="settings-hint error">Failed to parse models.json: ${esc(data.parseError)}</div>`;
+    return;
+  }
+  if (!data.present) {
+    settingsPiModelsSummary.innerHTML = `<div class="settings-hint">No Pi models.json found at ${esc(data.path || '—')}</div>`;
+    return;
+  }
+  const providers = (data.providers || []).map(p => `${esc(p.name)} (${p.modelCount})`).join(', ') || 'none';
+  const models = (data.models || []).slice(0, 12).map(m => `
+    <div class="settings-pi-model-row">
+      <span class="settings-pi-model-provider">${esc(m.provider || '—')}</span>
+      <span class="settings-pi-model-id">${esc(m.name || m.id || '—')}</span>
+    </div>`).join('');
+  settingsPiModelsSummary.innerHTML = `
+    <div class="settings-hint">${esc(String(data.modelCount || 0))} models · ${providers}</div>
+    <div class="settings-pi-models-list">${models || '<div class="settings-hint">No models listed</div>'}</div>`;
+}
+
+function renderSettingsRouterSection() {
+  const config = settingsState.harnessConfig || {};
+  const router = config.modelRouter || {};
+  const adaptive = config.adaptiveSearch || {};
+  const routerEnabled = document.getElementById('settings-model-router-enabled');
+  const routerStrategy = document.getElementById('settings-model-router-strategy');
+  const adaptiveMode = document.getElementById('settings-adaptive-search-mode');
+  const adaptiveMax = document.getElementById('settings-adaptive-search-max-actions');
+  const adaptiveSwitch = document.getElementById('settings-adaptive-search-profile-switch');
+  if (routerEnabled) routerEnabled.checked = Boolean(router.enabled);
+  if (routerStrategy && router.strategy) routerStrategy.value = router.strategy;
+  if (adaptiveMode && adaptive.mode) adaptiveMode.value = adaptive.mode;
+  if (adaptiveMax && adaptive.maxActionsPerTask != null) adaptiveMax.value = adaptive.maxActionsPerTask;
+  if (adaptiveSwitch) adaptiveSwitch.checked = adaptive.allowProfileSwitching !== false;
+}
+
+function saveSettingsRouterSection() {
+  patchHarnessConfig({
+    modelRouter: {
+      enabled: Boolean(document.getElementById('settings-model-router-enabled')?.checked),
+      strategy: document.getElementById('settings-model-router-strategy')?.value || 'thompson_sampling',
+    },
+    adaptiveSearch: {
+      mode: document.getElementById('settings-adaptive-search-mode')?.value || 'advisory',
+      maxActionsPerTask: Number(document.getElementById('settings-adaptive-search-max-actions')?.value) || 8,
+      allowProfileSwitching: Boolean(document.getElementById('settings-adaptive-search-profile-switch')?.checked),
+    },
+  });
+}
+
+function endpointProfileOptions(selected) {
+  const profiles = Object.keys(settingsState.harnessConfig?.modelCouncil?.endpointProfiles || {});
+  if (!profiles.length) return '<option value="">—</option>';
+  return profiles.map(id => `<option value="${escAttr(id)}" ${id === selected ? 'selected' : ''}>${esc(id)}</option>`).join('');
+}
+
+function modelProfileOptions(selected) {
+  const fromConfig = new Set(KNOWN_MODEL_PROFILES);
+  const roles = settingsState.harnessConfig?.modelCouncil?.roles || {};
+  Object.values(roles).forEach(role => {
+    if (role?.modelProfile) fromConfig.add(role.modelProfile);
+  });
+  const defaults = settingsState.harnessConfig?.defaults || {};
+  if (defaults.modelProfile) fromConfig.add(defaults.modelProfile);
+  if (defaults.swarmModelProfile) fromConfig.add(defaults.swarmModelProfile);
+  return Array.from(fromConfig).map(id => `<option value="${escAttr(id)}" ${id === selected ? 'selected' : ''}>${esc(id)}</option>`).join('');
+}
+
+function renderSettingsSwarmSection() {
+  const config = settingsState.harnessConfig || {};
+  const council = config.modelCouncil || {};
+  const swarm = config.swarmExecution || {};
+  const features = config.features || {};
+  const councilEnabled = document.getElementById('settings-model-council-enabled');
+  const concurrency = document.getElementById('settings-swarm-concurrency');
+  const workerMode = document.getElementById('settings-swarm-worker-mode');
+  const piNative = document.getElementById('settings-swarm-pi-native');
+  const rolesEl = document.getElementById('settings-swarm-roles');
+  const featuresEl = document.getElementById('settings-swarm-features');
+  if (councilEnabled) councilEnabled.checked = Boolean(council.enabled);
+  if (concurrency && swarm.concurrency != null) concurrency.value = swarm.concurrency;
+  if (workerMode && swarm.workerMode) workerMode.value = swarm.workerMode;
+  if (piNative) piNative.checked = Boolean(swarm.piNative ?? features.piNativeSwarm);
+  if (rolesEl) {
+    const roles = Object.entries(council.roles || {});
+    rolesEl.innerHTML = roles.length ? roles.map(([roleId, role]) => `
+      <div class="settings-swarm-role-row" data-role-id="${escAttr(roleId)}">
+        <div class="settings-swarm-role-name">${esc(roleId)}</div>
+        <label>Model profile
+          <select class="settings-select settings-swarm-role-model">${modelProfileOptions(role?.modelProfile)}</select>
+        </label>
+        <label>Endpoint profile
+          <select class="settings-select settings-swarm-role-endpoint">${endpointProfileOptions(role?.endpointProfile)}</select>
+        </label>
+      </div>`).join('') : '<div class="settings-hint">No swarm roles configured.</div>';
+  }
+  if (featuresEl) {
+    featuresEl.innerHTML = SWARM_FEATURE_TOGGLES.map(([key, label]) => `
+      <label class="settings-checkbox-row">
+        <input type="checkbox" data-swarm-feature="${escAttr(key)}" ${features[key] ? 'checked' : ''} />
+        ${esc(label)}
+      </label>`).join('');
+  }
+}
+
+function saveSettingsSwarmSection() {
+  const roles = {};
+  document.querySelectorAll('.settings-swarm-role-row').forEach(row => {
+    const roleId = row.dataset.roleId;
+    if (!roleId) return;
+    roles[roleId] = {
+      modelProfile: row.querySelector('.settings-swarm-role-model')?.value || undefined,
+      endpointProfile: row.querySelector('.settings-swarm-role-endpoint')?.value || undefined,
+    };
+  });
+  const features = { ...(settingsState.harnessConfig?.features || {}) };
+  document.querySelectorAll('[data-swarm-feature]').forEach(input => {
+    features[input.dataset.swarmFeature] = input.checked;
+  });
+  patchHarnessConfig({
+    modelCouncil: {
+      enabled: Boolean(document.getElementById('settings-model-council-enabled')?.checked),
+      roles,
+    },
+    swarmExecution: {
+      concurrency: Number(document.getElementById('settings-swarm-concurrency')?.value) || 2,
+      workerMode: document.getElementById('settings-swarm-worker-mode')?.value || 'model_driven',
+      piNative: Boolean(document.getElementById('settings-swarm-pi-native')?.checked),
+    },
+    features,
+  });
+}
+
+function loadStoredSmitheryKey() {
+  try {
+    const stored = localStorage.getItem(STORAGE_SMITHERY_KEY) || '';
+    if (settingsSmitheryKey) settingsSmitheryKey.value = stored;
+    if (capabilitySmitheryKey && !capabilitySmitheryKey.value) capabilitySmitheryKey.value = stored;
+  } catch (_) { /* ignore */ }
+}
+
+function saveSettingsSecrets() {
+  const key = settingsSmitheryKey?.value?.trim() || '';
+  try {
+    if (key) localStorage.setItem(STORAGE_SMITHERY_KEY, key);
+    else localStorage.removeItem(STORAGE_SMITHERY_KEY);
+    if (capabilitySmitheryKey) capabilitySmitheryKey.value = key;
+    toast('Secrets saved locally', 'success');
+  } catch (error) {
+    toast('Failed to save secrets: ' + error.message, 'error');
+  }
+}
+
+function loadPinnedSessions() {
+  try {
+    const raw = localStorage.getItem(STORAGE_PINNED_SESSIONS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePinnedSessions() {
+  try {
+    const pinnedIds = sessions.filter(s => s.pinned).map(s => s.id);
+    localStorage.setItem(STORAGE_PINNED_SESSIONS, JSON.stringify(pinnedIds));
+  } catch (_) { /* ignore */ }
+}
+
+function applyPinnedSessionsFromStorage() {
+  const pinnedIds = new Set(loadPinnedSessions());
+  sessions.forEach(s => {
+    if (pinnedIds.has(s.id)) s.pinned = true;
+  });
+}
+
+function chatModelLabel() {
+  return currentModel?.name || currentModel?.id || '';
+}
+
+function harnessDefaultModelProfile() {
+  return settingsState.harnessConfig?.defaults?.modelProfile || '';
+}
+
+function hasConfigDrift() {
+  const harnessDefault = harnessDefaultModelProfile();
+  if (!harnessDefault || !currentModel || settingsState.configDriftDismissed) return false;
+  const chatLabel = chatModelLabel();
+  if (!chatLabel) return false;
+  return chatLabel !== harnessDefault
+    && currentModel.id !== harnessDefault
+    && !String(currentModel.id || '').includes(harnessDefault);
+}
+
+function renderConfigDriftBanner() {
+  if (!configDriftBanner || !configDriftText) return;
+  const drift = hasConfigDrift();
+  configDriftBanner.classList.toggle('hidden', !drift);
+  if (drift) {
+    configDriftText.textContent = `Harness default is ${harnessDefaultModelProfile()}; chat is using ${chatModelLabel()}.`;
+  }
+}
+
+function alignConfigDrift() {
+  const harnessDefault = harnessDefaultModelProfile();
+  const match = models.find(m => m.id === harnessDefault || m.name === harnessDefault
+    || String(m.id || '').includes(harnessDefault));
+  if (match) {
+    selectModel(match.provider, match.id);
+    settingsState.configDriftDismissed = true;
+    renderConfigDriftBanner();
+    toast('Chat model aligned to harness default', 'success');
+    return;
+  }
+  const chatLabel = chatModelLabel();
+  if (chatLabel) {
+    patchHarnessConfig({ defaults: { modelProfile: chatLabel } });
+    settingsState.configDriftDismissed = true;
+    renderConfigDriftBanner();
+    toast('Harness default aligned to chat model', 'success');
+  }
+}
+
+function renderHarnessSwarmConfigBanner() {
+  if (!harnessSwarmConfigBanner) return;
+  const config = settingsState.harnessConfig || {};
+  const council = config.modelCouncil || {};
+  const endpointCount = Object.keys(council.endpointProfiles || {}).length;
+  const needsConfig = !council.enabled || endpointCount === 0;
+  harnessSwarmConfigBanner.classList.toggle('hidden', !needsConfig);
+  if (harnessSwarmConfigBannerText) {
+    harnessSwarmConfigBannerText.textContent = !council.enabled
+      ? 'Model council is disabled — swarm routing will use defaults only.'
+      : 'No endpoint profiles configured — add endpoints before running multi-model swarm.';
+  }
+}
+
+function setCapabilitiesViewMode(advanced) {
+  capabilitiesAdvancedMode = Boolean(advanced);
+  if (capabilityViewMode) capabilityViewMode.checked = capabilitiesAdvancedMode;
+  document.querySelectorAll('#harness-tab-capabilities .advanced-only').forEach(el => {
+    el.classList.toggle('hidden', !capabilitiesAdvancedMode);
+  });
+  if (capabilityInstallSection) {
+    capabilityInstallSection.classList.toggle('simple-mode', !capabilitiesAdvancedMode);
+  }
+}
+
+function renderApprovalInbox() {
+  const container = document.getElementById('approval-inbox-content');
+  if (!container) return;
+  const pending = Array.from(harnessState.pendingApprovals.values());
+  if (!pending.length) {
+    container.innerHTML = '<div class="settings-hint">No pending approvals</div>';
+    return;
+  }
+  container.innerHTML = pending.map(event => {
+    const action = event.proposedAction || {};
+    const choices = event.choices || ['approve', 'reject'];
+    return `
+      <div class="approval-inbox-item">
+        <div class="approval-inbox-head">
+          <strong>${esc(action.tool || event.kind || 'harness')}</strong>
+          <span class="approval-inbox-risk">${esc(event.risk || 'unknown')}</span>
+        </div>
+        <p class="approval-inbox-reason">${esc(event.reason || '')}</p>
+        <div class="approval-actions">
+          ${choices.map(choice => `
+            <button class="ext-btn ${choice === 'approve' ? 'primary' : ''}" type="button"
+              data-approval-action="${escAttr(choice)}" data-approval-id="${escAttr(event.actionId)}">${esc(choice)}</button>
+          `).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function openApprovalInbox() {
+  renderApprovalInbox();
+  openModal('approval-inbox');
+}
+
+function setAppMode(mode) {
+  activeAppMode = mode || 'chat';
+  document.querySelectorAll('.mode-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === activeAppMode);
+  });
+  if (activeAppMode === 'chat') {
+    harnessPanel?.classList.add('hidden');
+    return;
+  }
+  openHarnessTab({
+    research: 'run',
+    capabilities: 'capabilities',
+    traces: 'traces',
+  }[activeAppMode] || 'run');
+}
+
+function focusTabList(tablist, target) {
+  const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+  const index = tabs.indexOf(target);
+  if (index < 0) return;
+  tabs.forEach((tab, i) => {
+    const active = i === index;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+}
+
+function handleTablistKeydown(event, onSelect) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tablist = event.currentTarget;
+  const tabs = Array.from(tablist.querySelectorAll('[role="tab"]'));
+  const current = tabs.findIndex(tab => tab === document.activeElement || tab.classList.contains('active'));
+  let next = current;
+  if (event.key === 'ArrowLeft') next = (current - 1 + tabs.length) % tabs.length;
+  if (event.key === 'ArrowRight') next = (current + 1) % tabs.length;
+  if (event.key === 'Home') next = 0;
+  if (event.key === 'End') next = tabs.length - 1;
+  const tab = tabs[next];
+  if (!tab) return;
+  event.preventDefault();
+  onSelect?.(tab.dataset.harnessTab || tab.dataset.settingsTab, tab);
+  tab.focus();
+}
+
+function beginInlineSessionRename() {
+  if (!sessionTitleBar || !sessionTitleInput || !sessionTitle) return;
+  sessionTitleInput.value = sessionTitle.textContent.trim();
+  sessionTitle.classList.add('hidden');
+  sessionTitleInput.classList.remove('hidden');
+  sessionTitleInput.focus();
+  sessionTitleInput.select();
+}
+
+function commitInlineSessionRename() {
+  if (!sessionTitleInput || !sessionTitle) return;
+  const name = sessionTitleInput.value.trim();
+  sessionTitleInput.classList.add('hidden');
+  sessionTitle.classList.remove('hidden');
+  if (!name) return;
+  sessionTitle.textContent = name;
+  const s = sessions.find(s => s.id === currentSessionId);
+  if (s) { s.name = name; renderSessions(); }
+}
+
+function filterSessions(list) {
+  const query = sessionSearchQuery.trim().toLowerCase();
+  if (!query) return list;
+  return list.filter(s => String(s.name || '').toLowerCase().includes(query));
+}
+
+function checkCdnOffline() {
+  if (typeof marked !== 'undefined') return;
+  cdnOfflineBanner?.classList.remove('hidden');
 }
 
 function saveSettingsServerUrl() {
@@ -3999,8 +4499,14 @@ function handleSettingsTabClick(event) {
   if (!tab) return;
   settingsState.activeTab = tab;
   renderSettingsTabs();
-  if (tab === 'pi') renderSettingsPiSection();
+  if (tab === 'pi') {
+    renderSettingsPiSection();
+    if (ws?.readyState === WebSocket.OPEN) requestPiModelsSummary();
+  }
   if (tab === 'endpoints') renderSettingsEndpointsList();
+  if (tab === 'swarm') renderSettingsSwarmSection();
+  if (tab === 'harness') renderSettingsRouterSection();
+  if (tab === 'secrets') loadStoredSmitheryKey();
   if (tab === 'workplace' && ws?.readyState === WebSocket.OPEN) requestWorkplaceStatus();
   if (tab === 'harness' && ws?.readyState === WebSocket.OPEN) getHarnessConfig();
 }
@@ -4094,8 +4600,9 @@ function addSession(name) {
 }
 
 function renderSessions() {
-  pinnedList.innerHTML = sessions.filter(s => s.pinned).map(renderSessionItem).join('');
-  recentsList.innerHTML = sessions.filter(s => !s.pinned).map(renderSessionItem).join('');
+  const filtered = filterSessions(sessions);
+  pinnedList.innerHTML = filtered.filter(s => s.pinned).map(renderSessionItem).join('');
+  recentsList.innerHTML = filtered.filter(s => !s.pinned).map(renderSessionItem).join('');
   attachSessionEventListeners();
 }
 
@@ -4122,9 +4629,13 @@ function attachSessionEventListeners() {
 
 function renderSessionItem(s) {
   const sessionId = escAttr(s.id);
+  const countLabel = Number.isFinite(s.messageCount) && s.messageCount > 0
+    ? `<span class="session-message-count">${s.messageCount}</span>`
+    : '';
   return `
     <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${sessionId}">
       <span class="session-name">${esc(s.name)}</span>
+      ${countLabel}
       <div class="session-actions">
         <button class="session-action-btn session-pin-btn" title="${s.pinned ? 'Unpin' : 'Pin'}" data-session-id="${sessionId}">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="${s.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
@@ -4142,7 +4653,11 @@ function renderSessionItem(s) {
 
 function togglePin(id) {
   const s = sessions.find(s => s.id === id);
-  if (s) { s.pinned = !s.pinned; renderSessions(); }
+  if (s) {
+    s.pinned = !s.pinned;
+    savePinnedSessions();
+    renderSessions();
+  }
 }
 function selectSession(id) {
   currentSessionId = id;
@@ -4172,12 +4687,7 @@ function deleteSession(id) {
   }
 }
 function renameSession() {
-  const name = prompt('Rename chat:', sessionTitle.textContent);
-  if (name) {
-    sessionTitle.textContent = name;
-    const s = sessions.find(s => s.id === currentSessionId);
-    if (s) { s.name = name; renderSessions(); }
-  }
+  beginInlineSessionRename();
 }
 function toggleSection(header) {
   header.classList.toggle('collapsed');
@@ -4227,11 +4737,12 @@ function renderPiSessions(sessionFiles) {
         name: sessionName,
         pinned: false,
         path: s.path,
-        messageCount: s.messageCount
+        messageCount: s.messageCount,
       });
     }
   });
-  
+
+  applyPinnedSessionsFromStorage();
   renderSessions();
 }
 
@@ -4334,10 +4845,11 @@ $('#btn-stats').addEventListener('click', () => { send({ type: 'get_session_stat
 $('#btn-export')?.addEventListener('click', (e) => exportChat(e.shiftKey ? 'json' : 'markdown'));
 sidebarToggle?.addEventListener('click', toggleSidebar);
 sidebarOverlay?.addEventListener('click', closeSidebar);
-$('#btn-harness').addEventListener('click', toggleHarnessPanel);
-$('#btn-deep-research')?.addEventListener('click', () => openHarnessTab('deep-research'));
-$('#btn-capabilities')?.addEventListener('click', () => openHarnessTab('capabilities'));
-$('#btn-traces')?.addEventListener('click', () => openHarnessTab('traces'));
+modeNav?.addEventListener('click', (event) => {
+  const btn = event.target.closest('.mode-nav-btn');
+  if (!btn) return;
+  setAppMode(btn.dataset.mode);
+});
 $('#btn-harness-start').addEventListener('click', startHarness);
 $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
@@ -4388,6 +4900,17 @@ document.getElementById('btn-settings-workspace-browse')?.addEventListener('clic
   syncSettingsFormFromState();
   if (ws?.readyState === WebSocket.OPEN) requestWorkplaceStatus();
 });
+settingsWorkspacePathInput?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const newWorkspace = settingsWorkspacePathInput.value.trim();
+    if (newWorkspace) applyWorkspaceSelection(newWorkspace);
+  }
+});
+settingsWorkspacePathInput?.addEventListener('change', () => {
+  const newWorkspace = settingsWorkspacePathInput.value.trim();
+  if (newWorkspace) applyWorkspaceSelection(newWorkspace, { notify: false });
+});
 document.getElementById('btn-settings-init-workplace')?.addEventListener('click', initializeWorkplace);
 document.getElementById('btn-settings-load-preset')?.addEventListener('click', () => {
   applyHarnessPreset(settingsHarnessPreset?.value || 'standard', 'merge');
@@ -4396,6 +4919,78 @@ document.getElementById('btn-settings-apply-preset')?.addEventListener('click', 
   applyHarnessPreset(settingsHarnessPreset?.value || 'standard', 'replace');
 });
 settingsEndpointForm?.addEventListener('submit', saveSettingsEndpoint);
+settingsEndpointsList?.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-endpoint-test]');
+  if (!btn) return;
+  testEndpointProfile(btn.dataset.endpointTest);
+});
+document.getElementById('btn-settings-repair-workplace')?.addEventListener('click', repairWorkplace);
+document.getElementById('btn-settings-save-router')?.addEventListener('click', saveSettingsRouterSection);
+document.getElementById('btn-settings-save-swarm')?.addEventListener('click', saveSettingsSwarmSection);
+document.getElementById('btn-settings-save-secrets')?.addEventListener('click', saveSettingsSecrets);
+document.getElementById('btn-config-drift-align')?.addEventListener('click', alignConfigDrift);
+document.getElementById('btn-config-drift-dismiss')?.addEventListener('click', () => {
+  settingsState.configDriftDismissed = true;
+  renderConfigDriftBanner();
+});
+document.getElementById('btn-harness-swarm-configure')?.addEventListener('click', () => openSettings('swarm'));
+statusChipApprovals?.addEventListener('click', openApprovalInbox);
+statusChipApprovals?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    openApprovalInbox();
+  }
+});
+document.getElementById('approval-inbox-content')?.addEventListener('click', (event) => {
+  const btn = event.target.closest('[data-approval-action]');
+  if (!btn) return;
+  respondHarnessApproval(btn.dataset.approvalId, btn.dataset.approvalAction);
+  renderApprovalInbox();
+});
+sessionSearchInput?.addEventListener('input', (event) => {
+  sessionSearchQuery = event.target.value || '';
+  renderSessions();
+});
+sessionTitleBar?.addEventListener('click', (event) => {
+  if (event.target.closest('.session-title-input')) return;
+  beginInlineSessionRename();
+});
+sessionTitleInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    commitInlineSessionRename();
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    sessionTitleInput.classList.add('hidden');
+    sessionTitle.classList.remove('hidden');
+  }
+});
+sessionTitleInput?.addEventListener('blur', commitInlineSessionRename);
+capabilityViewMode?.addEventListener('change', () => setCapabilitiesViewMode(capabilityViewMode.checked));
+document.querySelector('.workspace-breadcrumb')?.addEventListener('click', () => openSettings('workplace'));
+document.querySelector('.harness-tabs')?.addEventListener('keydown', (event) => {
+  handleTablistKeydown(event, (tabId) => switchHarnessTab(tabId));
+});
+document.querySelector('#modal-settings .settings-tabs')?.addEventListener('keydown', (event) => {
+  handleTablistKeydown(event, (tabId) => {
+    settingsState.activeTab = tabId;
+    renderSettingsTabs();
+    handleSettingsTabClick({ target: document.querySelector(`.settings-tab[data-settings-tab="${tabId}"]`) });
+  });
+});
+document.addEventListener('keydown', (event) => {
+  const tag = event.target?.tagName;
+  const inField = tag === 'INPUT' || tag === 'TEXTAREA' || event.target?.isContentEditable;
+  if (event.key === 'Escape') {
+    closeDropdowns();
+    document.querySelectorAll('.modal:not(.hidden)').forEach(modal => modal.classList.add('hidden'));
+  }
+  if (event.key === '?' && !event.ctrlKey && !event.metaKey && !event.altKey && !inField) {
+    event.preventDefault();
+    openModal('shortcuts');
+  }
+});
 
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.dropdown') && !e.target.closest('.meta-select')) closeDropdowns();
@@ -4429,3 +5024,7 @@ setInterval(() => {
 // Connection is started from the dialog, not automatically
 updateGlobalStatusBar();
 updateHarnessPanelFooterVisibility();
+loadStoredSmitheryKey();
+checkCdnOffline();
+setCapabilitiesViewMode(false);
+setAppMode('chat');

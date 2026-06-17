@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250621">
+  <link rel="stylesheet" href="/app.css?v=20250622">
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -65,7 +65,10 @@
         </div>
       </div>
 
-      <div class="sidebar-nav">
+        <div class="sidebar-nav">
+        <div class="sidebar-search-row">
+          <input id="session-search" type="search" class="sidebar-search" placeholder="Search sessions…" aria-label="Search sessions" />
+        </div>
         <button id="btn-new-chat" class="new-chat-btn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           <span>New chat</span>
@@ -122,17 +125,34 @@
               <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
           </button>
-          <div id="session-title-bar" class="session-title-bar" onclick="renameSession()">
+          <div id="session-title-bar" class="session-title-bar" title="Click to rename">
             <span id="session-title">New Chat</span>
+            <input id="session-title-input" class="session-title-input hidden" type="text" aria-label="Session title" />
             <svg class="title-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
         </div>
+        <nav id="mode-nav" class="mode-nav" aria-label="Workspace mode">
+          <button class="mode-nav-btn active" type="button" data-mode="chat">Chat</button>
+          <button class="mode-nav-btn" type="button" data-mode="research">Research</button>
+          <button class="mode-nav-btn" type="button" data-mode="capabilities">Capabilities</button>
+          <button class="mode-nav-btn" type="button" data-mode="traces">Traces</button>
+        </nav>
         <div id="global-status-bar" class="topbar-right global-status-bar" aria-label="System status">
           <span id="status-chip-connection" class="status-chip" data-state="connecting">Connecting</span>
           <span id="status-chip-sidecar" class="status-chip" data-state="unknown">Sidecar unknown</span>
-          <span id="status-chip-approvals" class="status-chip" data-state="none">0 approvals</span>
+          <span id="status-chip-approvals" class="status-chip status-chip-clickable" data-state="none" role="button" tabindex="0" title="Open approval inbox">0 approvals</span>
         </div>
       </header>
+
+      <div id="config-drift-banner" class="config-drift-banner hidden" role="status">
+        <span id="config-drift-text">Harness default model differs from chat model.</span>
+        <button id="btn-config-drift-align" class="config-drift-btn" type="button">Align</button>
+        <button id="btn-config-drift-dismiss" class="config-drift-dismiss" type="button" aria-label="Dismiss">&times;</button>
+      </div>
+
+      <div id="cdn-offline-banner" class="cdn-offline-banner hidden" role="alert">
+        Markdown rendering unavailable — CDN scripts failed to load.
+      </div>
 
       <div id="workspace-layout" class="workspace-layout">
         <aside id="harness-panel" class="harness-panel hidden" aria-label="Helios Harness tools">
@@ -147,11 +167,11 @@
             </div>
           </div>
           <div class="harness-tabs" role="tablist" aria-label="Harness tools">
-            <button class="harness-tab active" type="button" data-harness-tab="run">Run</button>
-            <button class="harness-tab" type="button" data-harness-tab="deep-research">Deep Research</button>
-            <button class="harness-tab" type="button" data-harness-tab="capabilities">Capabilities</button>
-            <button class="harness-tab" type="button" data-harness-tab="swarm">Swarm</button>
-            <button class="harness-tab" type="button" data-harness-tab="traces">Traces</button>
+            <button class="harness-tab active" type="button" role="tab" aria-selected="true" data-harness-tab="run">Run</button>
+            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="deep-research">Deep Research</button>
+            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="capabilities">Capabilities</button>
+            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="swarm">Swarm</button>
+            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="traces">Traces</button>
           </div>
           <div id="harness-tab-run" class="harness-tab-panel active">
             <div class="harness-task-row">
@@ -205,9 +225,13 @@
           <div id="harness-tab-capabilities" class="harness-tab-panel">
             <div class="harness-capability-toolbar">
               <span id="harness-capability-status">No capabilities loaded</span>
+              <label class="harness-simple-toggle">
+                <input id="capability-view-mode" type="checkbox" />
+                <span>Advanced</span>
+              </label>
               <button id="btn-harness-capabilities-refresh" class="harness-btn" type="button">Refresh</button>
             </div>
-            <div class="harness-capability-install">
+            <div class="harness-capability-install" id="harness-capability-install">
               <div class="harness-capability-install-main">
                 <label>Install / Search
                   <input id="capability-install-query" type="text" placeholder="npx -y skills add https://smithery.ai/skills/anthropics/skill-creator, https://codex.openai.com/marketplace/skills/openai/code-review, claude mcp add browser-tools https://example.com/mcp, pi extension add https://github.com/jackjstark/pi-kwargs, or search text" />
@@ -258,7 +282,7 @@
                   <div id="capability-list-slash_command" class="harness-capability-list"></div>
                 </section>
               </div>
-              <form id="harness-capability-form" class="harness-capability-form">
+              <form id="harness-capability-form" class="harness-capability-form advanced-only">
                 <div class="harness-capability-form-title">Advanced Record</div>
                 <input id="capability-id" type="hidden" />
                 <div class="harness-form-grid">
@@ -295,6 +319,10 @@
             </div>
           </div>
           <div id="harness-tab-swarm" class="harness-tab-panel">
+            <div id="harness-swarm-config-banner" class="harness-config-banner hidden">
+              <span id="harness-swarm-config-banner-text">Swarm routing is not configured.</span>
+              <button id="btn-harness-swarm-configure" class="harness-btn" type="button">Configure in Settings</button>
+            </div>
             <div class="harness-swarm-toolbar">
               <span id="harness-swarm-status">No swarm attempts yet</span>
               <span id="harness-swarm-active-count">0 active</span>
@@ -473,19 +501,7 @@
       </div>
 
       <div id="input-area">
-        <div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">
-          <button id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
-          </button>
-          <button id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5 5l14 14"/><path d="M19 5L5 19"/></svg>
-          </button>
-          <button id="btn-traces" class="topbar-icon-btn" title="Traces" aria-label="Open Traces and Replay">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16"/><path d="M4 12h10"/><path d="M4 19h7"/><path d="M17 15l3 3-3 3"/><path d="M14 18h6"/></svg>
-          </button>
-          <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
-          </button>
+        <div class="topbar-actions bottom-left-tool-dock dock-minimal" aria-label="Workspace tools">
           <button id="btn-export" class="topbar-icon-btn" title="Export chat (Shift+click for JSON)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </button>
@@ -501,14 +517,8 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
             </button>
             <div class="input-meta">
-              <div class="meta-select workspace-wrapper" onclick="document.getElementById('workspace-input').focus()">
-                <input type="text" id="workspace-input" class="workspace-input" placeholder="workspace" />
-                <button id="btn-workspace-browse" class="workspace-browse-btn" type="button" title="Browse workspace" aria-label="Browse workspace">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-                    <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v1"/>
-                    <path d="M3 9h18l-2 10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z"/>
-                  </svg>
-                </button>
+              <div class="meta-select workspace-wrapper workspace-breadcrumb" title="Change workspace in Settings">
+                <span id="workspace-breadcrumb" class="workspace-breadcrumb-text">workspace</span>
               </div>
               <div id="model-select-wrapper" class="meta-select" onclick="openDropdown('model')">
                 <span id="model-display" class="meta-text">—</span>
@@ -558,6 +568,31 @@
       </div>
     </div>
 
+    <!-- Approval Inbox -->
+    <div id="modal-approval-inbox" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header"><h2>Approval Inbox</h2><button class="modal-close" onclick="closeModal('approval-inbox')">&times;</button></div>
+        <div class="modal-body"><div id="approval-inbox-content" class="approval-inbox-content">No pending approvals</div></div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcuts -->
+    <div id="modal-shortcuts" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content modal-content-compact">
+        <div class="modal-header"><h2>Keyboard Shortcuts</h2><button class="modal-close" onclick="closeModal('shortcuts')">&times;</button></div>
+        <div class="modal-body">
+          <ul class="shortcuts-list">
+            <li><kbd>Enter</kbd><span>Send message (or steer while streaming)</span></li>
+            <li><kbd>Shift</kbd> + <kbd>Enter</kbd><span>New line in composer</span></li>
+            <li><kbd>?</kbd><span>Show this help</span></li>
+            <li><kbd>Esc</kbd><span>Close dropdowns and modals</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
     <!-- Harness Approval -->
     <div id="modal-harness-approval" class="modal hidden">
       <div class="modal-overlay"></div>
@@ -585,11 +620,13 @@
           <button class="modal-close" onclick="closeModal('settings')">&times;</button>
         </div>
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-          <button class="settings-tab active" type="button" data-settings-tab="connection">Connection</button>
-          <button class="settings-tab" type="button" data-settings-tab="workplace">Workplace</button>
-          <button class="settings-tab" type="button" data-settings-tab="harness">Harness</button>
-          <button class="settings-tab" type="button" data-settings-tab="endpoints">Endpoints</button>
-          <button class="settings-tab" type="button" data-settings-tab="pi">Pi</button>
+          <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="connection">Connection</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="workplace">Workplace</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="harness">Harness</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="endpoints">Endpoints</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="swarm">Swarm</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="secrets">Secrets</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="pi">Pi</button>
         </div>
         <div class="modal-body settings-modal-body">
           <section id="settings-tab-connection" class="settings-panel active">
@@ -606,7 +643,7 @@
           <section id="settings-tab-workplace" class="settings-panel">
             <label class="settings-label" for="settings-workspace-path">Workspace path</label>
             <div class="settings-row">
-              <input id="settings-workspace-path" type="text" class="settings-input mono" placeholder="/path/to/project" readonly />
+              <input id="settings-workspace-path" type="text" class="settings-input mono" placeholder="/path/to/project" />
               <button id="btn-settings-workspace-browse" class="settings-btn" type="button">Browse</button>
             </div>
             <div id="settings-workplace-health" class="settings-health-checklist">
@@ -614,6 +651,7 @@
             </div>
             <div class="settings-actions">
               <button id="btn-settings-init-workplace" class="settings-btn primary" type="button">Initialize workplace</button>
+              <button id="btn-settings-repair-workplace" class="settings-btn" type="button">Repair missing</button>
               <button id="btn-settings-load-preset" class="settings-btn" type="button">Load preset</button>
             </div>
           </section>
@@ -628,6 +666,32 @@
               <button id="btn-settings-apply-preset" class="settings-btn primary" type="button">Apply preset</button>
             </div>
             <p id="settings-harness-status" class="settings-hint"></p>
+            <details id="settings-router-collapsible" class="settings-collapsible">
+              <summary class="settings-section-title">Router &amp; adaptive search</summary>
+              <div class="settings-collapsible-body">
+                <label class="settings-checkbox-row"><input id="settings-model-router-enabled" type="checkbox" /> Enable model router</label>
+                <label class="settings-field">Router strategy
+                  <select id="settings-model-router-strategy" class="settings-select">
+                    <option value="thompson_sampling">thompson_sampling</option>
+                    <option value="epsilon_greedy">epsilon_greedy</option>
+                  </select>
+                </label>
+                <label class="settings-field">Adaptive search mode
+                  <select id="settings-adaptive-search-mode" class="settings-select">
+                    <option value="advisory">advisory</option>
+                    <option value="active">active</option>
+                    <option value="off">off</option>
+                  </select>
+                </label>
+                <label class="settings-field">Max actions per task
+                  <input id="settings-adaptive-search-max-actions" type="number" min="1" max="64" class="settings-input" />
+                </label>
+                <label class="settings-checkbox-row"><input id="settings-adaptive-search-profile-switch" type="checkbox" /> Allow profile switching</label>
+                <div class="settings-actions">
+                  <button id="btn-settings-save-router" class="settings-btn primary" type="button">Save router settings</button>
+                </div>
+              </div>
+            </details>
           </section>
           <section id="settings-tab-endpoints" class="settings-panel">
             <div class="settings-section-title">Endpoint profiles</div>
@@ -651,6 +715,38 @@
               </div>
             </form>
           </section>
+          <section id="settings-tab-swarm" class="settings-panel">
+            <label class="settings-checkbox-row"><input id="settings-model-council-enabled" type="checkbox" /> Enable model council</label>
+            <div id="settings-swarm-roles" class="settings-swarm-roles">
+              <div class="settings-hint">Load harness config to edit role routing.</div>
+            </div>
+            <div class="settings-form-grid">
+              <label class="settings-field">Concurrency
+                <input id="settings-swarm-concurrency" type="number" min="1" max="32" class="settings-input" />
+              </label>
+              <label class="settings-field">Worker mode
+                <select id="settings-swarm-worker-mode" class="settings-select">
+                  <option value="model_driven">model_driven</option>
+                  <option value="pi_native">pi_native</option>
+                </select>
+              </label>
+            </div>
+            <label class="settings-checkbox-row"><input id="settings-swarm-pi-native" type="checkbox" /> Pi-native swarm execution</label>
+            <div class="settings-section-title">Feature toggles</div>
+            <div id="settings-swarm-features" class="settings-feature-grid"></div>
+            <div class="settings-actions">
+              <button id="btn-settings-save-swarm" class="settings-btn primary" type="button">Save swarm settings</button>
+            </div>
+          </section>
+          <section id="settings-tab-secrets" class="settings-panel">
+            <label class="settings-field" for="settings-smithery-key">Smithery API key
+              <input id="settings-smithery-key" type="password" class="settings-input" placeholder="Stored locally in this browser" autocomplete="off" />
+            </label>
+            <p class="settings-hint">Saved to localStorage as <code>helios_smithery_key</code>. Used for capability search when the Capabilities tab key is empty.</p>
+            <div class="settings-actions">
+              <button id="btn-settings-save-secrets" class="settings-btn primary" type="button">Save secrets</button>
+            </div>
+          </section>
           <section id="settings-tab-pi" class="settings-panel">
             <div class="settings-readonly-grid">
               <div class="settings-readonly-card">
@@ -663,6 +759,10 @@
               </div>
             </div>
             <p class="settings-hint">Reflects the current Pi session state from the composer.</p>
+            <div class="settings-section-title">Pi models catalog</div>
+            <div id="settings-pi-models-summary" class="settings-pi-models-summary">
+              <div class="settings-hint">Open this tab while connected to load models.</div>
+            </div>
           </section>
         </div>
       </div>
@@ -692,6 +792,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250621"></script>
+  <script src="/app.js?v=20250622"></script>
 </body>
 </html>

@@ -2,16 +2,24 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-test('harness controls expose deep research and capabilities as first-class toolbar actions', async () => {
+test('harness controls expose mode navigation and minimal tool dock', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const css = await readFile('public/app.css', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
 
-  assert.match(html, /id="btn-deep-research" class="topbar-icon-btn" title="Deep Research" aria-label="Open Deep Research"/);
-  assert.match(html, /id="btn-capabilities" class="topbar-icon-btn" title="Capabilities" aria-label="Add Skills and MCPs"/);
-  assert.match(html, /<div class="topbar-actions bottom-left-tool-dock" aria-label="Workspace tools">/);
+  assert.match(html, /id="mode-nav" class="mode-nav"/);
+  assert.match(html, /data-mode="research"/);
+  assert.match(html, /data-mode="capabilities"/);
+  assert.match(html, /data-mode="traces"/);
+  assert.match(html, /<div class="topbar-actions bottom-left-tool-dock dock-minimal" aria-label="Workspace tools">/);
+  assert.match(html, /id="btn-export"/);
+  assert.match(html, /id="btn-stats"/);
+  assert.doesNotMatch(html, /id="btn-deep-research"/);
+  assert.match(appJs, /function setAppMode/);
+  assert.match(appJs, /activeAppMode/);
   const inputStart = html.indexOf('<div id="input-area">');
   const inputEnd = html.indexOf('</main>', inputStart);
-  const dockStart = html.indexOf('<div class="topbar-actions bottom-left-tool-dock"', inputStart);
+  const dockStart = html.indexOf('class="topbar-actions bottom-left-tool-dock', inputStart);
   assert.ok(dockStart > inputStart && dockStart < inputEnd, 'tool dock should live in the input-area chrome layer');
   assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*static/s);
   assert.doesNotMatch(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
@@ -65,7 +73,7 @@ test('harness controls expose trace replay as a compact toolbar and tab surface'
   const appJs = await readFile('public/app.js', 'utf8');
   const serverJs = await readFile('src/server.js', 'utf8');
 
-  assert.match(html, /id="btn-traces" class="topbar-icon-btn" title="Traces" aria-label="Open Traces and Replay"/);
+  assert.match(html, /data-mode="traces"/);
   assert.match(html, /data-harness-tab="traces"/);
   assert.match(html, /id="harness-trace-list"/);
   assert.match(html, /id="harness-trace-events"/);
@@ -385,6 +393,6 @@ test('harness panel exposes capability goal status rows', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250621/);
-  assert.match(html, /app\.js\?v=20250621/);
+  assert.match(html, /app\.css\?v=20250622/);
+  assert.match(html, /app\.js\?v=20250622/);
 });
