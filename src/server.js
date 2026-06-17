@@ -643,6 +643,23 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         }));
         break;
       }
+      case 'harness_evidence_refresh': {
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const [replayCycles, operatorDashboards] = await Promise.all([
+          harness.client.getProductionEvidence('replayCycles'),
+          harness.client.getProductionEvidence('operatorDashboards'),
+        ]);
+        ws.send(JSON.stringify({
+          type: 'harness_evidence_refresh',
+          data: {
+            evidenceOnly: true,
+            canPromote: false,
+            replayCycles,
+            operatorDashboards,
+          },
+        }));
+        break;
+      }
       case 'harness_skill_candidates_get': {
         await ensureHarnessRunning(harness, pi, feedback);
         const result = await harness.client.listSkillCandidates({

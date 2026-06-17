@@ -180,6 +180,49 @@ test('harness status snapshot includes governance dashboard summaries', () => {
   assert.equal(snapshot.governance.audit.overrideCount, 1);
 });
 
+test('decideGovernanceAction escalates when trust kernel blocks before auto-approval', () => {
+  const auto = decideGovernanceAction({
+    autonomyLevel: 2,
+    candidate: {
+      candidateId: 'local-config-a',
+      changeType: 'local_config',
+      risk: 'low',
+      costIncrease: 0,
+    },
+    evidence: { baselinePassed: true, heldOutPassed: true },
+    rollback: { reversible: true },
+    actor: 'meta-loop',
+  });
+
+  const blocked = decideGovernanceAction({
+    autonomyLevel: 2,
+    candidate: {
+      candidateId: 'local-config-a',
+      changeType: 'local_config',
+      risk: 'low',
+      costIncrease: 0,
+    },
+    evidence: { baselinePassed: true, heldOutPassed: true },
+    rollback: { reversible: true },
+    trust: {
+      evaluate: true,
+      workspaceRoot: process.cwd(),
+      proposal: {
+        kind: 'source_patch',
+        paths: ['../outside.js'],
+      },
+    },
+    actor: 'meta-loop',
+  });
+
+  assert.equal(auto.decision, 'auto_approved');
+  assert.equal(blocked.decision, 'escalated');
+  assert.equal(blocked.evidenceOnly, true);
+  assert.equal(blocked.canPromote, false);
+  assert.ok(blocked.reasons.some((reason) => reason.startsWith('trust_kernel_blocked:')));
+  assert.equal(blocked.auditEvent.type, 'governance.escalation');
+});
+
 test('governance status exposes longitudinal frontier dashboard rows without promotion authority', () => {
   const summary = summarizeGovernanceStatus({
     longitudinalFrontier: {

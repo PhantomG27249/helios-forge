@@ -66,6 +66,10 @@ import { evaluatePromotion } from './meta/promotionPolicy.js';
 import { runResearchPolicyBesLane } from './meta/researchPolicyEvolution.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { runVerifierEvolutionLoop } from './meta/verifierEvolutionLoop.js';
+import {
+  buildGovernanceTrustInput,
+  runPostTaskRecursiveEvolutionHooks,
+} from './meta/recursiveEvolutionRuntimeHook.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
 import { composeUnifiedContext } from './rag/unifiedContextComposer.js';
 import { buildRhoCoreset } from './rho/coresetBuilder.js';
@@ -1525,6 +1529,14 @@ export function createHarnessSidecar({
       },
       evidence: { baselinePassed: true, heldOutPassed: true },
       rollback: { reversible: rollbackDrill.reversible },
+      trust: buildGovernanceTrustInput({
+        workspaceRoot: resolvedWorkspaceRoot,
+        proposal: {
+          kind: 'source_patch',
+          paths: metaProposal.patch ? ['.harness/runtime'] : [],
+          patch: metaProposal.patch,
+        },
+      }),
       actor: 'sidecar-governance',
     });
     const governance = summarizeGovernanceStatus({
@@ -2080,7 +2092,10 @@ export function createHarnessSidecar({
       featureFlags: {
         localMetaHarness: harnessConfig?.features?.localMetaHarness !== false,
         localMemoryGraph: harnessConfig?.features?.localMemoryGraph !== false,
-        localMetaArchive: false,
+        localMetaArchive: harnessConfig?.features?.nestedSwarmCells === true
+          || process.env.HELIOS_NESTED_SWARM_CELLS === '1',
+        nestedSwarmCells: harnessConfig?.features?.nestedSwarmCells === true
+          || process.env.HELIOS_NESTED_SWARM_CELLS === '1',
       },
       onAttemptEvent: emitEvent,
       commandAdapter: swarmCommandRunner,
@@ -2484,6 +2499,23 @@ export function createHarnessSidecar({
       },
       'sidecar-orchestrator',
     );
+
+    const swarmMemoryProposals = attempts.flatMap((attempt) => [
+      ...(attempt.evolutionOutput?.memoryProposals || []),
+      ...(attempt.localMeta?.candidates || []).flatMap((candidate) => candidate.memoryProposals || []),
+    ]);
+    await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot: resolvedWorkspaceRoot,
+      harnessConfig,
+      task,
+      memoryProposals: swarmMemoryProposals,
+      rollbackDrill: {
+        candidateId: champion?.attemptId || task.taskId,
+        restoreVerified: true,
+        reversible: true,
+      },
+      emitEvent,
+    });
   }
 
   async function createTask(body) {

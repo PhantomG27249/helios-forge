@@ -1,3 +1,4 @@
+import { evaluateProposalTrustBoundary } from '../core/trustKernelGateway.js';
 import { decideAutoApproval } from './autoApprovalPolicy.js';
 import { evaluateProductionAutonomy } from './productionAutonomyPolicy.js';
 import { updateHarnessFrontier } from './harnessFrontier.js';
@@ -360,6 +361,33 @@ export function decideGovernanceAction({
         },
       }),
     };
+  }
+
+  if (trust.evaluate === true && trust.workspaceRoot && trust.proposal) {
+    const trustBoundary = evaluateProposalTrustBoundary({
+      workspaceRoot: trust.workspaceRoot,
+      proposal: trust.proposal,
+      evidence,
+      visual: trust.visual,
+    });
+    if (!trustBoundary.allowed) {
+      const reasons = [`trust_kernel_blocked:${trustBoundary.boundary?.reason || trustBoundary.reasons?.[0] || 'boundary_rejected'}`];
+      return {
+        decision: 'escalated',
+        autonomy,
+        evidenceOnly: true,
+        canPromote: false,
+        productionAutonomy,
+        reasons,
+        auditEvent: auditEvent({
+          type: 'governance.escalation',
+          actor,
+          candidate,
+          reasons,
+          decision: 'escalated',
+        }),
+      };
+    }
   }
 
   const approval = decideAutoApproval({ candidate, evidence, rollback, trust, approvals, policy });

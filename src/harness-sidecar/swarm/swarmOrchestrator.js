@@ -17,6 +17,8 @@ import { reviewAttempt } from './reviewer.js';
 import { runSwarmAttemptsBounded } from './swarmExecutor.js';
 import { runSubagentAttempt } from './subagentRunner.js';
 import { getDefaultSwarmCells, resolveSwarmCell } from './swarmCellRegistry.js';
+import { orchestrateNestedSwarm } from './nestedSwarmOrchestrator.js';
+import { allocateOversoulBudget } from './oversoulBudgetRouter.js';
 import { runWorktreeAttempt } from './worktreeAttemptRunner.js';
 
 function buildRiskPolicy(context = {}, riskPolicy = {}) {
@@ -456,6 +458,67 @@ export async function orchestrateSwarm({
   oversoulContext = null,
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
+  if (featureEnabled(featureFlags, 'nestedSwarmCells')) {
+    const cells = getDefaultSwarmCells().slice(0, 3);
+    const budgetPlan = allocateOversoulBudget({
+      cells,
+      totalBudget: budget,
+      roleEcology: oversoulContext?.roleEcology || { coreRoles: cells.map((cell) => cell.role), missingRoles: [] },
+    });
+    const nested = await orchestrateNestedSwarm({
+      workspaceRoot,
+      cells,
+      task: { ...task, taskId },
+      commandAdapter,
+      featureFlags: {
+        ...featureFlags,
+        localMetaHarness: featureFlags.localMetaHarness !== false,
+      },
+      budget: { ...budget, cells: budgetPlan.cells },
+      context,
+    });
+    const attempts = nested.cells.map((cellResult, index) => ({
+      attemptId: cellResult.attemptId || cellResult.cellId || `nested_${index + 1}`,
+      role: cellResult.role || cells[index]?.role || 'implementer',
+      status: cellResult.contract?.valid === false ? 'failed' : 'completed',
+      output: cellResult.taskOutput || {},
+      evolutionOutput: cellResult.evolutionOutput || {},
+      localMeta: cellResult.localMeta || null,
+      score: cellResult.score || 0,
+      verifierPassed: cellResult.contract?.valid !== false,
+      nestedSwarm: true,
+      cellId: cellResult.cellId,
+    }));
+    const reviews = attempts.map((attempt) => reviewAttempt({
+      attempt,
+      riskPolicy: buildRiskPolicy(context, riskPolicy),
+    }));
+    const champion = chooseChampion(attempts);
+    return {
+      taskId,
+      runMode: { mode: 'nested-swarm', dryRun: !commandAdapter, real: Boolean(commandAdapter) },
+      attempts,
+      reviews,
+      recombination: recombineApprovedOutputs({ taskId, reviews }),
+      champion,
+      nestedSwarm: {
+        mergedEvolutionOutput: nested.mergedEvolutionOutput,
+        evidenceOnly: nested.evidenceOnly,
+        canPromote: nested.canPromote,
+        budgetPlan,
+      },
+      modelCouncil: null,
+      modelRouter: null,
+      oversoul: oversoulContext
+        ? {
+          authority: 'advisory',
+          canPromote: false,
+          roleEcology: oversoulContext.roleEcology,
+          strategyPosture: oversoulContext.strategyPosture,
+        }
+        : null,
+    };
+  }
   const hasModelWorker = Boolean(modelWorkerProvider({
     modelGateway,
     modelProvider,

@@ -1,6 +1,50 @@
+import { evaluateProposalTrustBoundary } from './trustKernelGateway.js';
 import { applyChangeProposal } from '../meta/changeProposal.js';
 import { applyChampion } from '../swarm/championApply.js';
 import { applyVerifierConfigCandidate } from '../tools/verifierConfigApply.js';
+
+function pathsFromPatch(patch) {
+  if (!patch) return [];
+  const paths = [];
+  for (const line of String(patch).split('\n')) {
+    const match = line.match(/^diff --git a\/(.+?) b\//);
+    if (match) paths.push(match[1]);
+  }
+  return paths;
+}
+
+function proposalFromApplyAction(action = {}) {
+  const payload = action.payload || {};
+  if (action.kind === 'champion_apply') {
+    const patch = payload.champion?.patch || payload.champion?.output?.patch;
+    const paths = pathsFromPatch(patch);
+    return {
+      kind: 'source_patch',
+      paths: paths.length ? paths : (patch ? ['.harness/CHAMPION.md'] : []),
+      patch,
+      championAttemptId: payload.champion?.attemptId,
+    };
+  }
+  if (action.kind === 'change_proposal_apply') {
+    const proposal = payload.proposal || {};
+    const paths = proposal.paths || proposal.files || (proposal.path ? [proposal.path] : pathsFromPatch(proposal.patch));
+    const hasPatch = Boolean(proposal.patch || paths.length);
+    return {
+      kind: hasPatch ? (proposal.kind || 'source_patch') : (proposal.kind || 'change_proposal'),
+      paths,
+      patch: proposal.patch,
+      changes: proposal.changes,
+    };
+  }
+  if (action.kind === 'verifier_config_apply') {
+    return {
+      kind: 'verifier_config_apply',
+      paths: ['.harness/verifiers.json'],
+      candidate: payload.candidate,
+    };
+  }
+  return { kind: action.kind || 'unknown' };
+}
 
 function clonePlain(value) {
   if (value === undefined || value === null) {
@@ -179,6 +223,29 @@ export async function executeApprovedApplyAction({
     const result = baseApplyResult(action, 'rejected', 'unknown_apply_kind');
     await emitMaybe(emitEvent, { type: 'approval.apply_rejected', ...result });
     return result;
+  }
+
+  if (workspaceRoot) {
+    const boundary = evaluateProposalTrustBoundary({
+      workspaceRoot,
+      proposal: proposalFromApplyAction(action),
+      evidence: {
+        approved: approved === true,
+        approval: {
+          approved: approved === true,
+          approvedBy: action.approvedBy || action.payload?.approvedBy || null,
+        },
+      },
+    });
+    if (!boundary.allowed) {
+      const result = {
+        ...baseApplyResult(action, 'rejected', boundary.boundary?.reason || 'trust_kernel_blocked'),
+        trustBoundary: boundary.boundary,
+        reasons: boundary.reasons,
+      };
+      await emitMaybe(emitEvent, { type: 'approval.apply_rejected', ...result });
+      return result;
+    }
   }
 
   let applyResult;

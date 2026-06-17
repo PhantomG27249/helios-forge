@@ -97,6 +97,7 @@ let harnessState = {
   capabilityGoals: null,
   passK: null,
   productionEvidence: {},
+  recursiveEvolutionEvidence: null,
 };
 const PRODUCTION_EVIDENCE_TYPES = [
   ['heldOutSuites', 'Held-out suites'],
@@ -427,6 +428,8 @@ const harnessSwarmThinking = $('#harness-swarm-thinking');
 const harnessSwarmActions = $('#harness-swarm-actions');
 const harnessSwarmHandoff = $('#harness-swarm-handoff');
 const harnessSwarmEventInspector = $('#harness-swarm-event-inspector');
+let harnessRecursiveEvolutionEvidenceStatus = null;
+let harnessRecursiveEvolutionEvidenceRows = null;
 const harnessLocalMetaStatus = $('#harness-local-meta-status');
 const harnessLocalMetaCandidates = $('#harness-local-meta-candidates');
 const harnessLocalMetaCell = $('#harness-local-meta-cell');
@@ -834,6 +837,10 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_production_evidence') {
     handleHarnessProductionEvidence(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_evidence_refresh') {
+    handleHarnessRecursiveEvolutionEvidence(msg.data || msg);
     return;
   }
   if (msg.type === 'harness_skill_candidates') {
@@ -1572,6 +1579,7 @@ function renderHarnessPanel() {
   renderHarnessVerifierEvolution();
   renderHarnessAdaptiveSearch();
   renderHarnessProductionEvidence();
+  renderHarnessRecursiveEvolutionEvidence();
   renderHarnessSkillCandidates();
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
@@ -1803,6 +1811,79 @@ function renderHarnessProductionEvidence() {
   }).join('');
 }
 
+function ensureRecursiveEvolutionEvidencePanel() {
+  if (harnessRecursiveEvolutionEvidenceRows) return;
+  const swarmPanel = document.getElementById('harness-tab-swarm');
+  const toolbar = swarmPanel?.querySelector('.harness-swarm-toolbar');
+  if (!toolbar) return;
+  const section = document.createElement('section');
+  section.id = 'harness-recursive-evolution-evidence';
+  section.className = 'harness-hierarchy-panel';
+  section.setAttribute('aria-label', 'Recursive evolution evidence');
+  section.innerHTML = `
+    <div class="harness-section-title-row compact">
+      <span>Recursive Evolution Evidence</span>
+      <button id="btn-harness-evidence-refresh" class="harness-btn" type="button">Refresh</button>
+    </div>
+    <div id="harness-recursive-evolution-evidence-status" class="harness-muted-line">No recursive evolution evidence loaded</div>
+    <div id="harness-recursive-evolution-evidence-rows" class="harness-list compact"></div>
+  `;
+  toolbar.insertAdjacentElement('afterend', section);
+  harnessRecursiveEvolutionEvidenceStatus = $('#harness-recursive-evolution-evidence-status');
+  harnessRecursiveEvolutionEvidenceRows = $('#harness-recursive-evolution-evidence-rows');
+  $('#btn-harness-evidence-refresh')?.addEventListener('click', requestHarnessRecursiveEvolutionEvidence);
+}
+
+function requestHarnessRecursiveEvolutionEvidence() {
+  ensureRecursiveEvolutionEvidencePanel();
+  if (harnessRecursiveEvolutionEvidenceStatus) {
+    harnessRecursiveEvolutionEvidenceStatus.textContent = 'Refreshing recursive evolution evidence...';
+  }
+  send({
+    type: 'harness_evidence_refresh',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
+  });
+}
+
+function handleHarnessRecursiveEvolutionEvidence(payload = {}) {
+  harnessState.recursiveEvolutionEvidence = {
+    evidenceOnly: payload.evidenceOnly !== false,
+    canPromote: payload.canPromote === true,
+    replayCycles: payload.replayCycles || null,
+    operatorDashboards: payload.operatorDashboards || null,
+  };
+  renderHarnessRecursiveEvolutionEvidence();
+}
+
+function renderHarnessRecursiveEvolutionEvidence() {
+  ensureRecursiveEvolutionEvidencePanel();
+  if (!harnessRecursiveEvolutionEvidenceRows) return;
+  const evidence = harnessState.recursiveEvolutionEvidence;
+  if (!evidence) {
+    if (harnessRecursiveEvolutionEvidenceStatus) {
+      harnessRecursiveEvolutionEvidenceStatus.textContent = 'No recursive evolution evidence loaded';
+    }
+    harnessRecursiveEvolutionEvidenceRows.innerHTML = '';
+    return;
+  }
+
+  const replayCount = evidence.replayCycles?.summary?.itemCount ?? 0;
+  const dashboardCount = evidence.operatorDashboards?.summary?.itemCount ?? 0;
+  const badge = evidence.evidenceOnly === false ? 'mixed authority' : 'evidence_only';
+  if (harnessRecursiveEvolutionEvidenceStatus) {
+    harnessRecursiveEvolutionEvidenceStatus.textContent = `${replayCount + dashboardCount} evidence snapshot${replayCount + dashboardCount === 1 ? '' : 's'} loaded | ${badge}`;
+  }
+  harnessRecursiveEvolutionEvidenceRows.innerHTML = [
+    ['Replay cycles', replayCount],
+    ['Operator dashboards', dashboardCount],
+  ].map(([label, itemCount]) => `
+    <div class="harness-list-row">
+      <strong>${esc(label)}</strong>
+      <span>${esc(String(itemCount))} item${itemCount === 1 ? '' : 's'} | ${esc(badge)}</span>
+    </div>
+  `).join('');
+}
+
 function requestHarnessSkillCandidates() {
   if (harnessSkillCandidatesEl) harnessSkillCandidatesEl.innerHTML = '<div class="harness-empty compact">Refreshing skill candidates...</div>';
   if (harnessSkillCandidatesRequestTimer) clearTimeout(harnessSkillCandidatesRequestTimer);
@@ -1963,6 +2044,9 @@ function switchHarnessTab(tabId) {
   }
   if (activeHarnessTab === 'run' && !harnessAdaptiveLoaded) {
     requestHarnessAdaptiveSearchStatus();
+  }
+  if (activeHarnessTab === 'swarm' && !harnessState.recursiveEvolutionEvidence) {
+    requestHarnessRecursiveEvolutionEvidence();
   }
 }
 
@@ -2877,6 +2961,9 @@ function toggleHarnessPanel() {
     if (activeHarnessTab === 'capabilities') requestHarnessCapabilities();
     if (activeHarnessTab === 'capabilities') requestHarnessSkillCandidates();
     if (activeHarnessTab === 'traces') requestHarnessTraces();
+    if (activeHarnessTab === 'swarm' && !harnessState.recursiveEvolutionEvidence) {
+      requestHarnessRecursiveEvolutionEvidence();
+    }
   }
 }
 
