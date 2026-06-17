@@ -24,8 +24,11 @@ import {
   getHarnessConfig,
   initializeWorkplace,
   patchHarnessConfig,
+  repairWorkplace,
 } from './harness/harnessConfigService.js';
 import { getWorkplaceStatus } from './harness/workplaceStatus.js';
+import { testEndpointProfile } from './harness/endpointHealth.js';
+import { getPiModelsSummary } from './harness/piModelsSummary.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -744,6 +747,23 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           });
         }
         ws.send(JSON.stringify({ type: 'harness_config_reloaded' }));
+        break;
+      }
+      case 'harness_workplace_repair': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const data = await repairWorkplace(workspaceRoot);
+        ws.send(JSON.stringify({ type: 'harness_workplace_repaired', data }));
+        break;
+      }
+      case 'harness_endpoint_test': {
+        const profile = msg.profile || msg.endpointProfile || {};
+        const data = await testEndpointProfile(profile);
+        ws.send(JSON.stringify({ type: 'harness_endpoint_test_result', data: { ...data, profileId: msg.profileId } }));
+        break;
+      }
+      case 'pi_models_get': {
+        const data = await getPiModelsSummary();
+        ws.send(JSON.stringify({ type: 'pi_models_summary', data }));
         break;
       }
       case 'get_session_files': {

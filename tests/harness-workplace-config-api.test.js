@@ -10,6 +10,7 @@ import {
   getHarnessConfig,
   patchHarnessConfig,
 } from '../src/harness/harnessConfigService.js';
+import { testEndpointProfile } from '../src/harness/endpointHealth.js';
 import { getWorkplaceStatus } from '../src/harness/workplaceStatus.js';
 
 async function withTempWorkspace(testFn) {
@@ -187,4 +188,35 @@ test('CONFIG_PRESETS includes minimal, standard, and multi_model_swarm', () => {
   assert.ok(CONFIG_PRESETS.multi_model_swarm);
   assert.equal(typeof CONFIG_PRESETS.standard, 'string');
   assert.match(CONFIG_PRESETS.standard, /modelDrivenSwarm: true/);
+});
+
+test('testEndpointProfile rejects missing fields', async () => {
+  const result = await testEndpointProfile({});
+  assert.equal(result.healthy, false);
+  assert.equal(result.reason, 'missing_base_url_or_model_id');
+});
+
+test('testEndpointProfile uses fetch implementation', async () => {
+  const result = await testEndpointProfile(
+    { baseUrl: 'http://example.test/v1', modelId: 'demo/model' },
+    {
+      fetchImpl: async (url) => ({
+        ok: url.includes('/health') || url.includes('/models'),
+        status: 200,
+        json: async () => ({ data: [{ id: 'demo/model' }] }),
+      }),
+    },
+  );
+  assert.equal(result.healthy, true);
+});
+
+test('repairWorkplace writes config when missing', async () => {
+  const { repairWorkplace } = await import('../src/harness/harnessConfigService.js');
+  await withTempWorkspace(async (workspaceRoot) => {
+    const result = await repairWorkplace(workspaceRoot);
+    assert.ok(result.repairs.includes('config'));
+    assert.ok(result.repairs.includes('scaffold'));
+    assert.equal(result.after.configYaml.present, true);
+    assert.equal(result.after.capabilitiesJson.present, true);
+  });
 });

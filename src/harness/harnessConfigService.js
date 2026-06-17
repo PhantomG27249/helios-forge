@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { loadHarnessConfig } from '../harness-sidecar/config/configLoader.js';
 import { setupHeliosForge } from '../../scripts/setup-helios-forge.js';
+import { getWorkplaceStatus } from './workplaceStatus.js';
 
 const STANDARD_CONFIG_YAML = [
   'project:',
@@ -325,3 +326,26 @@ export async function applyConfigPreset(workspaceRoot, { presetId, mode = 'merge
 }
 
 export { setupHeliosForge as initializeWorkplace };
+
+export async function repairWorkplace(workspaceRoot) {
+  const before = await getWorkplaceStatus(workspaceRoot);
+  const repairs = [];
+
+  if (!before.configYaml?.present) {
+    await applyConfigPreset(workspaceRoot, { presetId: 'standard', mode: 'replace' });
+    repairs.push('config');
+  }
+
+  const needsScaffold = !before.capabilitiesJson?.present
+    || !before.runtimeMount?.present
+    || !before.bundledPackage?.present
+    || !before.harnessDir?.present;
+
+  if (needsScaffold) {
+    await setupHeliosForge({ workspaceRoot, forceConfig: false });
+    repairs.push('scaffold');
+  }
+
+  const after = await getWorkplaceStatus(workspaceRoot);
+  return { repairs, before, after };
+}
