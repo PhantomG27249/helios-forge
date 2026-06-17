@@ -27,7 +27,7 @@ test('model profiles expose qwen vision defaults and critic profile', () => {
   assert.equal(critic.defaultTemperature, 0.1);
   assert.equal(ebft5.model, 'selimaktas/ebft-5');
   assert.equal(ebft5.maxContextTokens, 262144);
-  assert.equal(ebft5.chatTemplateKwargs.enable_thinking, false);
+  assert.equal(ebft5.chatTemplateKwargs.enable_thinking, true);
 });
 
 test('structured output repair parses fenced or trailing-comma JSON objects', () => {
@@ -114,7 +114,7 @@ test('OpenAI-compatible provider posts chat completions and extracts visible con
 
   assert.equal(requests[0].url, 'http://model.test/v1/chat/completions');
   assert.equal(JSON.parse(requests[0].request.body).model, 'selimaktas/ebft-5');
-  assert.equal(JSON.parse(requests[0].request.body).chat_template_kwargs.enable_thinking, false);
+  assert.equal(JSON.parse(requests[0].request.body).chat_template_kwargs.enable_thinking, true);
   assert.equal(response.text, 'FINAL: HELIOS_OK');
   assert.deepEqual(response.usage, { inputTokens: 10, outputTokens: 4 });
 });

@@ -7,7 +7,14 @@ import {
   createProviderRequestPatch,
   parseZeusArgsWithDiagnostics,
   parseZeusArgs,
+  parseEnableThinkingFromArgs,
 } from '../src/pi/modelArgs.js';
+
+test('parseEnableThinkingFromArgs reads enable_thinking from model args', () => {
+  assert.equal(parseEnableThinkingFromArgs('--chat-template-kwargs \'{"enable_thinking":true}\''), true);
+  assert.equal(parseEnableThinkingFromArgs('--chat-template-kwargs \'{"enable_thinking":false}\''), false);
+  assert.equal(parseEnableThinkingFromArgs('--temp 0.6'), null);
+});
 
 test('parseZeusArgs preserves thinking kwargs even without temperature args', () => {
   const parsed = parseZeusArgs('--chat-template-kwargs \'{"enable_thinking":true}\'');

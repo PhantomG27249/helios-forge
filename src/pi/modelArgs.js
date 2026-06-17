@@ -117,6 +117,14 @@ export function parseZeusArgs(args) {
   return parseZeusArgsWithDiagnostics(args).params;
 }
 
+export function parseEnableThinkingFromArgs(args) {
+  const kwargs = parseZeusArgs(args)?.chat_template_kwargs;
+  if (!kwargs) return null;
+  if (kwargs.enable_thinking !== undefined) return kwargs.enable_thinking === true;
+  if (kwargs.preserve_thinking !== undefined) return kwargs.preserve_thinking === true;
+  return null;
+}
+
 export function buildModelArgsLookup(rawJson) {
   const config = JSON.parse(String(rawJson || '').replace(/^\uFEFF/, ''));
   const lookup = {};

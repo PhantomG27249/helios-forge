@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { parseEnableThinkingFromArgs } from '../pi/modelArgs.js';
 
 function modelsPath() {
   const home = process.env.HOME || process.env.USERPROFILE || homedir();
@@ -25,6 +26,8 @@ export async function getPiModelsSummary() {
         name: model?.name || model?.id,
         contextWindow: model?.contextWindow,
         reasoning: model?.reasoning,
+        args: model?.args || '',
+        enableThinking: parseEnableThinkingFromArgs(model?.args),
       }));
       return { name, modelCount: models.length, models };
     });

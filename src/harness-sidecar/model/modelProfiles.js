@@ -30,7 +30,7 @@
     supportsTools: true,
     defaultTemperature: 0.6,
     chatTemplateKwargs: {
-      enable_thinking: false,
+      enable_thinking: true,
     },
   },
 };
