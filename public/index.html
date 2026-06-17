@@ -51,6 +51,8 @@
   <!-- App (hidden until connected) -->
   <div id="app" style="display:none;">
     <!-- Sidebar -->
+    <div id="sidebar-overlay" class="sidebar-overlay hidden" aria-hidden="true"></div>
+
     <aside id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-logo">
@@ -96,11 +98,18 @@
             <span id="user-status" class="user-status">Connecting...</span>
           </div>
         </div>
-        <button id="btn-debug" class="debug-toggle" title="Debug console">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
-          </svg>
-        </button>
+        <div class="sidebar-footer-actions">
+          <button id="btn-settings" class="debug-toggle" title="Settings" aria-label="Settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+          </button>
+          <button id="btn-debug" class="debug-toggle" title="Debug console">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -108,10 +117,20 @@
     <main id="main">
       <header id="topbar">
         <div class="topbar-left">
+          <button id="btn-sidebar-toggle" class="sidebar-toggle" type="button" title="Menu" aria-label="Open menu">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+          </button>
           <div id="session-title-bar" class="session-title-bar" onclick="renameSession()">
             <span id="session-title">New Chat</span>
             <svg class="title-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
           </div>
+        </div>
+        <div id="global-status-bar" class="topbar-right global-status-bar" aria-label="System status">
+          <span id="status-chip-connection" class="status-chip" data-state="connecting">Connecting</span>
+          <span id="status-chip-sidecar" class="status-chip" data-state="unknown">Sidecar unknown</span>
+          <span id="status-chip-approvals" class="status-chip" data-state="none">0 approvals</span>
         </div>
       </header>
 
@@ -405,27 +424,29 @@
               </div>
             </div>
           </div>
-          <div class="harness-metrics">
-            <span id="harness-state-pill" class="harness-pill">unknown</span>
-            <span id="harness-task-count">0 tasks</span>
-            <span id="harness-approval-count">0 approvals</span>
+          <div id="harness-panel-footer" class="harness-panel-footer">
+            <div class="harness-metrics">
+              <span id="harness-state-pill" class="harness-pill">unknown</span>
+              <span id="harness-task-count">0 tasks</span>
+              <span id="harness-approval-count">0 approvals</span>
+            </div>
+            <div id="harness-verifier-evolution" class="harness-metrics">
+              <span id="harness-verifier-evolution-status">verifier evolution idle</span>
+              <span id="harness-verifier-latest-score">score n/a</span>
+              <span id="harness-verifier-baseline-comparison">baseline n/a</span>
+              <span id="harness-verifier-pending-promotions">0 verifier approvals</span>
+            </div>
+            <div id="harness-verifier-artifacts" class="harness-artifact-links"></div>
+            <div class="harness-activity-heading">
+              <span>Subagents</span>
+              <span id="harness-subagent-count">0 active</span>
+            </div>
+            <div id="harness-subagents" class="harness-subagents"></div>
+            <div class="harness-activity-heading">
+              <span>Events</span>
+            </div>
+            <div id="harness-events" class="harness-events"></div>
           </div>
-          <div id="harness-verifier-evolution" class="harness-metrics">
-            <span id="harness-verifier-evolution-status">verifier evolution idle</span>
-            <span id="harness-verifier-latest-score">score n/a</span>
-            <span id="harness-verifier-baseline-comparison">baseline n/a</span>
-            <span id="harness-verifier-pending-promotions">0 verifier approvals</span>
-          </div>
-          <div id="harness-verifier-artifacts" class="harness-artifact-links"></div>
-          <div class="harness-activity-heading">
-            <span>Subagents</span>
-            <span id="harness-subagent-count">0 active</span>
-          </div>
-          <div id="harness-subagents" class="harness-subagents"></div>
-          <div class="harness-activity-heading">
-            <span>Events</span>
-          </div>
-          <div id="harness-events" class="harness-events"></div>
         </aside>
         <section id="chat-workspace" class="chat-workspace" aria-label="Chat feed">
           <div id="chat-container">
@@ -465,7 +486,7 @@
           <button id="btn-harness" class="topbar-icon-btn" title="Research harness">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
           </button>
-          <button id="btn-export" class="topbar-icon-btn" title="Export">
+          <button id="btn-export" class="topbar-icon-btn" title="Export chat (Shift+click for JSON)">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </button>
           <button id="btn-stats" class="topbar-icon-btn" title="Stats">
@@ -555,6 +576,98 @@
       </div>
     </div>
 
+    <!-- Settings -->
+    <div id="modal-settings" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content settings-modal-content">
+        <div class="modal-header">
+          <h2>Settings</h2>
+          <button class="modal-close" onclick="closeModal('settings')">&times;</button>
+        </div>
+        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button class="settings-tab active" type="button" data-settings-tab="connection">Connection</button>
+          <button class="settings-tab" type="button" data-settings-tab="workplace">Workplace</button>
+          <button class="settings-tab" type="button" data-settings-tab="harness">Harness</button>
+          <button class="settings-tab" type="button" data-settings-tab="endpoints">Endpoints</button>
+          <button class="settings-tab" type="button" data-settings-tab="pi">Pi</button>
+        </div>
+        <div class="modal-body settings-modal-body">
+          <section id="settings-tab-connection" class="settings-panel active">
+            <label class="settings-label" for="settings-server-url">Server URL</label>
+            <div class="settings-row">
+              <input id="settings-server-url" type="text" class="settings-input" placeholder="ws://localhost:3777" />
+              <button id="btn-settings-save-url" class="settings-btn primary" type="button">Save</button>
+            </div>
+            <div class="settings-row">
+              <button id="btn-settings-test-connection" class="settings-btn" type="button">Test connection</button>
+              <span id="settings-connection-status" class="settings-hint"></span>
+            </div>
+          </section>
+          <section id="settings-tab-workplace" class="settings-panel">
+            <label class="settings-label" for="settings-workspace-path">Workspace path</label>
+            <div class="settings-row">
+              <input id="settings-workspace-path" type="text" class="settings-input mono" placeholder="/path/to/project" readonly />
+              <button id="btn-settings-workspace-browse" class="settings-btn" type="button">Browse</button>
+            </div>
+            <div id="settings-workplace-health" class="settings-health-checklist">
+              <div class="settings-hint">Workplace health checklist will appear here.</div>
+            </div>
+            <div class="settings-actions">
+              <button id="btn-settings-init-workplace" class="settings-btn primary" type="button">Initialize workplace</button>
+              <button id="btn-settings-load-preset" class="settings-btn" type="button">Load preset</button>
+            </div>
+          </section>
+          <section id="settings-tab-harness" class="settings-panel">
+            <label class="settings-label" for="settings-harness-preset">Harness preset</label>
+            <div class="settings-row">
+              <select id="settings-harness-preset" class="settings-select">
+                <option value="minimal">minimal</option>
+                <option value="standard" selected>standard</option>
+                <option value="multi_model_swarm">multi_model_swarm</option>
+              </select>
+              <button id="btn-settings-apply-preset" class="settings-btn primary" type="button">Apply preset</button>
+            </div>
+            <p id="settings-harness-status" class="settings-hint"></p>
+          </section>
+          <section id="settings-tab-endpoints" class="settings-panel">
+            <div class="settings-section-title">Endpoint profiles</div>
+            <div id="settings-endpoints-list" class="settings-endpoints-list">
+              <div class="settings-hint">No endpoint profiles loaded.</div>
+            </div>
+            <form id="settings-endpoint-form" class="settings-endpoint-form">
+              <div class="settings-form-grid">
+                <label class="settings-field">Profile ID
+                  <input id="settings-endpoint-id" type="text" class="settings-input" placeholder="local_deep" required />
+                </label>
+                <label class="settings-field">Model ID
+                  <input id="settings-endpoint-model" type="text" class="settings-input" placeholder="provider/model-id" required />
+                </label>
+              </div>
+              <label class="settings-field">Base URL
+                <input id="settings-endpoint-base-url" type="text" class="settings-input mono" placeholder="http://host:8000/v1" required />
+              </label>
+              <div class="settings-actions">
+                <button class="settings-btn primary" type="submit">Save endpoint</button>
+              </div>
+            </form>
+          </section>
+          <section id="settings-tab-pi" class="settings-panel">
+            <div class="settings-readonly-grid">
+              <div class="settings-readonly-card">
+                <span class="settings-readonly-label">Model</span>
+                <strong id="settings-pi-model">—</strong>
+              </div>
+              <div class="settings-readonly-card">
+                <span class="settings-readonly-label">Thinking</span>
+                <strong id="settings-pi-thinking">—</strong>
+              </div>
+            </div>
+            <p class="settings-hint">Reflects the current Pi session state from the composer.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <!-- Extension UI -->
     <div id="modal-extension" class="modal hidden">
       <div class="modal-overlay"></div>
@@ -570,6 +683,10 @@
     <div id="debug-panel" class="debug-panel hidden">
       <div class="debug-panel-header">
         <span>Debug Pipeline</span>
+        <label class="debug-option">
+          <input id="auto-harness-toggle" type="checkbox" checked />
+          Background harness
+        </label>
         <button id="btn-debug-close" class="debug-close">&times;</button>
       </div>
       <textarea id="debug-log" readonly class="debug-log"></textarea>

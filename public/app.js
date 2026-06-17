@@ -25,9 +25,13 @@ let workspacePath = ''; // Persist across text_start
 let currentSessionId = null;
 let autoHarnessEnabled = true;
 let lastBackgroundHarnessAt = 0;
+let connectionState = 'connecting';
 const HARNESS_BACKGROUND_COOLDOWN_MS = 1500;
 const DEFAULT_HARNESS_BUDGET = { maxToolCalls: 20, maxWallMinutes: 15 };
 const HARNESS_MAX_SUBAGENTS = 50;
+const STORAGE_SERVER_URL = 'helios_server_url';
+const STORAGE_WORKSPACE_PATH = 'helios_workspace_path';
+const LS_AUTO_HARNESS = 'helios_auto_harness';
 let harnessRenderScheduled = false;
 let harnessState = {
   status: 'unknown',
@@ -127,6 +131,12 @@ let assistantActivity = {
   toolCalls: 0,
   errors: 0,
   toolName: null,
+};
+let settingsState = {
+  activeTab: 'connection',
+  harnessConfig: null,
+  workplaceStatus: null,
+  connectionTestSocket: null,
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -254,7 +264,37 @@ const workspacePathInput = document.getElementById('workspace-path');
 const workspaceBrowseConnectBtn = document.getElementById('btn-workspace-browse-connect');
 const workspaceBrowseBtn = document.getElementById('btn-workspace-browse');
 
-serverUrlInput.value = `ws://${location.host}`;
+try {
+  const storedAutoHarness = localStorage.getItem(LS_AUTO_HARNESS);
+  if (storedAutoHarness !== null) autoHarnessEnabled = storedAutoHarness === 'true';
+} catch {}
+
+function loadStoredConnectionPrefs() {
+  try {
+    const savedUrl = localStorage.getItem(STORAGE_SERVER_URL);
+    const savedWorkspace = localStorage.getItem(STORAGE_WORKSPACE_PATH);
+    serverUrlInput.value = savedUrl || `ws://${location.host}`;
+    if (savedWorkspace && workspacePathInput) {
+      workspacePathInput.value = savedWorkspace;
+      workspacePath = savedWorkspace;
+      syncWorkspaceInputs(savedWorkspace);
+    }
+  } catch (error) {
+    serverUrlInput.value = `ws://${location.host}`;
+    debug('Failed to load stored connection prefs: ' + error.message);
+  }
+}
+
+function persistConnectionPrefs() {
+  try {
+    if (serverUrl) localStorage.setItem(STORAGE_SERVER_URL, serverUrl);
+    if (workspacePath) localStorage.setItem(STORAGE_WORKSPACE_PATH, workspacePath);
+  } catch (error) {
+    debug('Failed to persist connection prefs: ' + error.message);
+  }
+}
+
+loadStoredConnectionPrefs();
 
 window.setServerUrl = function(host) {
   const port = host.includes(':') ? '' : ':3777';
@@ -266,6 +306,7 @@ function startConnection() {
   serverUrl = serverUrlInput.value.trim();
   workspacePath = workspacePathInput?.value?.trim() || '';
   syncWorkspaceInputs(workspacePath);
+  persistConnectionPrefs();
   if (!serverUrl) return;
   if (location.protocol === 'https:') serverUrl = serverUrl.replace('ws://', 'wss://');
   debug(`Connecting to: ${serverUrl}`);
@@ -296,8 +337,15 @@ const thinkingDisplay = $('#thinking-display');
 const scrollSentinel = $('#scroll-sentinel');
 const pinnedList = $('#pinned-list');
 const recentsList = $('#recents-list');
+const sidebarEl = $('#sidebar');
+const sidebarOverlay = $('#sidebar-overlay');
+const sidebarToggle = $('#btn-sidebar-toggle');
 let sessions = []; // Session list for sidebar
 const userStatus = $('#user-status');
+const statusChipConnection = $('#status-chip-connection');
+const statusChipSidecar = $('#status-chip-sidecar');
+const statusChipApprovals = $('#status-chip-approvals');
+const harnessPanelFooter = $('#harness-panel-footer');
 const connectionBanner = $('#connection-banner');
 const connectionText = $('#connection-text');
 const fileInput = $('#file-input');
@@ -393,6 +441,7 @@ function applyWorkspaceSelection(path, { notify = true } = {}) {
   const changed = nextWorkspace !== workspacePath;
   workspacePath = nextWorkspace;
   syncWorkspaceInputs(workspacePath);
+  persistConnectionPrefs();
   debug('Workspace changed to: ' + workspacePath);
   if (ws?.readyState === WebSocket.OPEN) {
     send({ type: 'set_workspace', path: workspacePath });
@@ -512,6 +561,7 @@ function send(msg) {
 }
 
 function setStatus(state, text) {
+  connectionState = state;
   userStatus.textContent = text;
   userStatus.className = 'user-status ' + state;
   if (connectionBanner) {
@@ -522,6 +572,36 @@ function setStatus(state, text) {
       : 'Disconnected — reconnecting...';
   }
   inputEl.disabled = state !== 'connected';
+  updateGlobalStatusBar();
+}
+
+function updateGlobalStatusBar() {
+  const connectionLabels = {
+    connected: 'Connected',
+    connecting: 'Connecting',
+    disconnected: 'Disconnected',
+    error: 'Error',
+  };
+  if (statusChipConnection) {
+    statusChipConnection.dataset.state = connectionState;
+    statusChipConnection.textContent = connectionLabels[connectionState] || connectionState;
+  }
+  if (statusChipSidecar) {
+    const status = harnessState.status || 'unknown';
+    statusChipSidecar.dataset.state = status;
+    statusChipSidecar.textContent = status === 'running' ? 'Sidecar running' : `Sidecar ${status}`;
+  }
+  if (statusChipApprovals) {
+    const count = harnessState.pendingApprovals.size;
+    statusChipApprovals.dataset.state = count > 0 ? 'pending' : 'none';
+    statusChipApprovals.textContent = `${count} approval${count === 1 ? '' : 's'}`;
+  }
+}
+
+function updateHarnessPanelFooterVisibility() {
+  if (!harnessPanelFooter) return;
+  const showFooter = activeHarnessTab === 'run' || activeHarnessTab === 'swarm';
+  harnessPanelFooter.classList.toggle('hidden', !showFooter);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -707,6 +787,26 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_abmcts_replay') {
     handleHarnessTraceReplay(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_workplace_status' && msg.data) {
+    handleHarnessWorkplaceStatus(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_workplace_initialized' && msg.data) {
+    handleHarnessWorkplaceInitialized(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_config' && msg.data) {
+    handleHarnessConfig(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_config_updated' && msg.data) {
+    handleHarnessConfigUpdated(msg.data);
+    return;
+  }
+  if (msg.type === 'harness_config_reloaded') {
+    handleHarnessConfigReloaded(msg.data || {});
     return;
   }
 
@@ -1384,6 +1484,8 @@ function renderHarnessPanel() {
   harnessStatePill.className = `harness-pill ${harnessState.status}`;
   harnessTaskCount.textContent = `${harnessState.activeTasks.size} task${harnessState.activeTasks.size === 1 ? '' : 's'}`;
   harnessApprovalCount.textContent = `${harnessState.pendingApprovals.size} approval${harnessState.pendingApprovals.size === 1 ? '' : 's'}`;
+  updateHarnessPanelFooterVisibility();
+  updateGlobalStatusBar();
   renderHarnessVerifierEvolution();
   renderHarnessAdaptiveSearch();
   renderHarnessProductionEvidence();
@@ -1762,6 +1864,7 @@ function switchHarnessTab(tabId) {
   document.querySelectorAll('.harness-tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `harness-tab-${activeHarnessTab}`);
   });
+  updateHarnessPanelFooterVisibility();
   if (activeHarnessTab === 'capabilities' && !harnessCapabilitiesLoaded) {
     requestHarnessCapabilities();
   }
@@ -3237,7 +3340,7 @@ function createAssistantMsg() {
           <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
         </svg>
       </button>
-      <button class="msg-action-btn" title="Good">
+      <button class="msg-action-btn" title="Good" onclick="feedbackMsg()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/>
         </svg>
@@ -3273,6 +3376,10 @@ function showWelcome() {
   messagesEl.querySelector('.welcome')?.remove();
   const el = document.createElement('div');
   el.className = 'welcome';
+  const wsPath = getSelectedWorkspacePath();
+  const wsLine = wsPath
+    ? `<p class="welcome-workspace">Workplace: <code>${esc(wsPath)}</code></p>`
+    : '<p class="welcome-workspace">Set your workplace path in the composer or connection dialog.</p>';
   el.innerHTML = `
     <div class="welcome-icon">
       <svg viewBox="0 0 48 48" fill="none">
@@ -3282,7 +3389,9 @@ function showWelcome() {
       </svg>
     </div>
     <h2>Welcome to Helios Forge</h2>
-    <p>Ask anything — read files, run commands, edit code, and more.</p>`;
+    <p>Chat with Pi in your workplace, launch research tasks via the sidecar, and use slash commands like <code>/harness</code> and <code>/deep-research</code>.</p>
+    ${wsLine}
+    <button type="button" class="welcome-settings-btn" onclick="openSettings()">Open Settings</button>`;
   messagesEl.appendChild(el);
 }
 
@@ -3597,6 +3706,303 @@ function selectThinking(level) {
 function updateHeader() {
   modelDisplay.textContent = currentModel?.name || currentModel?.id || '—';
   thinkingDisplay.textContent = currentThinking ? currentThinking.charAt(0).toUpperCase() + currentThinking.slice(1) : '—';
+  renderSettingsPiSection();
+}
+
+// ═══════════════════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════════════════
+const settingsServerUrlInput = document.getElementById('settings-server-url');
+const settingsConnectionStatus = document.getElementById('settings-connection-status');
+const settingsWorkspacePathInput = document.getElementById('settings-workspace-path');
+const settingsWorkplaceHealth = document.getElementById('settings-workplace-health');
+const settingsHarnessPreset = document.getElementById('settings-harness-preset');
+const settingsHarnessStatus = document.getElementById('settings-harness-status');
+const settingsEndpointsList = document.getElementById('settings-endpoints-list');
+const settingsEndpointForm = document.getElementById('settings-endpoint-form');
+const settingsPiModel = document.getElementById('settings-pi-model');
+const settingsPiThinking = document.getElementById('settings-pi-thinking');
+
+function settingsWorkspaceRoot() {
+  return getSelectedWorkspacePath() || workspacePath || undefined;
+}
+
+function requestWorkplaceStatus() {
+  send({ type: 'harness_workplace_status', workspaceRoot: settingsWorkspaceRoot() });
+}
+
+function initializeWorkplace() {
+  send({ type: 'harness_workplace_initialize', workspaceRoot: settingsWorkspaceRoot() });
+}
+
+function getHarnessConfig() {
+  send({ type: 'harness_config_get', workspaceRoot: settingsWorkspaceRoot() });
+}
+
+function patchHarnessConfig(patch) {
+  if (!patch || typeof patch !== 'object') return;
+  send({ type: 'harness_config_patch', workspaceRoot: settingsWorkspaceRoot(), patch });
+}
+
+function applyHarnessPreset(presetId, mode = 'merge') {
+  if (!presetId) return;
+  send({
+    type: 'harness_config_apply_preset',
+    workspaceRoot: settingsWorkspaceRoot(),
+    presetId,
+    mode,
+  });
+}
+
+function openSettings(tab = settingsState.activeTab || 'connection') {
+  if (!document.getElementById('modal-settings')) return;
+  settingsState.activeTab = tab;
+  syncSettingsFormFromState();
+  renderSettingsTabs();
+  renderSettingsPiSection();
+  renderSettingsEndpointsList();
+  openModal('settings');
+  if (ws?.readyState === WebSocket.OPEN) {
+    requestWorkplaceStatus();
+    getHarnessConfig();
+  }
+}
+
+function syncSettingsFormFromState() {
+  if (settingsServerUrlInput) {
+    settingsServerUrlInput.value = serverUrl || serverUrlInput?.value || '';
+  }
+  if (settingsWorkspacePathInput) {
+    settingsWorkspacePathInput.value = getSelectedWorkspacePath() || '';
+  }
+}
+
+function renderSettingsTabs() {
+  document.querySelectorAll('.settings-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.settingsTab === settingsState.activeTab);
+  });
+  document.querySelectorAll('.settings-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.id === `settings-tab-${settingsState.activeTab}`);
+  });
+}
+
+function renderSettingsPiSection() {
+  if (!settingsPiModel && !settingsPiThinking) return;
+  if (settingsPiModel) {
+    settingsPiModel.textContent = currentModel?.name || currentModel?.id || '—';
+  }
+  if (settingsPiThinking) {
+    settingsPiThinking.textContent = currentThinking
+      ? currentThinking.charAt(0).toUpperCase() + currentThinking.slice(1)
+      : '—';
+  }
+}
+
+function renderSettingsEndpointsList() {
+  if (!settingsEndpointsList) return;
+  const profiles = settingsState.harnessConfig?.modelCouncil?.endpointProfiles
+    || settingsState.harnessConfig?.endpointProfiles
+    || {};
+  const entries = Object.entries(profiles);
+  if (!entries.length) {
+    settingsEndpointsList.innerHTML = '<div class="settings-hint">No endpoint profiles loaded.</div>';
+    return;
+  }
+  settingsEndpointsList.innerHTML = entries.map(([profileId, profile]) => {
+    const baseUrl = esc(profile?.baseUrl || '—');
+    const modelId = esc(profile?.modelId || '—');
+    return `
+      <div class="settings-endpoint-item">
+        <div class="settings-endpoint-item-main">
+          <div class="settings-endpoint-item-id">${esc(profileId)}</div>
+          <div class="settings-endpoint-item-meta">${modelId} · ${baseUrl}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+const WORKPLACE_HEALTH_LABELS = {
+  harnessDir: '.harness/',
+  configYaml: 'config.yaml',
+  capabilitiesJson: 'capabilities.json',
+  runtimeMount: 'runtime mount manifest',
+  bundledPackage: 'bundled harness package',
+};
+
+function workplaceHealthState(item) {
+  if (!item?.present) return 'error';
+  if (item.error) return 'warn';
+  return 'ok';
+}
+
+function renderSettingsWorkplaceHealth(status) {
+  if (!settingsWorkplaceHealth) return;
+  const checklist = status?.checklist || status?.items || status?.artifacts;
+  if (Array.isArray(checklist) && checklist.length) {
+    settingsWorkplaceHealth.innerHTML = checklist.map((item) => {
+      const label = esc(typeof item === 'string' ? item : (item.label || item.name || item.id || 'Item'));
+      const state = typeof item === 'object'
+        ? (item.ok === true || item.status === 'ok' ? 'ok' : item.status === 'warn' ? 'warn' : item.ok === false || item.status === 'error' ? 'error' : '')
+        : '';
+      return `
+        <div class="settings-health-item">
+          <span class="settings-health-dot ${state}"></span>
+          <span>${label}</span>
+        </div>`;
+    }).join('');
+    return;
+  }
+
+  const artifactKeys = ['harnessDir', 'configYaml', 'capabilitiesJson', 'runtimeMount', 'bundledPackage'];
+  const rows = artifactKeys
+    .filter((key) => status?.[key] && typeof status[key] === 'object')
+    .map((key) => {
+      const item = status[key];
+      const state = workplaceHealthState(item);
+      const suffix = item.error ? ` (${item.error})` : '';
+      return `
+        <div class="settings-health-item">
+          <span class="settings-health-dot ${state}"></span>
+          <span>${esc(WORKPLACE_HEALTH_LABELS[key] || key)}${esc(suffix)}</span>
+        </div>`;
+    });
+
+  if (!rows.length) {
+    const message = status?.message || status?.summary || 'Open Settings while connected to load workplace health.';
+    settingsWorkplaceHealth.innerHTML = `<div class="settings-hint">${esc(String(message))}</div>`;
+    return;
+  }
+  settingsWorkplaceHealth.innerHTML = rows.join('');
+}
+
+function handleHarnessWorkplaceStatus(data) {
+  settingsState.workplaceStatus = data || null;
+  renderSettingsWorkplaceHealth(data || {});
+}
+
+function handleHarnessWorkplaceInitialized(data) {
+  const created = data?.config?.created || data?.capabilityCount > 0;
+  toast(
+    data?.message || (created ? 'Workplace initialized' : 'Workplace setup complete'),
+    data?.success === false ? 'error' : 'success',
+  );
+  requestWorkplaceStatus();
+  getHarnessConfig();
+}
+
+function handleHarnessConfig(data) {
+  settingsState.harnessConfig = data?.config || data || null;
+  renderSettingsEndpointsList();
+  if (settingsHarnessStatus && data?.presetId) {
+    settingsHarnessStatus.textContent = `Active preset: ${data.presetId}`;
+  }
+}
+
+function handleHarnessConfigUpdated(data) {
+  if (data?.config) settingsState.harnessConfig = data.config;
+  renderSettingsEndpointsList();
+  toast(data?.message || 'Harness config updated', data?.success === false ? 'error' : 'success');
+}
+
+function handleHarnessConfigReloaded(data) {
+  if (data?.config) settingsState.harnessConfig = data.config;
+  renderSettingsEndpointsList();
+  toast(data?.message || 'Harness config reloaded', 'success');
+  send({ type: 'harness_status' });
+}
+
+function saveSettingsServerUrl() {
+  const nextUrl = settingsServerUrlInput?.value?.trim();
+  if (!nextUrl) {
+    toast('Enter a server URL', 'error');
+    return;
+  }
+  serverUrl = nextUrl;
+  if (serverUrlInput) serverUrlInput.value = nextUrl;
+  try {
+    localStorage.setItem(STORAGE_SERVER_URL, nextUrl);
+  } catch (error) {
+    debug('Failed to save server URL: ' + error.message);
+  }
+  toast('Server URL saved', 'success');
+}
+
+function testSettingsConnection() {
+  const testUrl = settingsServerUrlInput?.value?.trim();
+  if (!testUrl) {
+    toast('Enter a server URL to test', 'error');
+    return;
+  }
+  let url = testUrl;
+  if (location.protocol === 'https:') url = url.replace('ws://', 'wss://');
+  if (settingsConnectionStatus) {
+    settingsConnectionStatus.textContent = 'Testing…';
+    settingsConnectionStatus.className = 'settings-hint';
+  }
+  if (settingsState.connectionTestSocket) {
+    try { settingsState.connectionTestSocket.close(); } catch (_) { /* ignore */ }
+    settingsState.connectionTestSocket = null;
+  }
+  let settled = false;
+  const finish = (ok, message) => {
+    if (settled) return;
+    settled = true;
+    if (settingsConnectionStatus) {
+      settingsConnectionStatus.textContent = message;
+      settingsConnectionStatus.className = `settings-hint ${ok ? 'ok' : 'error'}`;
+    }
+  };
+  const timeout = setTimeout(() => {
+    finish(false, 'Connection timed out');
+    try { socket.close(); } catch (_) { /* ignore */ }
+  }, 5000);
+  const socket = new WebSocket(url);
+  settingsState.connectionTestSocket = socket;
+  socket.onopen = () => {
+    clearTimeout(timeout);
+    finish(true, 'Connection successful');
+    socket.close();
+  };
+  socket.onerror = () => {
+    clearTimeout(timeout);
+    finish(false, 'Connection failed');
+  };
+  socket.onclose = (event) => {
+    if (!settled && event.code !== 1000) {
+      clearTimeout(timeout);
+      finish(false, 'Connection closed');
+    }
+  };
+}
+
+function saveSettingsEndpoint(event) {
+  event?.preventDefault();
+  const profileId = document.getElementById('settings-endpoint-id')?.value?.trim();
+  const modelId = document.getElementById('settings-endpoint-model')?.value?.trim();
+  const baseUrl = document.getElementById('settings-endpoint-base-url')?.value?.trim();
+  if (!profileId || !modelId || !baseUrl) {
+    toast('Profile ID, model ID, and base URL are required', 'error');
+    return;
+  }
+  patchHarnessConfig({
+    modelCouncil: {
+      endpointProfiles: {
+        [profileId]: { baseUrl, modelId },
+      },
+    },
+  });
+  settingsEndpointForm?.reset();
+}
+
+function handleSettingsTabClick(event) {
+  const tab = event.target.closest('.settings-tab')?.dataset?.settingsTab;
+  if (!tab) return;
+  settingsState.activeTab = tab;
+  renderSettingsTabs();
+  if (tab === 'pi') renderSettingsPiSection();
+  if (tab === 'endpoints') renderSettingsEndpointsList();
+  if (tab === 'workplace' && ws?.readyState === WebSocket.OPEN) requestWorkplaceStatus();
+  if (tab === 'harness' && ws?.readyState === WebSocket.OPEN) getHarnessConfig();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3745,16 +4151,20 @@ function selectSession(id) {
     switchToSession(session);
   }
   renderSessions();
+  closeSidebar();
 }
 
 function deleteSession(id) {
   const session = sessions.find(s => s.id === id);
   if (!session) return;
-  
+
+  const label = session.name || 'this chat';
+  if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
+
   // Remove from local array
   sessions = sessions.filter(s => s.id !== id);
   renderSessions();
-  
+
   // Delete from server if it's a pi session
   if (session.path) {
     send({ type: 'delete_session', path: session.path });
@@ -3772,6 +4182,23 @@ function renameSession() {
 function toggleSection(header) {
   header.classList.toggle('collapsed');
   header.nextElementSibling.classList.toggle('collapsed');
+}
+
+function openSidebar() {
+  sidebarEl?.classList.add('open');
+  sidebarOverlay?.classList.remove('hidden');
+  sidebarOverlay?.setAttribute('aria-hidden', 'false');
+}
+
+function closeSidebar() {
+  sidebarEl?.classList.remove('open');
+  sidebarOverlay?.classList.add('hidden');
+  sidebarOverlay?.setAttribute('aria-hidden', 'true');
+}
+
+function toggleSidebar() {
+  if (sidebarEl?.classList.contains('open')) closeSidebar();
+  else openSidebar();
 }
 
 
@@ -3815,8 +4242,7 @@ function switchToSession(session) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Copy / Retry
-
+// Copy / Retry / Feedback / Export
 // ═══════════════════════════════════════════════════════════
 function copyMsg(btn) {
   const msg = btn.closest('.message');
@@ -3824,13 +4250,68 @@ function copyMsg(btn) {
   navigator.clipboard.writeText(content?.textContent || '').then(() => toast('Copied!', 'success'));
 }
 
+function feedbackMsg() {
+  toast('Thanks for your feedback', 'success');
+}
+
+function collectChatMessages() {
+  const messages = [];
+  messagesEl.querySelectorAll('.message-user, .message-assistant').forEach(el => {
+    const role = el.classList.contains('message-user') ? 'user' : 'assistant';
+    const contentEl = el.querySelector('.msg-content');
+    const content = contentEl?.textContent?.trim() || '';
+    if (content) messages.push({ role, content });
+  });
+  return messages;
+}
+
+function sanitizeFilename(name) {
+  return (name || 'chat').replace(/[^\w\-]+/g, '-').replace(/^-+|-+$/g, '') || 'chat';
+}
+
+function downloadTextFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportChat(format = 'markdown') {
+  const messages = collectChatMessages();
+  if (!messages.length) {
+    toast('Nothing to export', 'error');
+    return;
+  }
+
+  const title = sessionTitle?.textContent?.trim() || 'Chat';
+  const exportedAt = new Date().toISOString();
+  const baseName = sanitizeFilename(title);
+
+  if (format === 'json') {
+    const payload = { title, exportedAt, messages };
+    downloadTextFile(JSON.stringify(payload, null, 2), `${baseName}.json`, 'application/json');
+  } else {
+    const lines = [`# ${title}`, '', `Exported: ${exportedAt}`, ''];
+    messages.forEach(({ role, content }) => {
+      lines.push(`## ${role === 'user' ? 'User' : 'Assistant'}`, '', content, '');
+    });
+    downloadTextFile(lines.join('\n'), `${baseName}.md`, 'text/markdown');
+  }
+
+  toast('Chat exported', 'success');
+}
+
 function retryMsg() {
   const userMsgs = messagesEl.querySelectorAll('.message-user');
-  if (userMsgs.length) {
-    const lastUser = userMsgs[userMsgs.length - 1];
-    const text = lastUser.querySelector('.msg-content').textContent;
-    sendMessage('prompt');
-  }
+  if (!userMsgs.length) return;
+  const text = userMsgs[userMsgs.length - 1].querySelector('.msg-content')?.textContent?.trim() || '';
+  if (!text) return;
+  inputEl.value = text;
+  autoResize();
+  sendMessage('prompt');
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3850,6 +4331,9 @@ inputEl.addEventListener('keydown', (e) => {
 
 $('#btn-new-chat').addEventListener('click', () => send({ type: 'new_session' }));
 $('#btn-stats').addEventListener('click', () => { send({ type: 'get_session_stats' }); openModal('stats'); });
+$('#btn-export')?.addEventListener('click', (e) => exportChat(e.shiftKey ? 'json' : 'markdown'));
+sidebarToggle?.addEventListener('click', toggleSidebar);
+sidebarOverlay?.addEventListener('click', closeSidebar);
 $('#btn-harness').addEventListener('click', toggleHarnessPanel);
 $('#btn-deep-research')?.addEventListener('click', () => openHarnessTab('deep-research'));
 $('#btn-capabilities')?.addEventListener('click', () => openHarnessTab('capabilities'));
@@ -3895,6 +4379,24 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', () => o.parentElement.classList.add('hidden'));
 });
 
+document.getElementById('btn-settings')?.addEventListener('click', () => openSettings());
+document.querySelector('#modal-settings .settings-tabs')?.addEventListener('click', handleSettingsTabClick);
+document.getElementById('btn-settings-save-url')?.addEventListener('click', saveSettingsServerUrl);
+document.getElementById('btn-settings-test-connection')?.addEventListener('click', testSettingsConnection);
+document.getElementById('btn-settings-workspace-browse')?.addEventListener('click', async (event) => {
+  await chooseWorkspace(event);
+  syncSettingsFormFromState();
+  if (ws?.readyState === WebSocket.OPEN) requestWorkplaceStatus();
+});
+document.getElementById('btn-settings-init-workplace')?.addEventListener('click', initializeWorkplace);
+document.getElementById('btn-settings-load-preset')?.addEventListener('click', () => {
+  applyHarnessPreset(settingsHarnessPreset?.value || 'standard', 'merge');
+});
+document.getElementById('btn-settings-apply-preset')?.addEventListener('click', () => {
+  applyHarnessPreset(settingsHarnessPreset?.value || 'standard', 'replace');
+});
+settingsEndpointForm?.addEventListener('submit', saveSettingsEndpoint);
+
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.dropdown') && !e.target.closest('.meta-select')) closeDropdowns();
 });
@@ -3902,6 +4404,14 @@ document.addEventListener('click', (e) => {
 // Debug panel toggle
 const debugPanel = document.getElementById('debug-panel');
 const btnDebug = document.getElementById('btn-debug');
+const autoHarnessToggle = document.getElementById('auto-harness-toggle');
+if (autoHarnessToggle) {
+  autoHarnessToggle.checked = autoHarnessEnabled;
+  autoHarnessToggle.addEventListener('change', () => {
+    autoHarnessEnabled = autoHarnessToggle.checked;
+    try { localStorage.setItem(LS_AUTO_HARNESS, autoHarnessEnabled ? 'true' : 'false'); } catch {}
+  });
+}
 if (btnDebug) btnDebug.addEventListener('click', () => debugPanel.classList.toggle('hidden'));
 const btnDebugClose = document.getElementById('btn-debug-close');
 if (btnDebugClose) btnDebugClose.addEventListener('click', () => debugPanel.classList.add('hidden'));
@@ -3917,3 +4427,5 @@ setInterval(() => {
 // Init
 // ═══════════════════════════════════════════════════════════
 // Connection is started from the dialog, not automatically
+updateGlobalStatusBar();
+updateHarnessPanelFooterVisibility();
