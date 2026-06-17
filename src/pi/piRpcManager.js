@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 
 import { resolvePiCommand } from './resolvePiCommand.js';
+import { normalizePromptImages } from './normalizePromptImages.js';
 
 export class PiRpcManager {
   constructor({
@@ -195,8 +196,12 @@ export class PiRpcManager {
 
   sendCommand(cmd) {
     if (!this.process || this.process.exitCode !== null) return Promise.reject(new Error('Pi not running'));
+    const payload = { ...cmd };
+    if (Array.isArray(payload.images)) {
+      payload.images = normalizePromptImages(payload.images);
+    }
     const id = `cmd-${++this.idCounter}`;
-    const summary = this.commandSummary(cmd, id);
+    const summary = this.commandSummary(payload, id);
     this.log('info', '[PiRPC] command.start', summary);
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -210,7 +215,7 @@ export class PiRpcManager {
       }, this.commandTimeoutMs);
       const startedAt = Date.now();
       this.pending.set(id, { id, type: summary.type, resolve, reject, timeout, startedAt });
-      this.process.stdin.write(`${JSON.stringify({ ...cmd, id })}\n`);
+      this.process.stdin.write(`${JSON.stringify({ ...payload, id })}\n`);
     });
   }
 

@@ -10,10 +10,16 @@ async function makeReleaseRoot() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'helios-release-smoke-'));
   await mkdir(path.join(root, 'src', 'electron'), { recursive: true });
   await mkdir(path.join(root, 'public'), { recursive: true });
+  await mkdir(path.join(root, 'build'), { recursive: true });
   await writeFile(path.join(root, 'src', 'server.js'), 'console.log("server");\n');
   await writeFile(path.join(root, 'src', 'electron', 'main.js'), 'console.log("main");\n');
   await writeFile(path.join(root, 'src', 'electron', 'preload.js'), 'console.log("preload");\n');
+  await writeFile(path.join(root, 'src', 'electron', 'appPaths.js'), 'export function resolveAppPaths() {}\n');
   await writeFile(path.join(root, 'public', 'index.html'), '<main>Helios</main>\n');
+  await writeFile(path.join(root, 'public', 'icon.png'), 'icon\n');
+  await writeFile(path.join(root, 'build', 'icon.png'), 'icon\n');
+  await writeFile(path.join(root, 'build', 'icon.ico'), 'icon\n');
+  await writeFile(path.join(root, 'electron-builder.yml'), 'appId: test\n');
   await writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n');
   await writeFile(
     path.join(root, 'package.json'),

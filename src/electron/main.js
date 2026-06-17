@@ -10,14 +10,29 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveAppPaths } from './appPaths.js';
+import {
+  ensureWorkspaceReady,
+  loadOnboardingState,
+  saveOnboardingState,
+} from './onboarding.js';
+import { allocateLoopbackPort } from './portAllocator.js';
+import { checkPiPrerequisites } from './piPrerequisites.js';
+
 const require = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const appRoot = path.resolve(__dirname, '..', '..');
-const serverReadyText = 'HTTP + WebSocket server on';
+const serverReadyText = 'Listening on http://';
 
 let mainWindow;
 let serverProcess;
+let runtimeState = {
+  port: 3777,
+  paths: null,
+  workspaceRoot: null,
+  piStatus: null,
+  appUrl: 'http://127.0.0.1:3777/',
+};
 
 function loadElectron() {
   const electron = require('electron');
@@ -47,21 +62,40 @@ export async function waitForServerReady(url, { timeoutMs = 15000, intervalMs = 
   throw lastError || new Error(`Timed out waiting for ${url}`);
 }
 
+export async function createRuntimePlan({
+  isPackaged = false,
+  appPath = path.resolve(__dirname, '..', '..'),
+  resourcesPath = path.resolve(__dirname, '..', '..'),
+  dirname = __dirname,
+  allocateLoopbackPort: allocate = allocateLoopbackPort,
+  preferredPort = 0,
+} = {}) {
+  const paths = resolveAppPaths({ isPackaged, appPath, resourcesPath, dirname });
+  const port = await allocate(preferredPort);
+  return {
+    paths,
+    port,
+    appUrl: `http://127.0.0.1:${port}/`,
+  };
+}
+
 export function startServer({
   spawnFn = spawn,
   nodePath = process.execPath,
   port = '3777',
-  cwd = appRoot,
-  serverPath = path.join(appRoot, 'src', 'server.js'),
+  cwd,
+  serverPath,
   env = process.env,
   log = console,
-  waitForServerReady: waitForReady = waitForServerReady,
   readyTimeoutMs = 15000,
-  readyIntervalMs = 100,
+  paths = runtimeState.paths,
 } = {}) {
+  const resolvedCwd = cwd || paths?.appRoot || path.resolve(__dirname, '..', '..');
+  const resolvedServerPath = serverPath || paths?.serverEntry || path.join(resolvedCwd, 'src', 'server.js');
+
   return new Promise((resolve, reject) => {
     let settled = false;
-    const readyUrl = `http://127.0.0.1:${port}/`;
+    const readyDeadline = Date.now() + readyTimeoutMs;
 
     function finish(error, child) {
       if (settled) return;
@@ -73,9 +107,9 @@ export function startServer({
       }
     }
 
-    const child = spawnFn(nodePath, [serverPath], {
-      cwd,
-      env: { ...env, ELECTRON_RUN_AS_NODE: '1', PORT: port },
+    const child = spawnFn(nodePath, [resolvedServerPath], {
+      cwd: resolvedCwd,
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1', PORT: String(port) },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -91,6 +125,17 @@ export function startServer({
       }
     });
 
+    const readyTimer = setInterval(() => {
+      if (settled) {
+        clearInterval(readyTimer);
+        return;
+      }
+      if (Date.now() >= readyDeadline) {
+        clearInterval(readyTimer);
+        finish(new Error(`Timed out waiting for embedded server on port ${port}`));
+      }
+    }, 100);
+
     child.stderr?.on('data', (data) => {
       const output = data.toString().trim();
       if (output) {
@@ -105,9 +150,8 @@ export function startServer({
       }
     });
 
-    waitForReady(readyUrl, { timeoutMs: readyTimeoutMs, intervalMs: readyIntervalMs })
-      .then(() => finish(null, child))
-      .catch((error) => finish(error));
+    // Only trust readiness from this child process stdout. A generic HTTP poll can
+    // succeed against another dev server already bound to the same port.
   });
 }
 
@@ -131,22 +175,66 @@ export function stopServer(child = serverProcess) {
   });
 }
 
-function createWindow({ BrowserWindow }) {
+export async function resolveStartupWorkspace({
+  app,
+  dialog,
+  userDataDir,
+  loadOnboardingState: loadState = loadOnboardingState,
+  saveOnboardingState: saveState = saveOnboardingState,
+  ensureWorkspaceReady: ensureReady = ensureWorkspaceReady,
+  bundledPackageRoot,
+  defaultPath,
+} = {}) {
+  const onboarding = await loadState(userDataDir);
+  let workspaceRoot = onboarding.workspaceRoot || defaultPath || app.getPath('documents');
+
+  if (!onboarding.completed || !onboarding.workspaceRoot) {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Helios Forge workplace',
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: workspaceRoot,
+    });
+    if (result.canceled || !result.filePaths?.[0]) {
+      return { canceled: true };
+    }
+    workspaceRoot = result.filePaths[0];
+  }
+
+  const setup = await ensureReady({
+    workspaceRoot,
+    bundledPackageRoot,
+  });
+
+  await saveState(userDataDir, {
+    completed: true,
+    workspaceRoot: setup.workspaceRoot,
+    lastSetupAt: new Date().toISOString(),
+  });
+
+  return {
+    canceled: false,
+    workspaceRoot: setup.workspaceRoot,
+    setup,
+  };
+}
+
+function createWindow({ BrowserWindow, appUrl, paths, title = 'Helios Forge' }) {
+  const iconPath = path.join(paths.publicDir, 'icon.png');
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Helios Forge',
-    icon: path.join(appRoot, 'public', 'icon.png'),
+    title,
+    icon: iconPath,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: paths.preloadPath,
     },
   });
 
-  mainWindow.loadURL('http://localhost:3777');
+  mainWindow.loadURL(appUrl);
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
@@ -155,12 +243,54 @@ function createWindow({ BrowserWindow }) {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  return mainWindow;
+}
+
+export async function startDesktopRuntime(electron, deps = {}) {
+  const { app, BrowserWindow, dialog } = electron;
+  const {
+    createRuntimePlan: createPlan = createRuntimePlan,
+    startServer: startServerImpl = startServer,
+    checkPiPrerequisites: checkPi = checkPiPrerequisites,
+    resolveStartupWorkspace: resolveWorkspace = resolveStartupWorkspace,
+    preferredPort = 0,
+  } = deps;
+
+  const plan = await createPlan({
+    isPackaged: app.isPackaged,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    dirname: __dirname,
+    preferredPort,
+  });
+
+  runtimeState.paths = plan.paths;
+  runtimeState.port = plan.port;
+  runtimeState.appUrl = plan.appUrl;
+  runtimeState.piStatus = checkPi();
+
+  const workspace = await resolveWorkspace({
+    app,
+    dialog,
+    userDataDir: app.getPath('userData'),
+    bundledPackageRoot: plan.paths.bundledHarnessPackage,
+    defaultPath: app.getPath('documents'),
+  });
+
+  if (workspace.canceled) {
+    app.quit();
+    return;
+  }
+
+  runtimeState.workspaceRoot = workspace.workspaceRoot;
+  await startServerImpl({ port: plan.port, paths: plan.paths });
+  createWindow({ BrowserWindow, appUrl: plan.appUrl, paths: plan.paths });
 }
 
 async function initialize(electron) {
   try {
-    await startServer();
-    createWindow(electron);
+    await startDesktopRuntime(electron);
   } catch (error) {
     console.error('Failed to start:', error);
     electron.app.quit();
@@ -170,7 +300,20 @@ async function initialize(electron) {
 export function registerElectronApp(electron = loadElectron()) {
   const { app, BrowserWindow, ipcMain, dialog } = electron;
 
-  app.whenReady().then(() => initialize({ app, BrowserWindow }));
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+    return;
+  }
+
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  app.whenReady().then(() => initialize({ app, BrowserWindow, dialog }));
 
   app.on('before-quit', () => {
     stopServer();
@@ -184,18 +327,47 @@ export function registerElectronApp(electron = loadElectron()) {
   });
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow({ BrowserWindow });
+    if (BrowserWindow.getAllWindows().length === 0 && runtimeState.paths) {
+      createWindow({
+        BrowserWindow,
+        appUrl: runtimeState.appUrl,
+        paths: runtimeState.paths,
+      });
     }
   });
 
-  ipcMain.handle('get-app-version', () => {
-    return app.getVersion();
+  ipcMain.handle('get-app-version', () => app.getVersion());
+
+  ipcMain.handle('get-runtime-info', () => ({
+    port: runtimeState.port,
+    appUrl: runtimeState.appUrl,
+    workspaceRoot: runtimeState.workspaceRoot,
+    piStatus: runtimeState.piStatus,
+    isPackaged: app.isPackaged,
+  }));
+
+  ipcMain.handle('check-pi-prerequisites', () => {
+    runtimeState.piStatus = checkPiPrerequisites();
+    return runtimeState.piStatus;
+  });
+
+  ipcMain.handle('run-onboarding', async (_event, workspaceRoot) => {
+    const result = await ensureWorkspaceReady({
+      workspaceRoot,
+      bundledPackageRoot: runtimeState.paths?.bundledHarnessPackage,
+    });
+    runtimeState.workspaceRoot = result.workspaceRoot;
+    await saveOnboardingState(app.getPath('userData'), {
+      completed: true,
+      workspaceRoot: result.workspaceRoot,
+      lastSetupAt: new Date().toISOString(),
+    });
+    return result;
   });
 
   ipcMain.handle('select-workspace', async (_event, initialDirectory) => {
     const options = {
-      title: 'Select Helios Forge workspace',
+      title: 'Select Helios Forge workplace',
       properties: ['openDirectory', 'createDirectory'],
     };
     if (initialDirectory) options.defaultPath = initialDirectory;

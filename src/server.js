@@ -8,8 +8,14 @@ import fs, { existsSync, createReadStream } from 'fs';
 import path, { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'http';
+import os from 'os';
 import { HarnessClient } from './harness/harnessClient.js';
 import { applyHarnessFeedbackToPrompt, createHarnessFeedbackBuffer } from './harness/harnessFeedbackContext.js';
+import {
+  buildHeliosChatContext,
+  ensurePiWorkplaceBridge,
+  prependHeliosChatContext,
+} from './harness/piWorkspaceBridge.js';
 import { HarnessManager } from './harness/harnessManager.js';
 import {
   selectHarnessWorkspaceRoot,
@@ -17,6 +23,7 @@ import {
 } from './harness/workspaceSelection.js';
 import { searchSmitheryCatalog } from './harness-sidecar/capabilities/smitheryRegistry.js';
 import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
+import { normalizePromptImages } from './pi/normalizePromptImages.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
 import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
 import {
@@ -29,6 +36,7 @@ import {
 import { getWorkplaceStatus } from './harness/workplaceStatus.js';
 import { testEndpointProfile } from './harness/endpointHealth.js';
 import { getPiModelsSummary } from './harness/piModelsSummary.js';
+import { setModelEnableThinking } from './harness/piModelsService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -152,18 +160,67 @@ class PiRpcManager {
 const MIMES = {
   html: 'text/html', js: 'application/javascript', css: 'text/css',
   json: 'application/json', png: 'image/png', svg: 'image/svg+xml',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
 };
 
-function serveStatic(req, res, url) {
-  let filePath = url === '/' ? '/index.html' : url.split('?')[0];
-  filePath = join(ROOT, 'public', filePath);
-  if (existsSync(filePath)) {
-    const ext = filePath.split('.').pop();
-    res.writeHead(200, { 'Content-Type': MIMES[ext] || 'application/octet-stream' });
-    createReadStream(filePath).pipe(res);
-  } else {
-    res.writeHead(404); res.end('Not Found');
+const VENDOR_ROUTES = {
+  '/vendor/marked.min.js': join(ROOT, 'node_modules/marked/marked.min.js'),
+  '/vendor/highlight.min.js': join(ROOT, 'node_modules/@highlightjs/cdn-assets/highlight.min.js'),
+  '/vendor/github-dark.min.css': join(ROOT, 'node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css'),
+  '/vendor/katex/katex.min.js': join(ROOT, 'node_modules/katex/dist/katex.min.js'),
+  '/vendor/katex/katex.min.css': join(ROOT, 'node_modules/katex/dist/katex.min.css'),
+  '/vendor/katex/contrib/auto-render.min.js': join(ROOT, 'node_modules/katex/dist/contrib/auto-render.min.js'),
+};
+
+function formatSessionDisplayName({ sessionId, timestamp, rawName }) {
+  if (rawName && rawName !== 'Untitled') {
+    const text = String(rawName).replace(/\s+/g, ' ').trim();
+    const looksLikeSystemPrompt = /^(you are |# |system:|<\/?system)/i.test(text)
+      || text.length > 80
+      || text.includes('\n');
+    if (!looksLikeSystemPrompt) {
+      return text.length > 48 ? `${text.slice(0, 45)}…` : text;
+    }
   }
+  if (timestamp) {
+    const parsed = new Date(timestamp);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toLocaleString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+      });
+    }
+    return timestamp.slice(0, 16).replace('T', ' ');
+  }
+  const shortId = String(sessionId || '').slice(0, 8);
+  return shortId ? `Session ${shortId}` : 'Untitled';
+}
+
+function serveFile(res, filePath) {
+  if (!existsSync(filePath)) {
+    res.writeHead(404); res.end('Not Found');
+    return;
+  }
+  const ext = filePath.split('.').pop();
+  res.writeHead(200, { 'Content-Type': MIMES[ext] || 'application/octet-stream' });
+  createReadStream(filePath).pipe(res);
+}
+
+function serveStatic(req, res, url) {
+  const urlPath = url === '/' ? '/index.html' : url.split('?')[0];
+
+  if (urlPath.startsWith('/vendor/katex/fonts/')) {
+    const rel = urlPath.slice('/vendor/katex/'.length);
+    serveFile(res, join(ROOT, 'node_modules/katex/dist', rel));
+    return;
+  }
+
+  const vendorPath = VENDOR_ROUTES[urlPath];
+  if (vendorPath) {
+    serveFile(res, vendorPath);
+    return;
+  }
+
+  serveFile(res, join(ROOT, 'public', urlPath));
 }
 
 function sendJson(res, statusCode, payload) {
@@ -297,6 +354,15 @@ function syncPiCapabilitiesManifest(pi, manifestPath) {
   }
 }
 
+async function applyPiWorkplaceBridge(pi, workspaceRoot) {
+  const bridge = await ensurePiWorkplaceBridge(workspaceRoot);
+  syncPiCapabilitiesManifest(pi, bridge.manifestPath);
+  if (bridge.repaired && typeof pi.changeWorkspace === 'function') {
+    await pi.changeWorkspace(workspaceRoot);
+  }
+  return bridge;
+}
+
 async function ensureHarnessRunning(harness, pi, feedback, { workspaceRoot, port } = {}) {
   const desiredWorkspaceRoot = selectHarnessWorkspaceRoot({
     requestedWorkspaceRoot: workspaceRoot,
@@ -340,18 +406,20 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       case 'prompt': {
         const opts = {};
         if (msg.streamingBehavior) opts.streamingBehavior = msg.streamingBehavior;
-        if (msg.images && msg.images.length) opts.images = msg.images;
-        const message = applyHarnessFeedbackToPrompt({
+        if (msg.images?.length) opts.images = normalizePromptImages(msg.images);
+        let message = applyHarnessFeedbackToPrompt({
           message: msg.message,
           feedback,
           enabled: msg.useHarnessFeedback !== false,
         });
+        const heliosContext = await buildHeliosChatContext(pi.cwd);
+        message = prependHeliosChatContext(message, heliosContext);
         await pi.sendCommand({ type: 'prompt', message, ...opts });
         break;
       }
       case 'steer': {
         const opts = { message: msg.message };
-        if (msg.images && msg.images.length) opts.images = msg.images;
+        if (msg.images?.length) opts.images = normalizePromptImages(msg.images);
         await pi.sendCommand({ type: 'steer', ...opts });
         break;
       }
@@ -402,18 +470,22 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       }
       case 'set_workspace': {
         const newCwd = msg.path || process.cwd();
-        if (newCwd === pi.cwd) {
-          ws.send(JSON.stringify({ type: 'workspace_changed', success: true, path: newCwd }));
-          break;
+        if (newCwd !== pi.cwd) {
+          console.log('[Server] Changing workspace to:', newCwd);
+          await pi.changeWorkspace(newCwd);
+          closeHarnessClient(harness);
+          if (harness.manager.getStatus().state !== 'stopped') {
+            await harness.manager.stop();
+          }
+          harness.manager = new HarnessManager({ workspaceRoot: pi.cwd });
         }
-        console.log('[Server] Changing workspace to:', newCwd);
-        await pi.changeWorkspace(newCwd);
-        closeHarnessClient(harness);
-        if (harness.manager.getStatus().state !== 'stopped') {
-          await harness.manager.stop();
-        }
-        harness.manager = new HarnessManager({ workspaceRoot: pi.cwd });
-        ws.send(JSON.stringify({ type: 'workspace_changed', success: true, path: newCwd }));
+        const bridge = await applyPiWorkplaceBridge(pi, pi.cwd);
+        ws.send(JSON.stringify({
+          type: 'workspace_changed',
+          success: true,
+          path: pi.cwd,
+          bridge,
+        }));
         break;
       }
       case 'harness_status': {
@@ -709,7 +781,8 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       case 'harness_workplace_initialize': {
         const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
         const result = await initializeWorkplace({ workspaceRoot });
-        ws.send(JSON.stringify({ type: 'harness_workplace_initialized', data: result }));
+        const bridge = await applyPiWorkplaceBridge(pi, workspaceRoot);
+        ws.send(JSON.stringify({ type: 'harness_workplace_initialized', data: { ...result, bridge } }));
         break;
       }
       case 'harness_config_get': {
@@ -752,7 +825,8 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       case 'harness_workplace_repair': {
         const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
         const data = await repairWorkplace(workspaceRoot);
-        ws.send(JSON.stringify({ type: 'harness_workplace_repaired', data }));
+        const bridge = await applyPiWorkplaceBridge(pi, workspaceRoot);
+        ws.send(JSON.stringify({ type: 'harness_workplace_repaired', data: { ...data, bridge } }));
         break;
       }
       case 'harness_endpoint_test': {
@@ -766,8 +840,27 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'pi_models_summary', data }));
         break;
       }
+      case 'pi_models_set_thinking': {
+        const provider = msg.provider;
+        const modelId = msg.modelId;
+        if (provider && modelId && typeof msg.enableThinking === 'boolean') {
+          await setModelEnableThinking({ provider, modelId, enabled: msg.enableThinking });
+          await pi.sendCommand({ type: 'set_model', provider, modelId });
+        }
+        if (msg.reasoningLevel) {
+          await pi.sendCommand({ type: 'set_thinking_level', level: msg.reasoningLevel });
+        }
+        const summary = await getPiModelsSummary();
+        const state = await pi.sendCommand({ type: 'get_state' });
+        ws.send(JSON.stringify({ type: 'pi_models_summary', data: summary }));
+        ws.send(JSON.stringify({ type: 'thinking_changed', success: true }));
+        if (state?.data) {
+          ws.send(JSON.stringify({ type: 'state', data: state.data }));
+        }
+        break;
+      }
       case 'get_session_files': {
-        const sessionsDir = process.env.HOME + '/.pi/agent/sessions';
+        const sessionsDir = join(os.homedir(), '.pi', 'agent', 'sessions');
         try {
           
           
@@ -828,7 +921,7 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
                   path: filePath,
                   id: sessionId,
                   timestamp,
-                  name: sessionName,
+                  name: formatSessionDisplayName({ sessionId, timestamp, rawName: sessionName }),
                   cwd
                 });
               }
@@ -866,7 +959,7 @@ async function main() {
       sendJson(res, 500, { error: error.message });
     });
   });
-  const wss = new WebSocketServer({ server });
+  const wss = new WebSocketServer({ server, maxPayload: 32 * 1024 * 1024 });
 
   wss.on('connection', (ws) => {
     console.log('[Server] Client connected');

@@ -33,6 +33,7 @@ const STORAGE_SERVER_URL = 'helios_server_url';
 const STORAGE_WORKSPACE_PATH = 'helios_workspace_path';
 const STORAGE_SMITHERY_KEY = 'helios_smithery_key';
 const STORAGE_PINNED_SESSIONS = 'helios_pinned_sessions';
+const STORAGE_CONFIG_DRIFT_DISMISSED = 'helios_config_drift_dismissed';
 const LS_AUTO_HARNESS = 'helios_auto_harness';
 const KNOWN_MODEL_PROFILES = [
   'qwen36_vlm_fast',
@@ -291,6 +292,7 @@ const workspaceBrowseBtn = document.getElementById('btn-workspace-browse');
 try {
   const storedAutoHarness = localStorage.getItem(LS_AUTO_HARNESS);
   if (storedAutoHarness !== null) autoHarnessEnabled = storedAutoHarness === 'true';
+  settingsState.configDriftDismissed = localStorage.getItem(STORAGE_CONFIG_DRIFT_DISMISSED) === '1';
 } catch {}
 
 function loadStoredConnectionPrefs() {
@@ -600,13 +602,17 @@ function describeWsMessage(msg) {
 }
 
 function send(msg) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    try {
-      debug(`WS: Send ${msg.type || 'unknown'} len=${String(msg.message || '').length} images=${Array.isArray(msg.images) ? msg.images.length : 0}`);
-      ws.send(JSON.stringify(msg));
-    } catch (error) {
-      debug(`WS: Send failed (${error.message})`);
-    }
+  if (ws?.readyState !== WebSocket.OPEN) {
+    toast('Not connected to Helios Forge', 'error');
+    return false;
+  }
+  try {
+    ws.send(JSON.stringify(msg));
+    return true;
+  } catch (error) {
+    toast(`Failed to send message: ${error.message}`, 'error');
+    debug(`WS: Send failed (${error.message})`);
+    return false;
   }
 }
 
@@ -615,11 +621,14 @@ function setStatus(state, text) {
   userStatus.textContent = text;
   userStatus.className = 'user-status ' + state;
   if (connectionBanner) {
-    connectionBanner.className = 'connection-banner ' + state;
-    connectionText.textContent = state === 'connected' ? 'Connected to Helios Forge'
-      : state === 'connecting' ? 'Connecting to Helios Forge...'
-      : state === 'error' ? text || 'Connection error'
-      : 'Disconnected — reconnecting...';
+    if (state === 'connected') {
+      connectionBanner.className = 'connection-banner hidden';
+    } else {
+      connectionBanner.className = 'connection-banner ' + state;
+      connectionText.textContent = state === 'connecting' ? 'Connecting to Helios Forge...'
+        : state === 'error' ? text || 'Connection error'
+        : 'Disconnected — reconnecting...';
+    }
   }
   inputEl.disabled = state !== 'connected';
   updateGlobalStatusBar();
@@ -758,7 +767,11 @@ function handleMessage(msg) {
       syncWorkspaceInputs(workspacePath);
     }
     send({ type: 'harness_status' });
-    toast('Workspace set', 'success');
+    if (msg.bridge?.repaired) {
+      toast('Helios workplace repaired — deep research skills installed', 'success');
+    } else {
+      toast('Workspace set', 'success');
+    }
     return;
   }
   if (msg.type === 'session_deleted' && msg.success) {
@@ -3558,22 +3571,59 @@ function scroll() {
 // ═══════════════════════════════════════════════════════════
 // File Attachments
 // ═══════════════════════════════════════════════════════════
-function handleFileSelect(files) {
-  Array.from(files).forEach(file => {
+const MAX_CHAT_IMAGE_DIMENSION = 1600;
+const MAX_CHAT_IMAGE_BYTES = 3 * 1024 * 1024;
+
+function estimateBase64Bytes(base64) {
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+async function prepareChatImageFile(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_CHAT_IMAGE_DIMENSION / Math.max(bitmap.width, bitmap.height, 1));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+
+  let quality = 0.9;
+  let mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+  let dataUrl = canvas.toDataURL(mimeType, quality);
+  let base64 = dataUrl.split(',')[1];
+
+  while (estimateBase64Bytes(base64) > MAX_CHAT_IMAGE_BYTES && quality > 0.45) {
+    quality -= 0.1;
+    mimeType = 'image/jpeg';
+    dataUrl = canvas.toDataURL(mimeType, quality);
+    base64 = dataUrl.split(',')[1];
+  }
+
+  if (estimateBase64Bytes(base64) > MAX_CHAT_IMAGE_BYTES) {
+    throw new Error('Image is still too large after resizing. Try a smaller screenshot.');
+  }
+
+  return { type: 'image', data: base64, mimeType };
+}
+
+async function handleFileSelect(files) {
+  for (const file of Array.from(files)) {
     if (!file.type.startsWith('image/')) {
       toast('Only image files are supported', 'error');
-      return;
+      continue;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target.result.split(',')[1];
-      const mime = file.type;
-      uploadedImages.push({ type: 'image', data: base64, mimeType: mime });
+    try {
+      const attachment = await prepareChatImageFile(file);
+      uploadedImages.push(attachment);
       updateImagePreview();
       toast(`Image attached: ${file.name}`, 'success');
-    };
-    reader.readAsDataURL(file);
-  });
+    } catch (error) {
+      toast(error.message || 'Failed to attach image', 'error');
+    }
+  }
 }
 
 function handlePasteImages(event) {
@@ -3703,10 +3753,12 @@ function sendMessage(mode = 'prompt') {
   }
 
   const msg = { type: 'prompt', message: text || '[Image]' };
-  if (uploadedImages.length) msg.images = [...uploadedImages];
+  if (uploadedImages.length) msg.images = uploadedImages.map((image) => ({ ...image }));
+
   if (wasStreaming) msg.streamingBehavior = mode === 'steer' ? 'steer' : 'followUp';
 
-  send(msg);
+  const sent = send(msg);
+  if (!sent) return;
   if (mode === 'prompt') {
     launchHarnessFromPrompt(text || '[Image]', {
       hasImages: uploadedImages.length > 0,
@@ -3799,6 +3851,9 @@ const settingsEndpointsList = document.getElementById('settings-endpoints-list')
 const settingsEndpointForm = document.getElementById('settings-endpoint-form');
 const settingsPiModel = document.getElementById('settings-pi-model');
 const settingsPiThinking = document.getElementById('settings-pi-thinking');
+const settingsPiModelThinking = document.getElementById('settings-pi-model-thinking');
+const settingsPiThinkingLevel = document.getElementById('settings-pi-thinking-level');
+const settingsPiEnableThinking = document.getElementById('settings-pi-enable-thinking');
 
 function settingsWorkspaceRoot() {
   return getSelectedWorkspacePath() || workspacePath || undefined;
@@ -3869,16 +3924,69 @@ function renderSettingsTabs() {
   });
 }
 
+function formatPiReasoningLevel(level) {
+  if (!level) return '—';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function lookupModelEnableThinking(model) {
+  if (!model) return null;
+  const args = model.args;
+  if (args) {
+    const match = String(args).match(/enable_thinking["']?\s*:\s*(true|false)/i);
+    if (match) return match[1].toLowerCase() === 'true';
+  }
+  const catalog = settingsState.piModelsSummary?.models || [];
+  const entry = catalog.find((item) => item.id === model.id && (!model.provider || item.provider === model.provider));
+  if (entry && entry.enableThinking !== undefined && entry.enableThinking !== null) return entry.enableThinking;
+  return null;
+}
+
+function formatModelThinkingLabel(value) {
+  if (value === true) return 'On';
+  if (value === false) return 'Off';
+  return '—';
+}
+
 function renderSettingsPiSection() {
-  if (!settingsPiModel && !settingsPiThinking) return;
+  if (!settingsPiModel && !settingsPiThinking && !settingsPiModelThinking) return;
   if (settingsPiModel) {
     settingsPiModel.textContent = currentModel?.name || currentModel?.id || '—';
   }
   if (settingsPiThinking) {
-    settingsPiThinking.textContent = currentThinking
-      ? currentThinking.charAt(0).toUpperCase() + currentThinking.slice(1)
-      : '—';
+    settingsPiThinking.textContent = formatPiReasoningLevel(currentThinking);
   }
+  const modelThinking = lookupModelEnableThinking(currentModel);
+  if (settingsPiModelThinking) {
+    settingsPiModelThinking.textContent = formatModelThinkingLabel(modelThinking);
+  }
+  if (settingsPiThinkingLevel && currentThinking) {
+    settingsPiThinkingLevel.value = currentThinking;
+  }
+  if (settingsPiEnableThinking && modelThinking !== null) {
+    settingsPiEnableThinking.checked = modelThinking === true;
+  }
+}
+
+function applyPiThinkingSettings() {
+  const modelId = currentModel?.id;
+  const provider = currentModel?.provider
+    || settingsState.piModelsSummary?.models?.find((item) => item.id === modelId)?.provider
+    || models.find((item) => item.id === modelId)?.provider;
+  if (!provider || !modelId) {
+    toast('Connect and select a model first', 'error');
+    return;
+  }
+  const reasoningLevel = settingsPiThinkingLevel?.value || 'medium';
+  const enableThinking = settingsPiEnableThinking?.checked !== false;
+  send({
+    type: 'pi_models_set_thinking',
+    provider,
+    modelId,
+    enableThinking,
+    reasoningLevel,
+  });
+  toast('Applying thinking settings…', 'success');
 }
 
 function renderSettingsEndpointsList() {
@@ -4032,6 +4140,7 @@ function handleHarnessEndpointTestResult(data) {
 function handlePiModelsSummary(data) {
   settingsState.piModelsSummary = data || null;
   renderSettingsPiModelsSummary();
+  renderSettingsPiSection();
 }
 
 function repairWorkplace() {
@@ -4068,11 +4177,16 @@ function renderSettingsPiModelsSummary() {
     return;
   }
   const providers = (data.providers || []).map(p => `${esc(p.name)} (${p.modelCount})`).join(', ') || 'none';
-  const models = (data.models || []).slice(0, 12).map(m => `
+  const models = (data.models || []).slice(0, 12).map(m => {
+    const thinkingClass = m.enableThinking === true ? 'on' : m.enableThinking === false ? 'off' : '';
+    const thinkingLabel = m.enableThinking === true ? 'On' : m.enableThinking === false ? 'Off' : '—';
+    return `
     <div class="settings-pi-model-row">
       <span class="settings-pi-model-provider">${esc(m.provider || '—')}</span>
       <span class="settings-pi-model-id">${esc(m.name || m.id || '—')}</span>
-    </div>`).join('');
+      <span class="settings-pi-model-thinking ${thinkingClass}">${thinkingLabel}</span>
+    </div>`;
+  }).join('');
   settingsPiModelsSummary.innerHTML = `
     <div class="settings-hint">${esc(String(data.modelCount || 0))} models · ${providers}</div>
     <div class="settings-pi-models-list">${models || '<div class="settings-hint">No models listed</div>'}</div>`;
@@ -4242,23 +4356,48 @@ function harnessDefaultModelProfile() {
   return settingsState.harnessConfig?.defaults?.modelProfile || '';
 }
 
+function harnessResolvedModelId() {
+  const profile = harnessDefaultModelProfile();
+  if (!profile) return '';
+  if (profile.includes('/')) return profile;
+  const match = models.find(m => m.id === profile || m.name === profile
+    || String(m.id || '').endsWith(`/${profile}`)
+    || String(m.name || '').toLowerCase() === profile.toLowerCase());
+  return match?.id || profile;
+}
+
 function hasConfigDrift() {
+  if (settingsState.configDriftDismissed || !currentModel || !settingsState.harnessConfig) return false;
   const harnessDefault = harnessDefaultModelProfile();
-  if (!harnessDefault || !currentModel || settingsState.configDriftDismissed) return false;
+  if (!harnessDefault) return false;
+  const chatId = currentModel.id || '';
   const chatLabel = chatModelLabel();
-  if (!chatLabel) return false;
-  return chatLabel !== harnessDefault
-    && currentModel.id !== harnessDefault
-    && !String(currentModel.id || '').includes(harnessDefault);
+  if (!chatId && !chatLabel) return false;
+  const resolvedHarness = harnessResolvedModelId();
+  if (resolvedHarness === chatId || harnessDefault === chatId || harnessDefault === chatLabel) return false;
+  const norm = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const chatNorm = norm(chatId) || norm(chatLabel);
+  const harnessNorm = norm(resolvedHarness) || norm(harnessDefault);
+  if (!chatNorm || !harnessNorm) return false;
+  return chatNorm !== harnessNorm
+    && !chatNorm.includes(harnessNorm)
+    && !harnessNorm.includes(chatNorm);
 }
 
 function renderConfigDriftBanner() {
   if (!configDriftBanner || !configDriftText) return;
   const drift = hasConfigDrift();
   configDriftBanner.classList.toggle('hidden', !drift);
-  if (drift) {
-    configDriftText.textContent = `Harness default is ${harnessDefaultModelProfile()}; chat is using ${chatModelLabel()}.`;
-  }
+  if (!drift) return;
+  configDriftText.textContent = `Harness default is ${harnessDefaultModelProfile()}; chat is using ${chatModelLabel()}.`;
+}
+
+function dismissConfigDriftBanner() {
+  settingsState.configDriftDismissed = true;
+  try {
+    localStorage.setItem(STORAGE_CONFIG_DRIFT_DISMISSED, '1');
+  } catch (_) { /* ignore */ }
+  renderConfigDriftBanner();
 }
 
 function alignConfigDrift() {
@@ -4268,6 +4407,7 @@ function alignConfigDrift() {
   if (match) {
     selectModel(match.provider, match.id);
     settingsState.configDriftDismissed = true;
+    try { localStorage.setItem(STORAGE_CONFIG_DRIFT_DISMISSED, '1'); } catch (_) { /* ignore */ }
     renderConfigDriftBanner();
     toast('Chat model aligned to harness default', 'success');
     return;
@@ -4276,6 +4416,7 @@ function alignConfigDrift() {
   if (chatLabel) {
     patchHarnessConfig({ defaults: { modelProfile: chatLabel } });
     settingsState.configDriftDismissed = true;
+    try { localStorage.setItem(STORAGE_CONFIG_DRIFT_DISMISSED, '1'); } catch (_) { /* ignore */ }
     renderConfigDriftBanner();
     toast('Harness default aligned to chat model', 'success');
   }
@@ -4410,8 +4551,8 @@ function filterSessions(list) {
 }
 
 function checkCdnOffline() {
-  if (typeof marked !== 'undefined') return;
-  cdnOfflineBanner?.classList.remove('hidden');
+  const ok = typeof marked !== 'undefined' && typeof hljs !== 'undefined';
+  cdnOfflineBanner?.classList.toggle('hidden', ok);
 }
 
 function saveSettingsServerUrl() {
@@ -4721,18 +4862,24 @@ function toggleSidebar() {
 function renderPiSessions(sessionFiles) {
   if (!sessionFiles || !sessionFiles.length) return;
   const currentPath = currentSessionInfo?.sessionFile;
-  
-  // Keep existing pinned sessions
+  const MAX_SESSIONS = 30;
+
   const existingPinned = sessions.filter(s => s.pinned);
   sessions = [...existingPinned];
-  
-  // Add all pi sessions (not just 30)
-  sessionFiles.forEach(s => {
-    if (s.path === currentPath) return; // Skip current session
-    
-    const sessionName = s.name || s.timestamp?.slice(0, 16).replace('T', ' ') || 'Session';
+  const seenNames = new Map();
+
+  sessionFiles.slice(0, MAX_SESSIONS).forEach(s => {
+    if (s.path === currentPath) return;
+
+    let sessionName = s.name || s.timestamp?.slice(0, 16).replace('T', ' ') || 'Session';
+    const nameCount = (seenNames.get(sessionName) || 0) + 1;
+    seenNames.set(sessionName, nameCount);
+    if (nameCount > 1) {
+      const shortId = (s.id || pathBasename(s.path)).slice(0, 6);
+      sessionName = `${sessionName} · ${shortId}`;
+    }
+
     const alreadyExists = sessions.find(existing => existing.path === s.path);
-    
     if (!alreadyExists) {
       const shortId = s.id || String(s.path || '').split('/').pop().split('\\').pop().replace(/\.jsonl$/i, '');
       sessions.push({
@@ -4747,6 +4894,10 @@ function renderPiSessions(sessionFiles) {
 
   applyPinnedSessionsFromStorage();
   renderSessions();
+}
+
+function pathBasename(filePath) {
+  return String(filePath || '').split('/').pop().split('\\').pop().replace(/\.jsonl$/i, '');
 }
 
 function switchToSession(session) {
@@ -4931,11 +5082,9 @@ document.getElementById('btn-settings-repair-workplace')?.addEventListener('clic
 document.getElementById('btn-settings-save-router')?.addEventListener('click', saveSettingsRouterSection);
 document.getElementById('btn-settings-save-swarm')?.addEventListener('click', saveSettingsSwarmSection);
 document.getElementById('btn-settings-save-secrets')?.addEventListener('click', saveSettingsSecrets);
+document.getElementById('btn-settings-apply-pi-thinking')?.addEventListener('click', applyPiThinkingSettings);
 document.getElementById('btn-config-drift-align')?.addEventListener('click', alignConfigDrift);
-document.getElementById('btn-config-drift-dismiss')?.addEventListener('click', () => {
-  settingsState.configDriftDismissed = true;
-  renderConfigDriftBanner();
-});
+document.getElementById('btn-config-drift-dismiss')?.addEventListener('click', dismissConfigDriftBanner);
 document.getElementById('btn-harness-swarm-configure')?.addEventListener('click', () => openSettings('swarm'));
 statusChipApprovals?.addEventListener('click', openApprovalInbox);
 statusChipApprovals?.addEventListener('keydown', (event) => {
@@ -5024,10 +5173,36 @@ setInterval(() => {
 // ═══════════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════════
-// Connection is started from the dialog, not automatically
+// Connection is started from the dialog, not automatically (browser dev mode).
+// In Electron, auto-connect using runtime info from the main process.
+async function bootstrapElectronConnection() {
+  if (!window.electronAPI?.getRuntimeInfo) return;
+  try {
+    const info = await window.electronAPI.getRuntimeInfo();
+    if (info?.appUrl && serverUrlInput) {
+      const wsUrl = info.appUrl.replace(/^http/i, 'ws').replace(/\/$/, '');
+      serverUrlInput.value = wsUrl;
+    }
+    if (info?.workspaceRoot) {
+      applyWorkspaceSelection(info.workspaceRoot, { notify: false });
+    }
+    if (info?.piStatus && !info.piStatus.ok) {
+      const message = info.piStatus.guidance?.join(' ') || 'Pi prerequisites are not satisfied.';
+      toast(message, 'error');
+    }
+    startConnection();
+  } catch (error) {
+    debug('Electron bootstrap failed: ' + error.message);
+  }
+}
+
 updateGlobalStatusBar();
 updateHarnessPanelFooterVisibility();
 loadStoredSmitheryKey();
 checkCdnOffline();
+window.addEventListener('load', () => {
+  checkCdnOffline();
+  bootstrapElectronConnection();
+});
 setCapabilitiesViewMode(false);
 setAppMode('chat');

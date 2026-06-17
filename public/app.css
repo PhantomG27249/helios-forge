@@ -60,6 +60,10 @@
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.hidden {
+  display: none !important;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
@@ -368,11 +372,16 @@ body {
 
 /* Top Bar */
 #topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "left status"
+    "nav nav";
   align-items: center;
-  justify-content: space-between;
-  height: var(--topbar-h);
-  padding: 0 20px;
+  gap: 6px 12px;
+  height: auto;
+  min-height: var(--topbar-h);
+  padding: 8px 20px;
   background: transparent;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -380,17 +389,17 @@ body {
   z-index: 1;
 }
 
-.topbar-left { display: flex; align-items: center; min-width: 0; gap: 8px; }
+.topbar-left { grid-area: left; display: flex; align-items: center; min-width: 0; gap: 8px; }
 
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  margin-left: auto;
 }
 
 .global-status-bar {
+  grid-area: status;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -1014,7 +1023,7 @@ body {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 144px minmax(0, 1fr) 144px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: end;
   gap: 14px;
 }
@@ -1594,7 +1603,7 @@ body {
 
 .settings-readonly-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -1713,6 +1722,24 @@ body {
   border-radius: var(--radius-sm);
 }
 
+.settings-pi-model-thinking {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.settings-pi-model-thinking.on {
+  color: var(--success);
+}
+
+.settings-pi-model-thinking.off {
+  color: var(--warning);
+}
+
 .settings-pi-model-row {
   display: flex;
   justify-content: space-between;
@@ -1745,11 +1772,13 @@ body {
 .streaming-mode-hint.hidden { display: none; }
 
 .mode-nav {
+  grid-area: nav;
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: 8px;
+  margin-left: 0;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .mode-nav-btn {
@@ -1883,7 +1912,16 @@ body {
   color: var(--text-tertiary);
 }
 
-.dock-minimal {
+.bottom-left-tool-dock.dock-minimal {
+  display: flex;
+  flex-wrap: wrap;
+  grid-template-columns: unset;
+  grid-template-rows: unset;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 6px;
+  gap: 6px;
   justify-content: flex-start;
 }
 

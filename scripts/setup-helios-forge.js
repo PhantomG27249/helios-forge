@@ -66,6 +66,7 @@ async function ensureLocalConfig({ workspaceRoot, forceConfig = false }) {
 
 export async function setupHeliosForge({
   workspaceRoot = repoRoot,
+  bundledPackageRoot = path.join(repoRoot, 'packages', 'helios-research-harness'),
   forceConfig = false,
   now = () => new Date().toISOString(),
 } = {}) {

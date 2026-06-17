@@ -9,6 +9,9 @@
     "dev": "node src/server.js",
     "start": "node src/server.js",
     "electron": "electron src/electron/main.js",
+    "electron:pack": "electron-builder --dir --config electron-builder.yml",
+    "electron:dist": "electron-builder --config electron-builder.yml",
+    "icons:generate": "node scripts/generate-app-icons.js",
     "test": "node --test",
     "setup": "node scripts/setup-helios-forge.js",
     "install:helios": "node scripts/setup-helios-forge.js",
@@ -18,9 +21,14 @@
     "install:pi-helios": "node scripts/install-pi-helios-extension.js"
   },
   "dependencies": {
+    "@highlightjs/cdn-assets": "^11.10.0",
+    "highlight.js": "^11.10.0",
+    "katex": "^0.16.11",
+    "marked": "^15.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
   }
 }

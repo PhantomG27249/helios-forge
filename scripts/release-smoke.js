@@ -7,7 +7,12 @@ const requiredFiles = [
   'src/server.js',
   'src/electron/main.js',
   'src/electron/preload.js',
+  'src/electron/appPaths.js',
   'public/index.html',
+  'electron-builder.yml',
+  'build/icon.png',
+  'build/icon.ico',
+  'public/icon.png',
 ];
 
 async function readJson(filePath) {

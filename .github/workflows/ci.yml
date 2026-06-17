@@ -26,3 +26,34 @@ jobs:
 
       - name: Run release smoke
         run: npm run release:smoke
+
+  desktop-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate icons
+        run: npm run icons:generate
+
+      - name: Run tests
+        run: npm test
+
+      - name: Package Electron app (unpacked)
+        run: npm run electron:pack
+
+      - name: Upload unpacked build
+        uses: actions/upload-artifact@v4
+        with:
+          name: helios-forge-win-unpacked
+          path: dist/win-unpacked

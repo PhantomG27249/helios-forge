@@ -23,7 +23,7 @@ test('harness controls expose mode navigation and minimal tool dock', async () =
   assert.ok(dockStart > inputStart && dockStart < inputEnd, 'tool dock should live in the input-area chrome layer');
   assert.match(css, /\.bottom-left-tool-dock\s*\{[^}]*position:\s*static/s);
   assert.doesNotMatch(css, /\.bottom-left-tool-dock\s*\{[^}]*z-index:\s*1200/s);
-  assert.match(css, /#input-area\s*\{[^}]*grid-template-columns:\s*144px\s+minmax\(0,\s*1fr\)\s+144px/s);
+  assert.match(css, /#input-area\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/s);
   assert.doesNotMatch(html, /topbar-text-btn/);
 });
 
@@ -393,6 +393,6 @@ test('harness panel exposes capability goal status rows', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250622/);
-  assert.match(html, /app\.js\?v=20250622/);
+  assert.match(html, /app\.css\?v=20250624/);
+  assert.match(html, /app\.js\?v=20250624/);
 });

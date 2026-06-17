@@ -7,13 +7,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250622">
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.0/marked.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/styles/github-dark.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>
+  <link rel="stylesheet" href="/app.css?v=20250624">
+  <script src="/vendor/marked.min.js"></script>
+  <link rel="stylesheet" href="/vendor/github-dark.min.css">
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <script src="/vendor/katex/katex.min.js"></script>
+  <script src="/vendor/katex/contrib/auto-render.min.js"></script>
+  <script src="/vendor/highlight.min.js"></script>
 </head>
 <body>
   <div class="grain-overlay"></div>
@@ -151,7 +151,7 @@
       </div>
 
       <div id="cdn-offline-banner" class="cdn-offline-banner hidden" role="alert">
-        Markdown rendering unavailable — CDN scripts failed to load.
+        Markdown rendering unavailable — required scripts failed to load.
       </div>
 
       <div id="workspace-layout" class="workspace-layout">
@@ -755,11 +755,35 @@
                 <strong id="settings-pi-model">—</strong>
               </div>
               <div class="settings-readonly-card">
-                <span class="settings-readonly-label">Thinking</span>
+                <span class="settings-readonly-label">Reasoning level</span>
                 <strong id="settings-pi-thinking">—</strong>
               </div>
+              <div class="settings-readonly-card">
+                <span class="settings-readonly-label">Model thinking</span>
+                <strong id="settings-pi-model-thinking">—</strong>
+              </div>
             </div>
-            <p class="settings-hint">Reflects the current Pi session state from the composer.</p>
+            <p class="settings-hint">Reasoning level is Pi&apos;s composer budget. Model thinking sets <code>enable_thinking</code> in <code>models.json</code> for the active model.</p>
+            <div class="settings-form-grid settings-pi-thinking-form">
+              <label class="settings-field">
+                <span class="settings-field-label">Reasoning level</span>
+                <select id="settings-pi-thinking-level" class="settings-input">
+                  <option value="off">Off</option>
+                  <option value="minimal">Minimal</option>
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                </select>
+              </label>
+              <label class="settings-checkbox-row">
+                <input id="settings-pi-enable-thinking" type="checkbox" checked />
+                <span>Enable model thinking (<code>enable_thinking</code>)</span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <button id="btn-settings-apply-pi-thinking" class="settings-btn primary" type="button">Apply thinking settings</button>
+            </div>
             <div class="settings-section-title">Pi models catalog</div>
             <div id="settings-pi-models-summary" class="settings-pi-models-summary">
               <div class="settings-hint">Open this tab while connected to load models.</div>
@@ -793,6 +817,6 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/app.js?v=20250622"></script>
+  <script src="/app.js?v=20250624"></script>
 </body>
 </html>

@@ -113,6 +113,37 @@ test('pi rpc manager scopes capability manifest env to spawned pi process', asyn
   assert.equal('HELIOS_CAPABILITIES_MANIFEST' in spawns[1].options.env, false);
 });
 
+test('pi rpc manager normalizes structured prompt images before writing to pi stdin', async () => {
+  const writes = [];
+  const manager = new PiRpcManager({
+    initialCwd: 'C:\\Users\\jackj\\Github\\helios-forge',
+    readyDelayMs: 0,
+    commandTimeoutMs: 50,
+    resolvePiCommandImpl: () => ({ command: 'pi', args: [] }),
+    spawnImpl: () => createSilentPiProcess(writes),
+  });
+
+  await manager.start();
+  await assert.rejects(
+    manager.sendCommand({
+      type: 'prompt',
+      message: 'describe this',
+      images: [{ mimeType: 'image/png', data: 'abc123' }],
+    }),
+    /Timeout/,
+  );
+
+  const promptWrite = writes.find((write) => write.type === 'prompt');
+  assert.equal(promptWrite.images.length, 1);
+  assert.deepEqual(promptWrite.images[0], {
+    type: 'image',
+    mimeType: 'image/png',
+    data: 'abc123',
+  });
+
+  await manager.stopForRestart();
+});
+
 test('pi rpc manager logs command lifecycle with safe metadata and pending timeout details', async () => {
   const logs = [];
   const writes = [];

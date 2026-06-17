@@ -1,0 +1,25 @@
+appId: com.alphahelion.helios-forge
+productName: Helios Forge
+directories:
+  output: dist
+  buildResources: build
+files:
+  - package.json
+  - src/**/*
+  - public/**/*
+  - scripts/setup-helios-forge.js
+asarUnpack:
+  - src/server.js
+  - src/**/*
+extraResources:
+  - from: packages/helios-research-harness
+    to: helios-research-harness
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  # Avoid winCodeSign symlink extraction on Windows dev machines without admin/Developer Mode.
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

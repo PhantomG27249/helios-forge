@@ -88,7 +88,10 @@ Helios Forge is licensed under the Apache License, Version 2.0. See [LICENSE](./
 ```powershell
 npm test
 npm run release:smoke
+npm run electron
 ```
+
+See [docs/desktop-install.md](./docs/desktop-install.md) for standalone Electron install and packaging.
 
 Generated harness runtime files live under `.harness/` and are ignored by git.
 
