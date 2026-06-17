@@ -53,6 +53,17 @@ test('config loader returns safe defaults when no config file exists', async () 
     assert.equal(config.modelRouter.persistence.path, '.harness/model-router-state.json');
     assert.equal(config.icr.enabled, false);
     assert.equal(config.icr.mode, 'evidence_only');
+    assert.equal(config.icr.persistOnTask, true);
+    assert.equal(config.icr.includeRhoComparison, true);
+    assert.equal(config.icr.useModelRunners, false);
+    assert.equal(config.icr.branchBreadth, 5);
+    assert.equal(config.icr.correctionDepth, 10);
+    assert.equal(config.icr.hypothesisCount, 6);
+    assert.equal(config.icr.solutionPoolSize, 8);
+    assert.equal(config.icr.maxComputeMultiplier, 40);
+    assert.equal(config.icr.maxContextTokens, 140000);
+    assert.equal(config.productionCapabilities.icrLane.enabled, false);
+    assert.equal(config.productionCapabilities.icrLane.mode, 'offline');
   });
 });
 
@@ -110,5 +121,7 @@ test('config loader reads harness yaml overrides', async () => {
     assert.equal(config.adaptiveSearch.allowProfileSwitching, false);
     assert.equal(config.icr.enabled, true);
     assert.equal(config.icr.mode, 'shadow');
+    assert.equal(config.icr.branchBreadth, 5);
+    assert.equal(config.icr.correctionDepth, 10);
   });
 });

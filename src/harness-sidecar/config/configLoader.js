@@ -1,6 +1,11 @@
 import { access, readFile } from 'fs/promises';
 import path from 'path';
 
+import {
+  buildDefaultHarnessIcrConfig,
+  buildDefaultHarnessIcrLaneGate,
+} from '../icr/icrHarnessDefaults.js';
+
 export const DEFAULT_HARNESS_CONFIG = {
   project: {
     name: 'Helios Forge',
@@ -133,18 +138,9 @@ export const DEFAULT_HARNESS_CONFIG = {
       mode: 'advisory',
       authority: 'evidence_only',
     },
-    icrLane: {
-      enabled: false,
-      mode: 'offline',
-      authority: 'evidence_only',
-    },
+    icrLane: buildDefaultHarnessIcrLaneGate(),
   },
-  icr: {
-    enabled: false,
-    mode: 'evidence_only',
-    persistOnTask: true,
-    includeRhoComparison: false,
-  },
+  icr: buildDefaultHarnessIcrConfig(),
   swarmExecution: {
     concurrency: 1,
     workerMode: 'model_driven',

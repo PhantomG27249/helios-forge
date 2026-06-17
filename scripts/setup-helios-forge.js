@@ -8,6 +8,7 @@ import {
   saveCapabilityRecord,
 } from '../src/harness-sidecar/capabilities/capabilityStore.js';
 import { installPiPackage } from '../src/harness-sidecar/capabilities/piPackageInstaller.js';
+import { formatHarnessIcrYamlSection } from '../src/harness-sidecar/icr/icrHarnessDefaults.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundledPackageRoot = path.join(repoRoot, 'packages', 'helios-research-harness');
@@ -40,6 +41,7 @@ const DEFAULT_CONFIG = [
   '  mode: advisory',
   '  maxActionsPerTask: 8',
   '  allowProfileSwitching: true',
+  formatHarnessIcrYamlSection({ enabled: true, includeProductionGate: true }),
   '',
 ].join('\n');
 

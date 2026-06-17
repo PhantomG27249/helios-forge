@@ -55,6 +55,11 @@ test('setup creates local harness config, installs bundled package, and mounts c
     assert.match(configText, /adaptiveSearch: true/);
     assert.match(configText, /safeApply: true/);
     assert.match(configText, /mode: advisory/);
+    assert.match(configText, /icr:/);
+    assert.match(configText, /enabled: true/);
+    assert.match(configText, /branchBreadth: 5/);
+    assert.match(configText, /correctionDepth: 10/);
+    assert.match(configText, /icrLane:/);
 
     const registry = JSON.parse(await readFile(registryPath, 'utf8'));
     assert.equal(registry.capabilities.length, 11);

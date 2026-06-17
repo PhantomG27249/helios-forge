@@ -3,6 +3,10 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 
 import { loadHarnessConfig } from '../harness-sidecar/config/configLoader.js';
+import {
+  buildDefaultHarnessIcrConfig,
+  formatHarnessIcrYamlSection,
+} from '../harness-sidecar/icr/icrHarnessDefaults.js';
 import { setupHeliosForge } from '../../scripts/setup-helios-forge.js';
 import { getWorkplaceStatus } from './workplaceStatus.js';
 
@@ -34,6 +38,7 @@ const STANDARD_CONFIG_YAML = [
   '  mode: advisory',
   '  maxActionsPerTask: 8',
   '  allowProfileSwitching: true',
+  formatHarnessIcrYamlSection({ enabled: true, includeProductionGate: true }),
   '',
 ].join('\n');
 
@@ -130,6 +135,14 @@ export const CONFIG_PRESETS = {
       mode: 'advisory',
       maxActionsPerTask: 8,
       allowProfileSwitching: true,
+    },
+    icr: buildDefaultHarnessIcrConfig({ enabled: true }),
+    productionCapabilities: {
+      icrLane: {
+        enabled: true,
+        mode: 'advisory',
+        authority: 'evidence_only',
+      },
     },
   },
 };
