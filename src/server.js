@@ -19,6 +19,13 @@ import { searchSmitheryCatalog } from './harness-sidecar/capabilities/smitheryRe
 import { PiRpcManager as ManagedPiRpcManager } from './pi/piRpcManager.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
 import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
+import {
+  applyConfigPreset,
+  getHarnessConfig,
+  initializeWorkplace,
+  patchHarnessConfig,
+} from './harness/harnessConfigService.js';
+import { getWorkplaceStatus } from './harness/workplaceStatus.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -688,6 +695,55 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           : null;
         // For now, we get the current session info
         ws.send(JSON.stringify({ type: 'sessions', data: { current: state.data || {} } }));
+        break;
+      }
+      case 'harness_workplace_status': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const status = await getWorkplaceStatus(workspaceRoot);
+        ws.send(JSON.stringify({ type: 'harness_workplace_status', data: status }));
+        break;
+      }
+      case 'harness_workplace_initialize': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const result = await initializeWorkplace({ workspaceRoot });
+        ws.send(JSON.stringify({ type: 'harness_workplace_initialized', data: result }));
+        break;
+      }
+      case 'harness_config_get': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const data = await getHarnessConfig(workspaceRoot);
+        ws.send(JSON.stringify({ type: 'harness_config', data }));
+        break;
+      }
+      case 'harness_config_patch': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const data = await patchHarnessConfig(workspaceRoot, msg.patch || {});
+        ws.send(JSON.stringify({ type: 'harness_config_updated', data }));
+        break;
+      }
+      case 'harness_config_apply_preset': {
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        const data = await applyConfigPreset(workspaceRoot, {
+          presetId: msg.presetId,
+          mode: msg.mode || 'merge',
+        });
+        ws.send(JSON.stringify({ type: 'harness_config_updated', data }));
+        break;
+      }
+      case 'harness_config_reload': {
+        if (harness.manager.getStatus().state === 'running') {
+          closeHarnessClient(harness);
+          await harness.manager.restart();
+          harness.client = new HarnessClient({ baseUrl: harness.manager.getStatus().url });
+          harness.unsubscribeEvents = harness.client.onEvent((event) => {
+            if (event?.type === 'capabilities.runtime_mounted') {
+              syncPiCapabilitiesManifest(pi, event.manifestPath);
+            }
+            feedback?.record(event);
+            pi.broadcast({ type: 'harness_task_event', event });
+          });
+        }
+        ws.send(JSON.stringify({ type: 'harness_config_reloaded' }));
         break;
       }
       case 'get_session_files': {
