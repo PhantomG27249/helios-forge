@@ -102,7 +102,7 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     maturityStage: 'implemented_substrate',
     productionGate: null,
     productionEvidenceRequired: [],
-    paperGradeAutonomyGaps: ['nested_execution_not_implemented'],
+    paperGradeAutonomyGaps: ['nested_swarm_production_proof_pending'],
   },
   {
     goalId: 'oversoul_coverage',
@@ -111,7 +111,7 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     maturityStage: 'implemented_substrate',
     productionGate: null,
     productionEvidenceRequired: [],
-    paperGradeAutonomyGaps: ['nested_execution_not_implemented'],
+    paperGradeAutonomyGaps: ['nested_swarm_production_proof_pending'],
   },
 ]);
 

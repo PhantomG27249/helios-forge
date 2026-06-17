@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import path from 'path';
+import { loadHarnessConfig } from '../harness-sidecar/config/configLoader.js';
 import { summarizeCapabilityGoalStatus } from '../harness-sidecar/meta/capabilityGoalStatus.js';
+import { loadCapabilityGoalInputs } from '../harness-sidecar/meta/capabilityGoalSnapshot.js';
 
 const DEFAULT_PORT = 49321;
 const MAX_LOG_LINES = 200;
@@ -32,6 +34,7 @@ export class HarnessManager {
     this.state = 'stopped';
     this.logs = [];
     this.restartCount = 0;
+    this._capabilityGoalInputs = null;
   }
 
   get url() {
@@ -46,9 +49,20 @@ export class HarnessManager {
       url: this.url,
       workspaceRoot: this.workspaceRoot,
       restartCount: this.restartCount,
-      capabilityGoals: summarizeCapabilityGoalStatus(),
+      capabilityGoals: this._capabilityGoalInputs
+        ? summarizeCapabilityGoalStatus(this._capabilityGoalInputs)
+        : summarizeCapabilityGoalStatus(),
       logs: [...this.logs],
     };
+  }
+
+  async refreshCapabilityGoals() {
+    const harnessConfig = await loadHarnessConfig({ workspaceRoot: this.workspaceRoot });
+    this._capabilityGoalInputs = await loadCapabilityGoalInputs({
+      workspaceRoot: this.workspaceRoot,
+      harnessConfig,
+    });
+    return summarizeCapabilityGoalStatus(this._capabilityGoalInputs);
   }
 
   async start() {
@@ -78,6 +92,7 @@ export class HarnessManager {
     });
 
     await this.waitForHealth();
+    await this.refreshCapabilityGoals().catch(() => {});
     this.state = 'running';
     return this.getStatus();
   }

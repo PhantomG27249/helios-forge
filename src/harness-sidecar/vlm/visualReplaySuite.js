@@ -324,3 +324,70 @@ export function runVisualReplaySuite({
     besHardCases: failedResults.map((caseResult) => besHardCase({ caseResult })),
   };
 }
+
+function evidenceOnlyReplayReport(replay = {}) {
+  return {
+    ...replay,
+    visualEvidenceRequired: true,
+    evidenceOnly: true,
+    authority: 'visual_evidence_only',
+    canPromote: false,
+    promotion: {
+      ...(replay.promotion || {}),
+      allowed: false,
+    },
+    caseResults: asArray(replay.caseResults).map((caseResult) => ({
+      ...caseResult,
+      visualEvidenceRequired: true,
+      evidenceOnly: true,
+      authority: 'visual_evidence_only',
+      canPromote: false,
+    })),
+    promotionCandidates: asArray(replay.promotionCandidates).map((candidate) => ({
+      ...candidate,
+      visualEvidenceRequired: true,
+      evidenceOnly: true,
+      canPromote: false,
+    })),
+  };
+}
+
+export function buildProductionVisualReplayReport({
+  suite,
+  results = [],
+  runId = 'visual-replay-run',
+  candidateId = null,
+  recordedAt = new Date().toISOString(),
+} = {}) {
+  const replay = evidenceOnlyReplayReport(runVisualReplaySuite({
+    suite,
+    results,
+    runId,
+    candidateId,
+    recordedAt,
+  }));
+
+  return {
+    evidenceType: 'visual_replay_report',
+    runId: replay.runId,
+    suiteId: replay.suiteId,
+    recordedAt: replay.recordedAt,
+    summary: {
+      caseCount: replay.metrics.caseCount,
+      passedCount: replay.metrics.passedCount,
+      failedCount: replay.metrics.failedCount,
+      passRate: replay.metrics.passRate,
+      averageScore: replay.metrics.averageScore,
+      averageConfidence: replay.metrics.averageConfidence,
+      artifactCoverage: replay.metrics.artifactCoverage,
+      failedEvidenceCount: replay.metrics.failedEvidenceCount,
+      artifactHashes: replay.artifactHashes,
+    },
+    replay,
+    visualEvidenceRequired: true,
+    promotionEvidenceOnly: true,
+    evidenceOnly: true,
+    canPromote: false,
+    authority: 'visual_evidence_only',
+  };
+}

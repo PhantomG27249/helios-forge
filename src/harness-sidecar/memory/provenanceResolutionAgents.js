@@ -264,3 +264,63 @@ export async function runProvenanceResolutionAgents({
     reasons: unique([...normalized.reasons, ...runnerReasons]).sort(),
   };
 }
+
+function summarizeResolutionVerdicts(resolutions = []) {
+  const counts = {
+    supported: 0,
+    contradicted: 0,
+    conflicted: 0,
+    insufficient_evidence: 0,
+  };
+  for (const resolution of resolutions) {
+    const verdict = VERDICTS.has(resolution?.verdict) ? resolution.verdict : 'insufficient_evidence';
+    counts[verdict] += 1;
+  }
+  return {
+    conflictCount: resolutions.length,
+    supportedCount: counts.supported,
+    contradictedCount: counts.contradicted,
+    conflictedCount: counts.conflicted,
+    insufficientEvidenceCount: counts.insufficient_evidence,
+  };
+}
+
+export async function buildProductionProvenanceResolutionReport({
+  conflicts = [],
+  provenancePassages,
+  modelResolver,
+  policy,
+  runId = 'provenance-resolution-run',
+  recordedAt = new Date().toISOString(),
+} = {}) {
+  const resolutions = [];
+  for (const conflict of normalizeList(conflicts)) {
+    const resolution = await runProvenanceResolutionAgents({
+      conflict,
+      provenancePassages,
+      modelResolver,
+      policy,
+    });
+    resolutions.push({
+      ...resolution,
+      promotionAllowed: false,
+      modelEvidenceOnly: true,
+      canPromote: false,
+      authority: 'evidence_only',
+    });
+  }
+
+  return {
+    evidenceType: 'provenance_resolution_report',
+    runId,
+    recordedAt,
+    summary: summarizeResolutionVerdicts(resolutions),
+    resolutions,
+    modelEvidenceOnly: true,
+    promotionAllowed: false,
+    promotionEvidenceOnly: true,
+    evidenceOnly: true,
+    canPromote: false,
+    authority: 'evidence_only',
+  };
+}

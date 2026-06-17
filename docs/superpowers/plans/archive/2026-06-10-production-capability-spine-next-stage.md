@@ -1,5 +1,7 @@
 # Production Capability Spine Next Stage Implementation Plan
 
+> **Superseded (2026-06-17):** Absorbed into `2026-06-17-swarm-of-swarms-recursive-evolution-master-plan.md`. Canonical status: `docs/architecture/2026-06-17-implementation-reconciliation.md`.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move Helios Forge from deterministic local paper-shaped loops into a production-grade self-improvement spine with stable benchmarks, autonomous Meta-Harness variants, production RHO, model-assisted MemGraphRAG/BES judgment, multimodal scale, external durable A2A, and hardened governance.

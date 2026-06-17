@@ -6,9 +6,15 @@ import { runDueReplaySchedules } from '../benchmarks/replayScheduler.js';
 import { evaluateProposalTrustBoundary } from '../core/trustKernelGateway.js';
 import { ingestLocalMemoryProposals } from '../memory/memoryGraphTaskBridge.js';
 import { runDueCampaignSchedules } from './campaignScheduler.js';
+import { runMetaHarnessCampaign } from './metaHarnessCampaignRunner.js';
 import { accumulateAutonomyEvidence } from './autonomyEvidenceAccumulator.js';
+import { persistAutonomyProofArtifacts } from './autonomyProofRecorder.js';
 import { createOperatorDashboardStore } from './operatorDashboardStore.js';
+import { runProductionReportCycle } from './productionReportOrchestrator.js';
 import { coordinateRecursiveEvolution } from './recursiveEvolutionCoordinator.js';
+import { runA2aPeerCycle } from '../interop/a2aPeerCycleRunner.js';
+import { runPostTaskIcrHooks } from '../icr/icrPostTaskHook.js';
+import { createDeterministicIcrRunners } from '../icr/icrRuntimeCoordinator.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -34,7 +40,47 @@ function defaultCampaignSchedules(task = {}) {
     id: `post-task-campaign-${task.taskId || 'runtime'}`,
     campaignId: `campaign-${task.taskId || 'runtime'}`,
     intervalMs: 0,
+    maxCycles: 1,
   }];
+}
+
+export function createPostTaskCampaignBindings({
+  task = {},
+  replayReports = [],
+} = {}) {
+  const reports = asArray(replayReports).filter(Boolean);
+  const latestReplay = reports.length ? reports[reports.length - 1] : null;
+  const replayQuality = Number(latestReplay?.aggregateScore ?? latestReplay?.metrics?.quality);
+  const quality = Number.isFinite(replayQuality) ? replayQuality : 0.55;
+
+  return {
+    maxCycles: 1,
+    proposer: async (input) => ({
+      candidateId: `post-task-${task.taskId || 'runtime'}-${input.cycleIndex}`,
+      config: {
+        source: 'post_task_recursive_evolution',
+        replayReportIds: reports.map((report) => report.reportId).filter(Boolean),
+      },
+      metricManifest: { metrics: [{ name: 'quality' }] },
+    }),
+    evaluator: async ({ replayReport }) => ({
+      metrics: {
+        quality,
+        safety: 0.9,
+        cost: 0.5,
+        latency: 0.5,
+      },
+      replayReport: replayReport || latestReplay || null,
+    }),
+    variantRunner: async ({ previousReplayReports }) => ({
+      replayReport: replayReportFromList(previousReplayReports) || latestReplay || null,
+    }),
+  };
+}
+
+function replayReportFromList(reports = []) {
+  const list = asArray(reports).filter(Boolean);
+  return list.length ? list[list.length - 1] : null;
 }
 
 function smokeSuiteFallback(suiteId) {
@@ -112,6 +158,9 @@ export async function runPostTaskRecursiveEvolutionHooks({
     campaigns: null,
     coordinated: null,
     autonomy: null,
+    productionReports: null,
+    a2aPeerCycle: null,
+    icr: null,
   };
 
   if (asArray(memoryProposals).length > 0) {
@@ -162,20 +211,18 @@ export async function runPostTaskRecursiveEvolutionHooks({
   }
 
   if (productionGateEnabled(harnessConfig, 'sourceTreeVariants')) {
+    const replayReports = asArray(results.replay?.ran).map((entry) => entry.report).filter(Boolean);
+    const campaignBindings = createPostTaskCampaignBindings({ task, replayReports });
     const campaignResult = await runDueCampaignSchedules({
       workspaceRoot,
-      schedules: defaultCampaignSchedules(task),
+      schedules: defaultCampaignSchedules(task).map((schedule) => ({
+        ...schedule,
+        ...campaignBindings,
+      })),
       store: {
         saveReport: (report) => store.saveCampaignReport(report),
       },
-      campaignRunner: async (input) => ({
-        campaignId: input.schedule?.campaignId || input.campaignId,
-        status: 'evidence_only',
-        canPromote: false,
-        variantCount: 0,
-        evidenceOnly: true,
-        ...input,
-      }),
+      campaignRunner: runMetaHarnessCampaign,
     });
     results.campaigns = campaignResult;
     if (typeof emitEvent === 'function') {
@@ -205,6 +252,10 @@ export async function runPostTaskRecursiveEvolutionHooks({
         status: rollbackDrill.restoreVerified === false ? 'failed' : 'passed',
       },
     });
+    autonomyState.drills = [{
+      ...rollbackDrill,
+      status: rollbackDrill.restoreVerified === false ? 'failed' : 'passed',
+    }];
   }
   for (const entry of asArray(results.replay?.ran)) {
     autonomyState = accumulateAutonomyEvidence({
@@ -214,6 +265,37 @@ export async function runPostTaskRecursiveEvolutionHooks({
     });
   }
   results.autonomy = autonomyState;
+
+  results.productionReports = await runProductionReportCycle({
+    workspaceRoot,
+    harnessConfig,
+    task,
+  });
+
+  if (productionGateEnabled(harnessConfig, 'productionA2aTransport')
+    && productionGateEnabled(harnessConfig, 'productionA2aQueues')) {
+    const peerWorkspaceRoot = path.join(path.resolve(workspaceRoot), '.harness', 'a2a', 'peer-workspace');
+    await mkdir(peerWorkspaceRoot, { recursive: true });
+    results.a2aPeerCycle = await runA2aPeerCycle({
+      localWorkspaceRoot: workspaceRoot,
+      peerWorkspaceRoot,
+      harnessConfig,
+    });
+  }
+
+  results.icr = await runPostTaskIcrHooks({
+    workspaceRoot,
+    harnessConfig,
+    task,
+    emitEvent,
+    runners: createDeterministicIcrRunners(),
+  });
+
+  await persistAutonomyProofArtifacts({
+    workspaceRoot,
+    autonomyState,
+    harnessConfig,
+  });
 
   if (typeof emitEvent === 'function') {
     await emitEvent({

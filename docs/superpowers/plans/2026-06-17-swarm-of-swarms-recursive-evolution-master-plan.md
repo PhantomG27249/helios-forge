@@ -1,5 +1,7 @@
 # Swarm-of-Swarms Recursive Evolution Master Implementation Plan
 
+> **Status (2026-06-17):** M0–M7 wiring complete. Chunk 9B security audit **APPROVED** — `docs/architecture/2026-06-17-chunk-9-security-authority-audit.md`. Production proof indexing + ICR wiring remain parallel tracks.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire Helios Forge's existing Level 4-capable engine substrate into a continuously measuring, recursively improving swarm-of-swarms that earns autonomy only through held-out evidence — closing the gap between "engine built" and "organism proven."
@@ -11,25 +13,42 @@
 **Authority docs:**
 - Audit: `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md`
 - Vision: `docs/architecture/hierarchical-self-modifying-swarm-synthesis.md`
-- Supersedes execution priority for: `docs/superpowers/plans/2026-06-12-remaining-paper-gaps-parallel-subagents.md` (reuse workers where modules already exist)
+- Supersedes execution priority for: `docs/superpowers/plans/archive/2026-06-12-remaining-paper-gaps-parallel-subagents.md` (reuse workers where modules already exist)
 
 ---
 
 ## Current Baseline (June 17, 2026)
 
-**Already implemented (modules + tests, not production-wired):**
+**Reconciliation:** See `docs/architecture/2026-06-17-implementation-reconciliation.md` for code-grounded status.
 
-| Module | Path | Wired in `server.js`? |
+**Pre-existing substrate (modules existed before this plan):**
+
+| Module | Path | Hot-path status |
 | --- | --- | --- |
-| Replay cycle runner | `src/harness-sidecar/benchmarks/replayCycleRunner.js` | No |
-| Operator dashboard store | `src/harness-sidecar/meta/operatorDashboardStore.js` | No |
-| Trust kernel boundary | `src/harness-sidecar/core/trustKernelBoundary.js` | No (tests only) |
-| Promotion loop | `src/harness-sidecar/meta/promotionLoop.js` | No |
-| Meta-harness campaign runner | `src/harness-sidecar/meta/metaHarnessCampaignRunner.js` | No |
-| Harness-of-harnesses optimizer | `src/harness-sidecar/meta/harnessOfHarnessesOptimizer.js` | No |
-| Full MemGraphRAG runtime | `src/harness-sidecar/memory/memoryGraphRuntime.js` | No (light graph path only) |
-| SwarmCell runtime | `src/harness-sidecar/swarm/swarmCellRuntime.js` | No (orchestrator uses flat swarm) |
-| Governance loop | `src/harness-sidecar/meta/governanceLoop.js` | Partial (accepts `trust.boundary` but never receives it) |
+| Replay cycle runner | `src/harness-sidecar/benchmarks/replayCycleRunner.js` | Used by `replayScheduler.js` |
+| Operator dashboard store | `src/harness-sidecar/meta/operatorDashboardStore.js` | Wired via `recursiveEvolutionRuntimeHook.js` |
+| Trust kernel boundary | `src/harness-sidecar/core/trustKernelBoundary.js` | Wired via `trustKernelGateway.js` |
+| Promotion loop | `src/harness-sidecar/meta/promotionLoop.js` | Available to coordinator; not on every post-task path |
+| Meta-harness campaign runner | `src/harness-sidecar/meta/metaHarnessCampaignRunner.js` | Used by `campaignScheduler.js`; **post-task hook still uses stub runner** |
+| Harness-of-harnesses optimizer | `src/harness-sidecar/meta/harnessOfHarnessesOptimizer.js` | Substrate only |
+| Full MemGraphRAG runtime | `src/harness-sidecar/memory/memoryGraphRuntime.js` | Wired via `memoryGraphTaskBridge.js` |
+| SwarmCell runtime | `src/harness-sidecar/swarm/swarmCellRuntime.js` | Wired via `nestedSwarmOrchestrator.js` when `HELIOS_NESTED_SWARM_CELLS=1` |
+| Governance loop | `src/harness-sidecar/meta/governanceLoop.js` | Receives `trust.evaluate` via `buildGovernanceTrustInput` |
+
+**New integration hub (this plan):**
+
+| Module | Path | Hot-path status |
+| --- | --- | --- |
+| Trust kernel gateway | `src/harness-sidecar/core/trustKernelGateway.js` | Yes |
+| Replay scheduler | `src/harness-sidecar/benchmarks/replayScheduler.js` | Yes (gated) |
+| Nested swarm orchestrator | `src/harness-sidecar/swarm/nestedSwarmOrchestrator.js` | Yes (flag) |
+| Memory graph task bridge | `src/harness-sidecar/memory/memoryGraphTaskBridge.js` | Yes (gated) |
+| Campaign scheduler | `src/harness-sidecar/meta/campaignScheduler.js` | Yes (stub runner on post-task) |
+| Recursive evolution coordinator | `src/harness-sidecar/meta/recursiveEvolutionCoordinator.js` | Yes |
+| Recursive evolution runtime hook | `src/harness-sidecar/meta/recursiveEvolutionRuntimeHook.js` | Yes — primary post-task integration |
+| Background evolution worker | `src/harness-sidecar/meta/backgroundEvolutionWorker.js` | Yes |
+| Partial autonomy apply | `src/harness-sidecar/meta/partialAutonomyApply.js` | Yes (background worker) |
+| Autonomy evidence accumulator | `src/harness-sidecar/meta/autonomyEvidenceAccumulator.js` | Yes |
 
 **Already wired in production task path:**
 
@@ -53,7 +72,7 @@ Do not start the next milestone until the current gate passes `npm test` and foc
 | **M0** | Trust kernel on every apply/promote path | — | **Done** — `trustKernelGateway`, `approvalResume`, governance trust input |
 | **M1** | Recurring replay cycles + dashboard snapshots | `benchmark_spine` production evidence | **Done** — `replayScheduler` + post-task hooks persist reports |
 | **M2** | Nested SwarmCells with per-cell local meta history | `soul_coverage` nested path started | **Done** — `nestedSwarmOrchestrator` wired via `HELIOS_NESTED_SWARM_CELLS=1` |
-| **M3** | Autonomous meta-harness campaigns over source-tree variants | `meta_harness_loop` | **Done** — `campaignScheduler` in post-task hooks (feature-gated) |
+| **M3** | Autonomous meta-harness campaigns over source-tree variants | `meta_harness_loop` | **Partial** — `campaignScheduler` wired; post-task path uses stub `campaignRunner` (needs `runMetaHarnessCampaign`) |
 | **M4** | MemGraphRAG in task + swarm memory path | `memgraphrag_depth` | **Done** — `memoryGraphTaskBridge` in post-task hooks |
 | **M5** | Paper-grade RHO/BES/VLM at scale (feature-gated) | `rho_at_scale`, `bes_full_lanes`, `multimodal_system_sense` |
 | **M6** | External A2A peer cycles | `a2a_external_durability` |
@@ -209,13 +228,15 @@ Run these **read-only** subagents in parallel before any implementation.
 
 ### Worker 1A: Trust Kernel Gateway
 
+**Status:** Done (2026-06-17)
+
 **Files:**
 - Create: `src/harness-sidecar/core/trustKernelGateway.js`
 - Create: `tests/trust-kernel-gateway.test.js`
 
 **Owns:** gateway module only. No `server.js` edits.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```js
 import test from 'node:test';
@@ -337,7 +358,7 @@ Run: `npm test`
 - Create: `src/harness-sidecar/benchmarks/baselineFamilyRegistry.js`
 - Create: `tests/baseline-family-registry.test.js`
 
-- [ ] **Step 1: Write failing tests** for families: `forward_only`, `rho_only`, `bes_rho`, `full_stack`.
+- [x] **Step 1: Write failing tests** for families: `forward_only`, `rho_only`, `bes_rho`, `full_stack`.
 
 - [ ] **Step 2: Implement registry** exporting `listBaselineFamilies()`, `getBaselineFamily(id)`.
 
@@ -349,7 +370,7 @@ Run: `npm test`
 - Create: `src/harness-sidecar/benchmarks/replayScheduler.js`
 - Create: `tests/replay-scheduler.test.js`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Cover: schedule definition, due detection, calls `runReplayCycle`, persists report under `.harness/benchmarks/reports/`, calls `operatorDashboardStore` snapshot builder, evidence-only output.
 
@@ -431,7 +452,7 @@ export async function runDueReplaySchedules({
 - Create: `src/harness-sidecar/swarm/nestedSwarmOrchestrator.js`
 - Create: `tests/nested-swarm-orchestrator.test.js`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```js
 import test from 'node:test';
@@ -467,7 +488,7 @@ test('orchestrates multiple SwarmCells and merges evolution evidence', async () 
 - Create: `src/harness-sidecar/swarm/oversoulBudgetRouter.js`
 - Create: `tests/oversoul-budget-router.test.js`
 
-- [ ] **Step 1: Write failing tests** — advisory budget split across cells using role ecology from `oversoulRuntime.js` patterns.
+- [x] **Step 1: Write failing tests** — advisory budget split across cells using role ecology from `oversoulRuntime.js` patterns.
 
 - [ ] **Step 2–5: Implement evidence-only router, verify, commit**
 
@@ -500,7 +521,7 @@ test('orchestrates multiple SwarmCells and merges evolution evidence', async () 
 - Create: `src/harness-sidecar/memory/memoryGraphTaskBridge.js`
 - Create: `tests/memory-graph-task-bridge.test.js`
 
-- [ ] **Step 1: Write failing tests** — `local_memory.proposed` proposals flow into `memoryGraphRuntime` guarded ingest.
+- [x] **Step 1: Write failing tests** — `local_memory.proposed` proposals flow into `memoryGraphRuntime` guarded ingest.
 
 - [ ] **Step 2–5: Implement bridge (feature-gated by `productionCapabilities.modelAssistedMemory`), verify, commit**
 
@@ -526,7 +547,7 @@ test('orchestrates multiple SwarmCells and merges evolution evidence', async () 
 - Create: `src/harness-sidecar/meta/campaignScheduler.js`
 - Create: `tests/campaign-scheduler.test.js`
 
-- [ ] **Step 1: Write failing tests** — schedules call `runMetaHarnessCampaign` with isolated workspace, evidence-only output.
+- [x] **Step 1: Write failing tests** — schedules call `runMetaHarnessCampaign` with isolated workspace, evidence-only output.
 
 - [ ] **Step 2–5: Implement, verify, commit**
 
@@ -536,7 +557,7 @@ test('orchestrates multiple SwarmCells and merges evolution evidence', async () 
 - Create: `src/harness-sidecar/meta/recursiveEvolutionCoordinator.js`
 - Create: `tests/recursive-evolution-coordinator.test.js`
 
-- [ ] **Step 1: Write failing tests** — coordinates `runPromotionLoop` + campaign results + replay reports into single evidence envelope (no apply).
+- [x] **Step 1: Write failing tests** — coordinates `runPromotionLoop` + campaign results + replay reports into single evidence envelope (no apply).
 
 - [ ] **Step 2–5: Implement, verify, commit**
 
@@ -727,3 +748,21 @@ To begin execution in a fresh session:
 ## Bottom Line
 
 Helios does not need more architecture modules. It needs **wiring**, **measurement**, and **proof**. This plan uses subagents to do that in gated milestones: trust kernel first, scoreboard second, recursion third, then campaigns, memory depth, paper-grade scale, network, and earned autonomy.
+
+## Implementation Status (2026-06-17)
+
+Canonical detail: `docs/architecture/2026-06-17-implementation-reconciliation.md`
+
+| Chunk | Milestone | Status | Remaining |
+| --- | --- | --- | --- |
+| 0 | Recon | **Done** | — |
+| 1 | M0 Trust | **Done** | — |
+| 2 | M1 Scoreboard | **Mostly done** | `/v1/replay/schedules` optional; evidence via `/v1/evidence/*` |
+| 3 | M2 Nested swarms | **Done** | — |
+| 5 | M3 Campaigns | **Mostly done** | Real `runMetaHarnessCampaign` on post-task path; UI campaign status optional |
+| 4 | M4 MemGraphRAG | **Mostly done** | Production eval depth wired via M5 modules |
+| — | Background evolution | **Done** (extra) | Not in original chunk list |
+| 6 | M5 Paper-grade | **Mostly done** | Production report builders + tests; hot-path persistence on next scale pass |
+| 7 | M6 A2A network | **Partial** | `productionQueueProvider` wired on sidecar start; peer cycle test open |
+| 8 | M7 Autonomy | **Mostly done** | Accumulator thresholds in policy + UI dashboard |
+| 9 | Docs/audit | **In progress** | Reconciliation pass done; security audit subagent open |

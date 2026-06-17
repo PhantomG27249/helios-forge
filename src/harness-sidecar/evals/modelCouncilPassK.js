@@ -287,3 +287,54 @@ export async function runModelCouncilPassKEval({
     recommendedForPromotion: false,
   };
 }
+
+function evidenceOnlyPassKReport(report = {}) {
+  return {
+    ...report,
+    authority: 'evidence_only',
+    canPromote: false,
+    recommendedForPromotion: false,
+  };
+}
+
+function evidenceOnlyCalibration(calibration = {}) {
+  return {
+    ...calibration,
+    evidenceOnly: true,
+    canPromote: false,
+    recommendedForPromotion: false,
+  };
+}
+
+export function buildProductionPassKReport({
+  report = {},
+  gate = {},
+  calibration = null,
+} = {}) {
+  const summary = summarizePassKUplift(report);
+  const gateEnabled = gate.enabled === true;
+  return {
+    evidenceType: 'modelCouncilCalibration',
+    gateName: 'ensembleCalibration',
+    evidenceOnly: true,
+    promotionEvidenceOnly: true,
+    canPromote: false,
+    authority: 'evidence_only',
+    gate: {
+      name: 'ensembleCalibration',
+      enabled: gateEnabled,
+      mode: gate.mode || 'offline',
+      authority: 'evidence_only',
+    },
+    summary: {
+      ...summary,
+      suiteId: report.suiteId || null,
+      available: gateEnabled,
+      itemCount: 1,
+      proven: Boolean(report.proven),
+      regressionCount: summary.regressionCount ?? 0,
+    },
+    passKReport: evidenceOnlyPassKReport(report),
+    calibration: calibration ? evidenceOnlyCalibration(calibration) : null,
+  };
+}

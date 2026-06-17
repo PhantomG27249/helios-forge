@@ -1,5 +1,7 @@
 # Remaining Paper Gaps Parallel Subagent Implementation Plan
 
+> **Superseded (2026-06-17):** Execution priority moved to `2026-06-17-swarm-of-swarms-recursive-evolution-master-plan.md`. Canonical status: `docs/architecture/2026-06-17-implementation-reconciliation.md`. Keep for module ideas only.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the remaining paper-alignment gaps that keep Helios Forge at Level 3.9 instead of a Level 4-ready governed network-of-networks harness.

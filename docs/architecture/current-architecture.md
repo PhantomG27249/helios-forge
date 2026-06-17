@@ -1,10 +1,12 @@
 # Helios Forge Current Architecture
 
-Fresh snapshot: June 11, 2026.
+Fresh snapshot: June 17, 2026.
+
+**Canonical reconciliation:** `docs/architecture/2026-06-17-implementation-reconciliation.md`
 
 Helios Forge is a workspace-scoped research-agent harness around Pi Agent. The browser app and Pi bridge stay thin. The long-running research runtime lives in a local sidecar that owns capability mounting, traces, context, tools, verifiers, memory, RAG, graph construction, visual/VLM evidence, swarms, model routing, A2A interop, BES/RHO/meta-harness loops, and approval-gated apply.
 
-The current system is best described as a deterministic, safety-gated evolutionary harness substrate with the first production-organism foundation lanes in place. It now has real modules for recursive swarm, memory, held-out benchmark manifests, replay scheduling, source-tree variant experiments, adaptive model routing, visual evidence, external A2A transport, and production autonomy policy. It is still not a fully autonomous paper-grade research organism, because the strongest loops are gated, evidence-only, offline/advisory by default, or human approval governed.
+The current system is best described as a deterministic, safety-gated evolutionary harness substrate with production-organism foundation lanes **wired into the post-task hot path** via `recursiveEvolutionRuntimeHook.js` and an optional **background evolution worker**. Real modules now cover trust-kernel gateway integration, recurring replay scheduling, nested SwarmCells, MemGraphRAG task bridging, campaign scheduling, recursive evolution coordination, partial autonomy apply, and autonomy evidence accumulation. Paper-grade scale, external A2A durability, and repeated held-out proof at production size remain future work.
 
 ## Core Shape
 
@@ -130,7 +132,8 @@ Every task can emit JSONL trace events under `.harness/traces/<task-id>/events.j
 | Skills and policies | Self-authored skill candidates and shadow policy evolution for context, budget, memory, MCP trust, research, visual, verifier, and tool loop behavior. | `src/harness-sidecar/skills/*`, `src/harness-sidecar/meta/*PolicyEvolution.js` |
 | Model routing | Model profiles, OpenAI-compatible providers, routing provider, vLLM health, role-specialized council, adaptive model router state/reward/policy, pass@k ensemble evidence. | `src/harness-sidecar/model/*`, `src/harness-sidecar/swarm/modelCouncil.js`, `src/harness-sidecar/evals/modelCouncilPassK.js` |
 | A2A/local interop | Agent cards, local durable inbox/outbox, endpoint records, negotiation envelopes, delegated tokens, external gateway quarantine, injectable A2A transport server/client. | `src/harness-sidecar/interop/*` |
-| Trust and governance | Approval gates, promotion policy, trust-kernel checks, shared model-visible quarantine, production autonomy policy, audit, rollback and escalation metadata. | `src/harness-sidecar/core/trustKernelBoundary.js`, `src/harness-sidecar/security/*`, `src/harness-sidecar/meta/governanceLoop.js` |
+| Trust and governance | Approval gates, promotion policy, trust-kernel gateway, trust-kernel checks, shared model-visible quarantine, production autonomy policy, audit, rollback and escalation metadata. | `src/harness-sidecar/core/trustKernelGateway.js`, `trustKernelBoundary.js`, `recursiveEvolutionRuntimeHook.js`, `src/harness-sidecar/security/*`, `src/harness-sidecar/meta/governanceLoop.js` |
+| Recursive evolution spine | Post-task replay, campaigns, MemGraphRAG ingest, evidence coordination, background ticks, partial autonomy apply, autonomy accumulation. | `src/harness-sidecar/meta/recursiveEvolutionRuntimeHook.js`, `backgroundEvolutionWorker.js`, `recursiveEvolutionCoordinator.js`, `partialAutonomyApply.js`, `autonomyEvidenceAccumulator.js` |
 
 ## Evolution Spine
 
@@ -166,7 +169,7 @@ Current maturity is roughly:
 | Local harness architecture | Strong and implemented. |
 | Primitive modules | Strong for deterministic local operation. |
 | Shared composition layer | Stronger than before: BES lane envelopes, lineage, visual references, model-router evidence, held-out suite manifests, local/global memory, A2A transport adapters, and capability-goal status are present. |
-| Organism-level continuity | Partial but materially upgraded: the repo now has held-out suite storage, replay scheduling, source-tree variant execution, model routing evidence, visual SwarmCell evidence, and production autonomy evaluation. Repeated production cycles, dashboards, and queue providers are still future work. |
+| Organism-level continuity | Partial but materially upgraded: held-out suite storage, replay scheduling **on post-task path**, nested SwarmCells behind `HELIOS_NESTED_SWARM_CELLS=1`, background evolution worker, source-tree variant scheduler (stub runner on post-task), model routing evidence, visual SwarmCell evidence, and production autonomy evaluation. Repeated production-sized cycles and operator dashboards over time remain future work. |
 | Paper-grade autonomy | Not implemented end to end. The paper-grade pieces now exist as gated/advisory foundations, but production-sized autonomous loops, learned dense judgment, durable queues, multi-hop A2A lineage, operator dashboards, and broad eval coverage remain incomplete. |
 
 The useful shorthand is:
@@ -225,6 +228,10 @@ This keeps the system self-improving without making it self-authorizing.
 | `.harness/meta/harness-variants/` | Isolated candidate variant workspaces and source/config/trace/metric materialization. |
 | `.harness/meta/skill-candidates/` | Shadow generated or adapted skills waiting for review. |
 | `.harness/packages/generated-skills/` | Approved workspace-local generated skill output. |
+| `.harness/benchmarks/replay-cycles/` | Persisted replay cycle reports from `replayScheduler.js`. |
+| `.harness/meta/campaign-reports/` | Persisted campaign scheduler reports. |
+| `.harness/meta/autonomy-evidence.json` | Accumulated autonomy evidence from background/post-task hooks. |
+| `.harness/runtime/shadow-policy.json` | Partial autonomy shadow policy (safe scope only). |
 | `.harness/verifiers.json` | Approved verifier configuration, when present. |
 
 ## Important Feature Gates
@@ -253,6 +260,8 @@ Most high-autonomy behavior is guarded by config or environment flags.
 | Ensemble calibration | `productionCapabilities.ensembleCalibration`, default offline |
 | Endpoint capacity recommendations | `productionCapabilities.endpointCapacityRecommendations`, default advisory |
 | Operator dashboards | `productionCapabilities.operatorDashboards`, default offline |
+| Background evolution worker | `productionCapabilities.backgroundEvolution` or `features.backgroundEvolution`, default off |
+| Nested SwarmCells | `features.nestedSwarmCells` or `HELIOS_NESTED_SWARM_CELLS=1` |
 | Production autonomy policy | `productionCapabilities.productionAutonomyPolicy`, default advisory/evidence-only |
 
 The default setup file enables many features for local development, but promotion and apply authority still flows through policy and approvals.
@@ -273,22 +282,21 @@ Use this order when coming back to the repo cold:
 10. `src/harness-sidecar/meta/sourceTreeVariantRunner.js`, `src/harness-sidecar/meta/productionAutonomyPolicy.js`, and `src/harness-sidecar/meta/promotionPolicy.js` for variant experiments and governance.
 11. `src/harness-sidecar/interop/a2aTransportServer.js`, `a2aTransportClient.js`, and `externalAgentGateway.js` for A2A transport and external-agent boundaries.
 12. `src/harness-sidecar/vlm/visualSwarmCell.js` and `src/harness-sidecar/vlm/visualBenchmarkCases.js` for first-class visual evidence.
-13. `src/harness-sidecar/core/trustKernelBoundary.js` and `src/harness-sidecar/security/modelVisibleQuarantine.js` for the non-self-authorizing boundary.
-14. `docs/architecture/paper-implementation-alignment.md` and `docs/architecture/evolutionary-agentic-organism-gap-map.md` for paper-gap framing and target-state roadmap.
+13. `src/harness-sidecar/meta/recursiveEvolutionRuntimeHook.js` and `backgroundEvolutionWorker.js` for post-task and background recursive evolution wiring.
+14. `src/harness-sidecar/core/trustKernelGateway.js` and `src/harness-sidecar/security/modelVisibleQuarantine.js` for the non-self-authorizing boundary.
+15. `docs/architecture/2026-06-17-implementation-reconciliation.md` for canonical code-vs-plan status.
+16. `docs/architecture/paper-implementation-alignment.md` and `docs/architecture/evolutionary-agentic-organism-gap-map.md` for paper-gap framing and target-state roadmap.
 
 ## Target-State Delta
 
-The next architecture work should not add a new clever subsystem in isolation. The repo now has the foundation lanes. The highest-leverage remaining work is to make those lanes continuous, measured, and production-sized:
+The next architecture work should not add a new clever subsystem in isolation. The repo now has wired hot-path foundations for M0–M4. The highest-leverage remaining work is:
 
-1. Turn held-out suite manifests and RHO schedules into recurring replay cycles with persisted reports and frontier dashboards.
-2. Connect source-tree variant execution to larger autonomous Meta-Harness campaigns while keeping active workspace mutation approval-gated.
-3. Move RHO from deterministic fallback/model-adapter hooks toward production-sized grouped rerolls, richer self-preference evidence, and longitudinal replay budgets.
-4. Add guarded memory provenance resolution agents and larger eval coverage around the model-assisted extraction society.
-5. Deepen BES lanes so forward/backward search, AB/MCTS model choice, and dense subgoal judgment affect more live candidate paths.
-6. Turn visual/VLM evidence into reusable replay suites and policy frontier evidence across UI, PDF, OCR, chart, artifact, and diagram tasks.
-7. Extend A2A transport with restart-persistent production queue providers, issuer-secret providers, and multi-hop lineage compaction.
-8. Surface held-out suites, replay cycles, A2A transport status, visual evidence, and autonomy summaries in operator dashboards without adding apply/promote buttons.
-9. Harden endpoint capacity recommendations, ensemble calibration, council debate evidence, rollback drills, autonomy levels, escalation rules, and audit overrides.
+1. Replace stub campaign runner on post-task path with `runMetaHarnessCampaign` when `sourceTreeVariants` is enabled.
+2. Run recurring replay cycles at production scale and populate frontier dashboards with repeated held-out evidence.
+3. Execute Chunk 6 paper-grade workers: production grouped rerolls, live BES fusion, provenance agents, visual replay suites, model council pass@k.
+4. Wire `productionQueueProvider` into external A2A hot path with multi-hop lineage and two-instance peer tests.
+5. Complete M7 earned-autonomy proof loop: governance UI dashboard, accumulator thresholds under `productionAutonomyPolicy`.
+6. Harden endpoint capacity recommendations, ensemble calibration, council debate evidence, rollback drills, and audit overrides.
 
 ## Bottom Line
 

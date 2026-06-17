@@ -1,8 +1,10 @@
 # Evolutionary Agentic Organism Gap Map
 
-Current-state note, 2026-06-12:
+Current-state note, 2026-06-17:
 
-The freshest implementation status is the code-audited report at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md`. This gap map is still useful for the target architecture, but older maturity language should be read through the 2026-06-12 audit. Current audited framing: the Level 4-capable engine substrate is broadly implemented; the Level 4 evaluation record remains production-gated until repeated held-out cycles populate replay reports, dashboard snapshots, frontier trends, dense judgment reports, external peer evidence, and rollback/autonomy history.
+**Canonical status:** `docs/architecture/2026-06-17-implementation-reconciliation.md`
+
+The June 12 code audit at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md` remains valid for substrate-vs-proof framing. Since June 12, hot-path wiring landed for trust kernel gateway, replay scheduler, nested SwarmCells, MemGraphRAG task bridge, campaign scheduler, recursive evolution coordinator, background evolution worker, and partial autonomy apply.
 
 This document is the single later-reference map for turning Helios Forge from a broad paper-inspired agent harness into a cohesive evolutionary agentic organism: a swarm of swarms, harnesses of harnesses, shared Memory Graph RAG, A2A-linked evidence flow, multimodal perception, and guarded self-improvement over time.
 
@@ -21,7 +23,7 @@ Current state after the latest implementation pass:
 - **Architecture maturity:** high. The docs now describe the right shape: swarm of swarms, harnesses of harnesses, Memory Graph RAG, A2A lineage, RHO/BES/adaptive search, trust kernel.
 - **Primitive maturity:** high for a deterministic local harness. The repo has real code for SwarmCells, local/global memory, RHO replay, BES primitives, policy evolution, skill evolution, verifier evolution, adaptive search, visual/VLM workers, durable local A2A queues, governance loops, capability-goal status, and trust gates.
 - **Cohesive organism behavior:** strong deterministic local loop. The pieces now flow through shared BES lane envelopes, live lane events, benchmark/frontier history, executable variant workspaces, richer RHO/meta replay evidence, guarded memory graph feedback, durable A2A/visual references, capability-goal rows, role-specialized model routing, learned adaptive model-router state, AB-MCTS model-choice actions, model diversity telemetry, evidence-only council aggregation, and promotion gates that require replay/verifier/provenance/rollback/approval evidence. Production-scale continuity and paper-grade learned judgment remain future work.
-- **Recursive soul evolution levels:** implemented as an evidence-only lineage spine across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness. This is metadata/status plumbing only; nested execution remains future work.
+- **Recursive soul evolution levels:** implemented as an evidence-only lineage spine across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness. **Nested SwarmCell execution is implemented** behind `HELIOS_NESTED_SWARM_CELLS=1`; repeated production proof remains future work.
 
 Approximate level:
 
@@ -49,7 +51,7 @@ These pieces already exist in the current codebase and should be reused rather t
 | Policy evolution | `src/harness-sidecar/meta/*PolicyEvolution.js` | Implemented shadow-policy generators/evaluators with BES lane wrappers |
 | Skill evolution | `src/harness-sidecar/skills/*` | Implemented workspace-local skill candidate lifecycle |
 | Soul and oversoul runtime | `src/harness-sidecar/souls/*`, `src/harness-sidecar/swarm/rolePrompts.js`, `swarmOrchestrator.js`, `src/harness-sidecar/meta/capabilityGoalStatus.js` | Implemented first identity/collective advisory layer: strict Markdown parsing, workspace store, sanitized prompt context, reference-only BES/SwarmCell metadata, shadow variants, status rows, and governance blockers |
-| Recursive soul evolution levels | `src/harness-sidecar/souls/*`, `src/harness-sidecar/swarm/swarmCellContracts.js`, `src/harness-sidecar/bes/laneEvidence.js`, `src/harness-sidecar/meta/capabilityGoalStatus.js` | Evidence-only lineage metadata across subagent souls, subagent societies, SwarmCells, swarms, oversoul, local/global harness, and meta-harness; not nested execution |
+| Recursive soul evolution levels | `src/harness-sidecar/souls/*`, `src/harness-sidecar/swarm/swarmCellContracts.js`, `src/harness-sidecar/bes/laneEvidence.js`, `src/harness-sidecar/meta/capabilityGoalStatus.js`, `src/harness-sidecar/swarm/nestedSwarmOrchestrator.js` | Evidence-only lineage metadata; nested SwarmCell execution wired behind feature flag |
 | Multimodal/VLM | `src/harness-sidecar/vlm/*`, `src/harness-sidecar/model/multimodalRequestBuilder.js`, `visualPolicyEvolution.js`, `visualBenchmarkCases.js` | Implemented visual artifact/verifier substrate, sanitized visual benchmark cases, visual RHO seeds, and budget-aware VLM routing metadata |
 | A2A interop | `src/harness-sidecar/interop/a2aSwarmEnvelope.js`, `agentRouter.js`, `externalAgentGateway.js`, `a2aEndpointRegistry.js`, `a2aDurableStore.js`, `delegatedCapabilityTokens.js` | Local durable inbox/outbox, retries, progress/cancel, endpoint registry, negotiation envelopes, streaming envelopes, stable secret/store adapters, root/symlink-safe durable state, scoped delegated trust |
 | Capability-goal status | `src/harness-sidecar/meta/capabilityGoalStatus.js`, `public/app.js`, `src/harness/harnessManager.js` | Advisory paper-alignment capability rows in status and UI; evidence-only, no promotion authority |
@@ -243,7 +245,7 @@ Use this checklist to know when the "evolutionary agentic organism" target is cl
 - [x] Adaptive search can allocate budget across text, tool, swarm, visual, replay, and verifier actions.
 - [x] Global frontier records represent longitudinal quality, safety, reliability, cost, latency, maintainability, visual confidence, memory health, and trust risk.
 - [x] Capability-goal status rows summarize paper-alignment evidence without promotion authority.
-- [ ] Operator dashboards persist and visualize longitudinal frontier trends over repeated production-sized cycles.
+- [x] Operator dashboards persist replay reports and snapshots (post-task + background worker); longitudinal frontier trends over **repeated production-sized** cycles remain open.
 - [x] Promotions require replay, verifier, provenance, rollback, and approval evidence.
 - [x] Rejected candidates and failed replays become future hard cases.
 - [ ] The system demonstrates improvement over a held-out benchmark suite across multiple cycles.
@@ -282,8 +284,9 @@ and mutation policy. Fusion does not erase lineage. Every layer can remember,
 replay, mutate, recombine, and report upward. No layer can approve its own
 durable mutation. The global harness compares cells, candidate families,
 soul/oversoul variants, and source-tree harness variants over stable held-out
-tasks. The current evolution levels record that lineage as evidence-only
-metadata across the stack; they do not yet run nested harness execution. The
+tasks. The evolution levels record lineage as evidence-only metadata across the
+stack. Nested SwarmCell execution is implemented behind a feature flag; repeated
+production proof and full harness-of-harnesses nesting remain future work. The
 trust kernel remains outside the self-modifying loop.
 
 That is the line: self-evolving, memory-grounded, multimodal, networked,

@@ -1,5 +1,7 @@
 # Helios Forge Feature Architecture Map
 
+**Canonical status (2026-06-17):** `docs/architecture/2026-06-17-implementation-reconciliation.md`
+
 This document maps the major Helios Forge features and how they relate at runtime. It is meant as an operator and developer orientation guide: what exists, where it lives, what it depends on, and how data moves through the harness.
 
 ## System Purpose
@@ -517,10 +519,10 @@ Start here for common questions:
 - "How does the swarm use adaptive search?" Read `src/harness-sidecar/swarm/attemptScheduler.js` and `src/harness-sidecar/swarm/swarmOrchestrator.js`.
 - "How do self-authored skills work?" Read `src/harness-sidecar/skills/skillNeedMiner.js`, `skillEvolution.js`, `skillCandidateEvaluator.js`, `skillCandidateApply.js`, and `skillCandidateReview.js`.
 - "Which policies can evolve in shadow mode?" Read `src/harness-sidecar/meta/*PolicyEvolution.js`.
-- "How should swarm use meta evolution?" Read `docs/architecture/swarm-evolution-integration-plan.md`.
-- "How should subagents and swarm traces appear in the UI?" Read `docs/architecture/subagent-swarm-ui-and-tracing-plan.md`.
-- "Where else should RHO/BES/evolution expand?" Read `docs/architecture/rho-bes-evolution-expansion-roadmap.md`.
-- "What are the subagent implementation plans?" Read `docs/superpowers/plans/2026-06-08-evolution-aware-swarm-and-rho-bes-expansion-subagent-plans.md`.
+- "How should swarm use meta evolution?" Read `docs/architecture/archive/swarm-evolution-integration-plan.md` (historical).
+- "How should subagents and swarm traces appear in the UI?" Read `docs/architecture/archive/subagent-swarm-ui-and-tracing-plan.md` (historical).
+- "Where else should RHO/BES/evolution expand?" Read `docs/architecture/archive/rho-bes-evolution-expansion-roadmap.md` (historical).
+- "What are the subagent implementation plans?" Read `docs/superpowers/plans/archive/2026-06-08-evolution-aware-swarm-and-rho-bes-expansion-subagent-plans.md` (archived).
 - "Where are approvals handled?" Read `src/harness-sidecar/core/approvalResume.js`.
 - "Where are traces written?" Read `src/harness-sidecar/core/traceWriter.js`.
 - "Where is UI state shown?" Read `public/app.js`.

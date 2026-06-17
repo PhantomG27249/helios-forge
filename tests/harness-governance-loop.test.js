@@ -8,6 +8,8 @@ import {
   recordRollbackDrill,
   summarizeGovernanceStatus,
 } from '../src/harness-sidecar/meta/governanceLoop.js';
+import { evaluateProductionAutonomy } from '../src/harness-sidecar/meta/productionAutonomyPolicy.js';
+import { accumulateAutonomyEvidence } from '../src/harness-sidecar/meta/autonomyEvidenceAccumulator.js';
 import { createHarnessStatusSnapshot } from '../src/harness-sidecar/server.js';
 
 test('plans due replay jobs and blocks jobs that would exceed improvement budget', () => {
@@ -265,4 +267,114 @@ test('governance status exposes longitudinal frontier dashboard rows without pro
   assert.equal(summary.longitudinalFrontier.dashboardRows[0].classification, 'new');
   assert.equal(summary.longitudinalFrontier.dashboardRows[0].canPromote, false);
   assert.equal(summary.longitudinalFrontier.accounting.spentUsd, 0.4);
+});
+
+const enabledAutonomyPolicy = {
+  productionCapabilities: {
+    productionAutonomyPolicy: {
+      enabled: true,
+      mode: 'advisory',
+      authority: 'evidence_only',
+    },
+  },
+  partialAutonomy: {
+    thresholds: {
+      minRollbackDrillsPassed: 2,
+      maxRegressionCount: 0,
+      minDashboardDepth: 1,
+    },
+  },
+};
+
+function completeRollbackEvidence() {
+  return {
+    rollback: {
+      reversible: true,
+      drillId: 'rollback-1',
+      restoreVerified: true,
+      artifacts: [{ artifactId: 'rollback-log', path: '.harness/rollback/log.json', hash: 'sha256:rollback' }],
+    },
+  };
+}
+
+test('production autonomy gates L1/L2 widening when accumulator thresholds are not met', () => {
+  const insufficient = accumulateAutonomyEvidence({
+    rollbackDrill: { status: 'passed' },
+    replayReport: { regressions: [{ caseId: 'c1' }] },
+  });
+
+  const blocked = evaluateProductionAutonomy({
+    candidate: {
+      candidateId: 'config-threshold-blocked',
+      candidateType: 'config',
+      risk: 'low',
+      changeType: 'local_config',
+      writeScope: 'workspace_local',
+    },
+    evidence: completeRollbackEvidence(),
+    operatorPolicy: enabledAutonomyPolicy,
+    autonomyEvidence: insufficient,
+  });
+
+  assert.equal(blocked.maxAutonomyLevel, 2);
+  assert.equal(blocked.promotionEligible, false);
+  assert.equal(blocked.blockers.includes('rollback_drills_insufficient'), true);
+  assert.equal(blocked.blockers.includes('regression_count_exceeded'), true);
+  assert.equal(blocked.blockers.includes('dashboard_depth_insufficient'), true);
+  assert.equal(blocked.autonomyEvidencePolicy?.eligible, false);
+  assert.equal(blocked.canPromote, false);
+});
+
+test('production autonomy allows L2 widening when accumulator thresholds are satisfied', () => {
+  const sufficient = accumulateAutonomyEvidence({
+    rollbackDrill: { status: 'passed' },
+    replayReport: { regressions: [] },
+    dashboardSnapshot: { snapshotId: 'operator-2026-06-17' },
+  });
+  const ready = accumulateAutonomyEvidence({
+    existing: sufficient,
+    rollbackDrill: { status: 'passed' },
+  });
+
+  const allowed = evaluateProductionAutonomy({
+    candidate: {
+      candidateId: 'config-threshold-ready',
+      candidateType: 'config',
+      risk: 'low',
+      changeType: 'local_config',
+      writeScope: 'workspace_local',
+    },
+    evidence: completeRollbackEvidence(),
+    operatorPolicy: enabledAutonomyPolicy,
+    autonomyEvidence: ready,
+  });
+
+  assert.equal(allowed.maxAutonomyLevel, 2);
+  assert.equal(allowed.autonomyEvidencePolicy?.eligible, true);
+  assert.equal(allowed.promotionEligible, true);
+  assert.equal(allowed.canApply, false);
+});
+
+test('production autonomy L0 behavior is unchanged when accumulator thresholds fail', () => {
+  const insufficient = accumulateAutonomyEvidence({
+    rollbackDrill: { status: 'failed' },
+    replayReport: { regressions: [{ caseId: 'c1' }, { caseId: 'c2' }] },
+  });
+
+  const l0 = evaluateProductionAutonomy({
+    candidate: {
+      candidateId: 'code-l0',
+      candidateType: 'code',
+      risk: 'low',
+      changeType: 'source_patch',
+    },
+    evidence: completeRollbackEvidence(),
+    operatorPolicy: enabledAutonomyPolicy,
+    autonomyEvidence: insufficient,
+  });
+
+  assert.equal(l0.maxAutonomyLevel, 0);
+  assert.equal(l0.requiresHumanApproval, true);
+  assert.equal(l0.promotionEligible, false);
+  assert.equal(l0.autonomyEvidencePolicy, null);
 });

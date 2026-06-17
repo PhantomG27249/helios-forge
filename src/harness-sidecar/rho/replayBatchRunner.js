@@ -19,7 +19,8 @@ function normalizeKey(key) {
 function isAllowlistedAuthorityShape(key) {
   const normalized = normalizeKey(key);
   return normalized === 'promotionevidence' ||
-    normalized === 'promotionevidenceeligible';
+    normalized === 'promotionevidenceeligible' ||
+    normalized === 'promotionevidenceonly';
 }
 
 function isAuthorityShapedKey(key) {

@@ -390,9 +390,41 @@ test('harness panel exposes capability goal status rows', async () => {
   assert.match(appJs, /harnessCapabilityGoalsOpen/);
 });
 
+test('harness swarm tab exposes read-only autonomy evidence dashboard', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(appJs, /ensureAutonomyDashboardPanel/);
+  assert.match(appJs, /renderAutonomyDashboard/);
+  assert.match(appJs, /requestAutonomyDashboard/);
+  assert.match(appJs, /extractAutonomyAccumulatorState/);
+  assert.match(appJs, /autonomyRollback/);
+  assert.match(appJs, /backgroundEvolution/);
+  assert.match(appJs, /Autonomy Evidence Dashboard/);
+  assert.match(appJs, /evidence_only/);
+  assert.doesNotMatch(appJs, /harness_autonomy_dashboard_(?:apply|promote)/);
+  assert.doesNotMatch(appJs, /btn-harness-autonomy-dashboard-promote/);
+});
+
+test('settings modal exposes full harness config panels', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+  const schemaJs = await readFile('public/harnessConfigUiSchema.js', 'utf8');
+
+  assert.match(html, /data-settings-tab="general"/);
+  assert.match(html, /data-settings-tab="production"/);
+  assert.match(html, /id="settings-production-gates"/);
+  assert.match(html, /harnessConfigUiSchema\.js/);
+  assert.match(schemaJs, /PRODUCTION_CAPABILITY_GATES/);
+  assert.match(schemaJs, /icrLane/);
+  assert.match(appJs, /renderHarnessProductionGates/);
+  assert.match(appJs, /patchHarnessConfig/);
+  assert.match(appJs, /harness_config_reload/);
+});
+
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
   assert.match(html, /app\.css\?v=20250624/);
   assert.match(html, /app\.js\?v=20250624/);
+  assert.match(html, /harnessConfigUiSchema\.js\?v=20250624/);
 });

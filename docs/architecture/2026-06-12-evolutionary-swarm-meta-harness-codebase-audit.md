@@ -2,6 +2,8 @@
 
 Date: 2026-06-12
 
+**Addendum (2026-06-17):** Hot-path wiring for M0–M4 landed since this audit. See `docs/architecture/2026-06-17-implementation-reconciliation.md`. The substrate-vs-proof framing in this document remains valid.
+
 This audit compares three things:
 
 1. the papers that inspired Helios Forge;

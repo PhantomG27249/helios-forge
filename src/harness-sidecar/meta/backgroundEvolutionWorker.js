@@ -6,6 +6,7 @@ import {
   evaluateAutonomyEvidenceThresholds,
 } from './autonomyEvidenceAccumulator.js';
 import { buildOperatorDashboardSnapshot } from './operatorDashboardStore.js';
+import { persistAutonomyProofArtifacts } from './autonomyProofRecorder.js';
 import { applyPartialAutonomousImprovements } from './partialAutonomyApply.js';
 import { runPostTaskRecursiveEvolutionHooks } from './recursiveEvolutionRuntimeHook.js';
 
@@ -117,6 +118,12 @@ export async function runBackgroundEvolutionTick({
   }
 
   await persistAutonomyEvidenceState(workspaceRoot, autonomyState);
+  await persistAutonomyProofArtifacts({
+    workspaceRoot,
+    autonomyState,
+    harnessConfig,
+    now,
+  });
 
   return {
     evidenceOnly: true,

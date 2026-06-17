@@ -1,5 +1,7 @@
 # Paper Alignment Gap Subagent Implementation Plan
 
+> **Superseded (2026-06-17):** Capability goals now tracked in `capabilityGoalStatus.js`; execution in `2026-06-17-swarm-of-swarms-recursive-evolution-master-plan.md`. Canonical status: `docs/architecture/2026-06-17-implementation-reconciliation.md`.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Use focused subagents to close the remaining paper-alignment gaps that keep Helios Forge at Level 3.9 instead of a Level 4-ready network-of-networks harness candidate and eventual Level 5 governed research organism.

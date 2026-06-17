@@ -41,15 +41,23 @@ const KNOWN_MODEL_PROFILES = [
   'critic_low_temp',
   'alphahelion_ebft5',
 ];
-const SWARM_FEATURE_TOGGLES = [
+const SWARM_FEATURE_TOGGLES = (window.HELIOS_HARNESS_CONFIG_UI?.FEATURE_TOGGLES) || [
   ['swarm', 'Swarm'],
   ['modelDrivenSwarm', 'Model-driven swarm'],
   ['piNativeSwarm', 'Pi-native swarm'],
   ['multiModelSwarm', 'Multi-model swarm'],
+  ['adaptiveModelRouter', 'Adaptive model router'],
+  ['autonomousToolLoop', 'Autonomous tool loop'],
+  ['worktreeSwarm', 'Worktree swarm'],
   ['deepResearch', 'Deep research'],
-  ['adaptiveSearch', 'Adaptive search'],
   ['experiments', 'Experiments'],
+  ['visualArtifacts', 'Visual artifacts'],
+  ['adaptiveSearch', 'Adaptive search'],
   ['verifierEvolution', 'Verifier evolution'],
+  ['safeApply', 'Safe apply'],
+  ['localMemoryGraph', 'Local memory graph'],
+  ['nestedSwarmCells', 'Nested swarm cells'],
+  ['backgroundEvolution', 'Background evolution (feature flag)'],
 ];
 let harnessRenderScheduled = false;
 let harnessState = {
@@ -98,6 +106,7 @@ let harnessState = {
   passK: null,
   productionEvidence: {},
   recursiveEvolutionEvidence: null,
+  autonomyDashboard: null,
 };
 const PRODUCTION_EVIDENCE_TYPES = [
   ['heldOutSuites', 'Held-out suites'],
@@ -108,6 +117,9 @@ const PRODUCTION_EVIDENCE_TYPES = [
   ['modelCouncilCalibration', 'Council calibration'],
   ['endpointCapacity', 'Endpoint capacity'],
   ['autonomyRollback', 'Autonomy and rollback'],
+  ['productionReports', 'Production paper-grade reports'],
+  ['a2aPeerCycles', 'A2A peer cycles'],
+  ['icrStatus', 'ICR test-time compute'],
 ];
 const CAPABILITY_TYPES = [
   { id: 'skill', label: 'Skills' },
@@ -430,6 +442,8 @@ const harnessSwarmHandoff = $('#harness-swarm-handoff');
 const harnessSwarmEventInspector = $('#harness-swarm-event-inspector');
 let harnessRecursiveEvolutionEvidenceStatus = null;
 let harnessRecursiveEvolutionEvidenceRows = null;
+let harnessAutonomyDashboardStatus = null;
+let harnessAutonomyDashboardRows = null;
 const harnessLocalMetaStatus = $('#harness-local-meta-status');
 const harnessLocalMetaCandidates = $('#harness-local-meta-candidates');
 const harnessLocalMetaCell = $('#harness-local-meta-cell');
@@ -1783,6 +1797,7 @@ function handleHarnessProductionEvidence(payload = {}) {
   const reports = payload.reports || payload.productionEvidence || payload;
   harnessState.productionEvidence = { ...(harnessState.productionEvidence || {}), ...(reports || {}) };
   renderHarnessProductionEvidence();
+  syncAutonomyDashboardFromState();
 }
 
 function renderHarnessProductionEvidence() {
@@ -1854,6 +1869,7 @@ function handleHarnessRecursiveEvolutionEvidence(payload = {}) {
     backgroundEvolution: payload.backgroundEvolution || null,
   };
   renderHarnessRecursiveEvolutionEvidence();
+  syncAutonomyDashboardFromState();
 }
 
 function renderHarnessRecursiveEvolutionEvidence() {
@@ -1885,6 +1901,140 @@ function renderHarnessRecursiveEvolutionEvidence() {
     <div class="harness-list-row">
       <strong>${esc(label)}</strong>
       <span>${esc(String(itemCount))} item${itemCount === 1 ? '' : 's'} | ${esc(badge)}</span>
+    </div>
+  `).join('');
+}
+
+function extractAutonomyAccumulatorState(autonomyRollbackReport = {}, backgroundEvolutionReport = {}) {
+  const backgroundItem = backgroundEvolutionReport?.items?.[0];
+  if (backgroundItem && typeof backgroundItem === 'object') {
+    return backgroundItem;
+  }
+  const rollbackItems = autonomyRollbackReport?.items;
+  if (Array.isArray(rollbackItems) && rollbackItems.length) {
+    const merged = rollbackItems.find((item) => item?.rollbackDrills || item?.dashboardDepth !== undefined);
+    if (merged) return merged;
+    const nested = rollbackItems.find((item) => item?.autonomy && typeof item.autonomy === 'object');
+    if (nested?.autonomy) return nested.autonomy;
+  }
+  const directAutonomy = autonomyRollbackReport?.items?.autonomy || autonomyRollbackReport?.autonomy;
+  if (directAutonomy && typeof directAutonomy === 'object') return directAutonomy;
+  return null;
+}
+
+function ensureAutonomyDashboardPanel() {
+  if (harnessAutonomyDashboardRows) return;
+  ensureRecursiveEvolutionEvidencePanel();
+  const anchor = document.getElementById('harness-recursive-evolution-evidence');
+  if (!anchor) return;
+  const section = document.createElement('section');
+  section.id = 'harness-autonomy-dashboard';
+  section.className = 'harness-hierarchy-panel';
+  section.setAttribute('aria-label', 'Autonomy evidence dashboard');
+  section.innerHTML = `
+    <div class="harness-section-title-row compact">
+      <span>Autonomy Evidence Dashboard</span>
+      <button id="btn-harness-autonomy-dashboard-refresh" class="harness-btn" type="button">Refresh</button>
+    </div>
+    <div id="harness-autonomy-dashboard-status" class="harness-muted-line">No autonomy evidence loaded</div>
+    <div id="harness-autonomy-dashboard-rows" class="harness-list compact"></div>
+  `;
+  anchor.insertAdjacentElement('afterend', section);
+  harnessAutonomyDashboardStatus = $('#harness-autonomy-dashboard-status');
+  harnessAutonomyDashboardRows = $('#harness-autonomy-dashboard-rows');
+  $('#btn-harness-autonomy-dashboard-refresh')?.addEventListener('click', requestAutonomyDashboard);
+}
+
+function requestAutonomyDashboard() {
+  ensureAutonomyDashboardPanel();
+  if (harnessAutonomyDashboardStatus) {
+    harnessAutonomyDashboardStatus.textContent = 'Refreshing autonomy evidence...';
+  }
+  send({
+    type: 'harness_production_evidence_get',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
+    evidenceTypes: ['autonomyRollback', 'backgroundEvolution'],
+  });
+  send({
+    type: 'harness_evidence_refresh',
+    workspaceRoot: getSelectedWorkspacePath() || undefined,
+  });
+}
+
+function syncAutonomyDashboardFromState() {
+  const autonomyRollback = harnessState.productionEvidence?.autonomyRollback || null;
+  const backgroundEvolution = harnessState.recursiveEvolutionEvidence?.backgroundEvolution
+    || harnessState.productionEvidence?.backgroundEvolution
+    || null;
+  if (!autonomyRollback && !backgroundEvolution) return;
+  harnessState.autonomyDashboard = {
+    evidenceOnly: true,
+    canPromote: false,
+    autonomyRollback,
+    backgroundEvolution,
+    accumulator: extractAutonomyAccumulatorState(autonomyRollback, backgroundEvolution),
+  };
+  renderAutonomyDashboard();
+}
+
+function renderAutonomyDashboard() {
+  ensureAutonomyDashboardPanel();
+  if (!harnessAutonomyDashboardRows) return;
+  const dashboard = harnessState.autonomyDashboard;
+  if (!dashboard) {
+    if (harnessAutonomyDashboardStatus) {
+      harnessAutonomyDashboardStatus.textContent = 'No autonomy evidence loaded';
+    }
+    harnessAutonomyDashboardRows.innerHTML = '';
+    return;
+  }
+
+  const accumulator = dashboard.accumulator || {};
+  const drills = accumulator.rollbackDrills || {};
+  const passed = drills.passed ?? 0;
+  const failed = drills.failed ?? 0;
+  const total = drills.total ?? (passed + failed);
+  const regressionCount = accumulator.regressionCount ?? 0;
+  const dashboardDepth = accumulator.dashboardDepth ?? 0;
+  const blockers = Array.isArray(accumulator.blockers) ? accumulator.blockers : [];
+  const background = dashboard.backgroundEvolution?.worker
+    || dashboard.backgroundEvolution?.items?.[0]
+    || null;
+  const backgroundRunning = background?.running === true ? 'running' : 'idle';
+  const rollbackReport = dashboard.autonomyRollback?.items?.[0]
+    || dashboard.autonomyRollback?.items?.rollback
+    || null;
+  const rollbackCount = Array.isArray(rollbackReport)
+    ? rollbackReport.length
+    : (rollbackReport ? 1 : (dashboard.autonomyRollback?.summary?.itemCount ?? 0));
+  const badge = dashboard.evidenceOnly === false ? 'mixed authority' : 'evidence_only';
+  const thresholdSummary = blockers.length
+    ? `blocked: ${blockers.join(', ')}`
+    : (accumulator.eligible === false ? 'thresholds not met' : 'thresholds satisfied');
+
+  if (harnessAutonomyDashboardStatus) {
+    harnessAutonomyDashboardStatus.textContent = [
+      `${passed}/${total} rollback drills passed`,
+      `${regressionCount} regression${regressionCount === 1 ? '' : 's'}`,
+      `dashboard depth ${dashboardDepth}`,
+      thresholdSummary,
+      `background ${backgroundRunning}`,
+      badge,
+    ].join(' | ');
+  }
+
+  harnessAutonomyDashboardRows.innerHTML = [
+    ['Rollback drills passed', passed],
+    ['Rollback drills failed', failed],
+    ['Replay regressions', regressionCount],
+    ['Dashboard depth', dashboardDepth],
+    ['Governance rollback records', rollbackCount],
+    ['Threshold status', thresholdSummary],
+    ['Background worker', backgroundRunning],
+  ].map(([label, value]) => `
+    <div class="harness-list-row">
+      <strong>${esc(label)}</strong>
+      <span>${esc(String(value))} | ${esc(badge)}</span>
     </div>
   `).join('');
 }
@@ -2052,6 +2202,9 @@ function switchHarnessTab(tabId) {
   }
   if (activeHarnessTab === 'swarm' && !harnessState.recursiveEvolutionEvidence) {
     requestHarnessRecursiveEvolutionEvidence();
+  }
+  if (activeHarnessTab === 'swarm' && !harnessState.autonomyDashboard) {
+    requestAutonomyDashboard();
   }
 }
 
@@ -2968,6 +3121,9 @@ function toggleHarnessPanel() {
     if (activeHarnessTab === 'traces') requestHarnessTraces();
     if (activeHarnessTab === 'swarm' && !harnessState.recursiveEvolutionEvidence) {
       requestHarnessRecursiveEvolutionEvidence();
+    }
+    if (activeHarnessTab === 'swarm' && !harnessState.autonomyDashboard) {
+      requestAutonomyDashboard();
     }
   }
 }
@@ -3966,6 +4122,205 @@ function getHarnessConfig() {
 function patchHarnessConfig(patch) {
   if (!patch || typeof patch !== 'object') return;
   send({ type: 'harness_config_patch', workspaceRoot: settingsWorkspaceRoot(), patch });
+  send({ type: 'harness_config_reload', workspaceRoot: settingsWorkspaceRoot() });
+}
+
+function harnessConfigPathKey(path = []) {
+  return path.join('.');
+}
+
+function getHarnessConfigValue(config, path = []) {
+  return path.reduce((value, key) => (
+    value && typeof value === 'object' ? value[key] : undefined
+  ), config || {});
+}
+
+function assignHarnessConfigPatch(patch, path = [], value) {
+  let cursor = patch;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = path[index];
+    cursor[key] = cursor[key] && typeof cursor[key] === 'object' ? { ...cursor[key] } : {};
+    cursor = cursor[key];
+  }
+  cursor[path[path.length - 1]] = value;
+}
+
+function renderHarnessConfigField(field, config) {
+  const pathKey = harnessConfigPathKey(field.path);
+  const current = getHarnessConfigValue(config, field.path);
+  if (field.type === 'checkbox') {
+    return `
+      <label class="settings-checkbox-row settings-schema-field" data-config-path="${escAttr(pathKey)}">
+        <input type="checkbox" data-config-type="checkbox" data-config-path="${escAttr(pathKey)}" ${current ? 'checked' : ''} />
+        ${esc(field.label)}
+      </label>`;
+  }
+  if (field.type === 'select') {
+    const options = (field.options || []).map(([value, label]) => `
+      <option value="${escAttr(value)}" ${String(current ?? '') === String(value) ? 'selected' : ''}>${esc(label)}</option>`).join('');
+    return `
+      <label class="settings-field settings-schema-field" data-config-path="${escAttr(pathKey)}">
+        ${esc(field.label)}
+        <select class="settings-select" data-config-type="select" data-config-path="${escAttr(pathKey)}">${options}</select>
+      </label>`;
+  }
+  if (field.type === 'modelProfile') {
+    return `
+      <label class="settings-field settings-schema-field" data-config-path="${escAttr(pathKey)}">
+        ${esc(field.label)}
+        <select class="settings-select" data-config-type="select" data-config-path="${escAttr(pathKey)}">${modelProfileOptions(current)}</select>
+      </label>`;
+  }
+  if (field.type === 'csv') {
+    const value = Array.isArray(current) ? current.join(', ') : (current || '');
+    return `
+      <label class="settings-field settings-schema-field" data-config-path="${escAttr(pathKey)}">
+        ${esc(field.label)}
+        <input
+          type="text"
+          class="settings-input mono"
+          data-config-type="csv"
+          data-config-path="${escAttr(pathKey)}"
+          value="${escAttr(value)}"
+          placeholder="tool.one, tool.two"
+        />
+        ${field.hint ? `<span class="settings-hint">${esc(field.hint)}</span>` : ''}
+      </label>`;
+  }
+  const inputType = field.type === 'number' ? 'number' : 'text';
+  const extraAttrs = [
+    field.min != null ? `min="${field.min}"` : '',
+    field.max != null ? `max="${field.max}"` : '',
+    field.step != null ? `step="${field.step}"` : '',
+  ].filter(Boolean).join(' ');
+  return `
+    <label class="settings-field settings-schema-field" data-config-path="${escAttr(pathKey)}">
+      ${esc(field.label)}
+      <input
+        type="${inputType}"
+        class="settings-input${field.mono ? ' mono' : ''}"
+        data-config-type="${field.type}"
+        data-config-path="${escAttr(pathKey)}"
+        value="${escAttr(current ?? '')}"
+        ${extraAttrs}
+      />
+    </label>`;
+}
+
+function renderHarnessConfigSections(container, sectionIds = []) {
+  if (!container) return;
+  const schema = window.HELIOS_HARNESS_CONFIG_UI;
+  const config = settingsState.harnessConfig || {};
+  if (!schema?.sections) {
+    container.innerHTML = '<div class="settings-hint">Harness config schema unavailable.</div>';
+    return;
+  }
+  container.innerHTML = sectionIds.map((sectionId) => {
+    const section = schema.sections[sectionId];
+    if (!section) return '';
+    return `
+      <div class="settings-schema-group" data-schema-section="${escAttr(sectionId)}">
+        <div class="settings-section-title">${esc(section.title)}</div>
+        ${section.fields.map((field) => renderHarnessConfigField(field, config)).join('')}
+      </div>`;
+  }).join('');
+}
+
+function renderHarnessProductionGates() {
+  const container = document.getElementById('settings-production-gates');
+  if (!container) return;
+  const schema = window.HELIOS_HARNESS_CONFIG_UI;
+  const config = settingsState.harnessConfig || {};
+  const gates = schema?.PRODUCTION_CAPABILITY_GATES || [];
+  const modes = schema?.GATE_MODES || ['offline', 'advisory', 'active'];
+  if (!gates.length) {
+    container.innerHTML = '<div class="settings-hint">No production gates defined.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div class="settings-production-gates-head">
+      <span>Gate</span>
+      <span>Enabled</span>
+      <span>Mode</span>
+    </div>
+    ${gates.map(([gateId, label]) => {
+      const gate = config.productionCapabilities?.[gateId] || {};
+      const enabled = gate.enabled === true;
+      const mode = gate.mode || 'offline';
+      const modeOptions = modes.map((entry) => `
+        <option value="${escAttr(entry)}" ${entry === mode ? 'selected' : ''}>${esc(entry)}</option>`).join('');
+      return `
+        <div class="settings-production-gate-row" data-production-gate="${escAttr(gateId)}">
+          <div class="settings-production-gate-label">${esc(label)}</div>
+          <label class="settings-checkbox-row settings-production-gate-enabled">
+            <input type="checkbox" data-production-gate-enabled="${escAttr(gateId)}" ${enabled ? 'checked' : ''} />
+          </label>
+          <select class="settings-select" data-production-gate-mode="${escAttr(gateId)}">${modeOptions}</select>
+        </div>`;
+    }).join('')}`;
+}
+
+function collectHarnessConfigSections(container) {
+  const patch = {};
+  if (!container) return patch;
+  container.querySelectorAll('[data-config-type]').forEach((element) => {
+    const pathKey = element.dataset.configPath;
+    if (!pathKey) return;
+    const path = pathKey.split('.');
+    const type = element.dataset.configType || 'text';
+    let value;
+    if (type === 'checkbox') {
+      value = element.checked;
+    } else if (type === 'csv') {
+      value = String(element.value || '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    } else if (type === 'number') {
+      const parsed = Number(element.value);
+      value = Number.isFinite(parsed) ? parsed : element.value;
+    } else {
+      value = element.value;
+    }
+    if (type !== 'checkbox' && (value === '' || value === undefined)) return;
+    assignHarnessConfigPatch(patch, path, value);
+  });
+  return patch;
+}
+
+function collectHarnessProductionGatesPatch() {
+  const patch = { productionCapabilities: {} };
+  const schema = window.HELIOS_HARNESS_CONFIG_UI;
+  for (const [gateId] of schema?.PRODUCTION_CAPABILITY_GATES || []) {
+    const enabledInput = document.querySelector(`[data-production-gate-enabled="${gateId}"]`);
+    const modeInput = document.querySelector(`[data-production-gate-mode="${gateId}"]`);
+    patch.productionCapabilities[gateId] = {
+      enabled: Boolean(enabledInput?.checked),
+      mode: modeInput?.value || 'offline',
+      authority: 'evidence_only',
+    };
+  }
+  return patch;
+}
+
+function renderHarnessConfigPanels() {
+  renderHarnessConfigSections(document.getElementById('settings-general-sections'), ['general', 'runtime']);
+  renderHarnessConfigSections(document.getElementById('settings-router-advanced-sections'), ['routerAdvanced']);
+  renderHarnessConfigSections(document.getElementById('settings-council-advanced-sections'), ['councilAdvanced']);
+  renderHarnessConfigSections(document.getElementById('settings-icr-sections'), ['icr']);
+  renderHarnessProductionGates();
+}
+
+function saveSettingsGeneralSection() {
+  patchHarnessConfig(collectHarnessConfigSections(document.getElementById('settings-general-sections')));
+}
+
+function saveSettingsProductionSection() {
+  const patch = {
+    ...collectHarnessProductionGatesPatch(),
+    ...collectHarnessConfigSections(document.getElementById('settings-icr-sections')),
+  };
+  patchHarnessConfig(patch);
 }
 
 function applyHarnessPreset(presetId, mode = 'merge') {
@@ -3987,6 +4342,7 @@ function openSettings(tab = settingsState.activeTab || 'connection') {
   renderSettingsEndpointsList();
   renderSettingsRouterSection();
   renderSettingsSwarmSection();
+  renderHarnessConfigPanels();
   loadStoredSmitheryKey();
   openModal('settings');
   if (ws?.readyState === WebSocket.OPEN) {
@@ -4185,6 +4541,7 @@ function handleHarnessConfig(data) {
   renderSettingsEndpointsList();
   renderSettingsRouterSection();
   renderSettingsSwarmSection();
+  renderHarnessConfigPanels();
   renderConfigDriftBanner();
   renderHarnessSwarmConfigBanner();
   if (settingsHarnessStatus && data?.presetId) {
@@ -4197,6 +4554,7 @@ function handleHarnessConfigUpdated(data) {
   renderSettingsEndpointsList();
   renderSettingsRouterSection();
   renderSettingsSwarmSection();
+  renderHarnessConfigPanels();
   renderConfigDriftBanner();
   renderHarnessSwarmConfigBanner();
   toast(data?.message || 'Harness config updated', data?.success === false ? 'error' : 'success');
@@ -4207,6 +4565,7 @@ function handleHarnessConfigReloaded(data) {
   renderSettingsEndpointsList();
   renderSettingsRouterSection();
   renderSettingsSwarmSection();
+  renderHarnessConfigPanels();
   renderConfigDriftBanner();
   renderHarnessSwarmConfigBanner();
   toast(data?.message || 'Harness config reloaded', 'success');
@@ -4301,12 +4660,16 @@ function renderSettingsRouterSection() {
 }
 
 function saveSettingsRouterSection() {
+  const routerPatch = collectHarnessConfigSections(document.getElementById('settings-router-advanced-sections'));
   patchHarnessConfig({
     modelRouter: {
+      ...(settingsState.harnessConfig?.modelRouter || {}),
+      ...(routerPatch.modelRouter || {}),
       enabled: Boolean(document.getElementById('settings-model-router-enabled')?.checked),
       strategy: document.getElementById('settings-model-router-strategy')?.value || 'thompson_sampling',
     },
     adaptiveSearch: {
+      ...(settingsState.harnessConfig?.adaptiveSearch || {}),
       mode: document.getElementById('settings-adaptive-search-mode')?.value || 'advisory',
       maxActionsPerTask: Number(document.getElementById('settings-adaptive-search-max-actions')?.value) || 8,
       allowProfileSwitching: Boolean(document.getElementById('settings-adaptive-search-profile-switch')?.checked),
@@ -4383,17 +4746,24 @@ function saveSettingsSwarmSection() {
   document.querySelectorAll('[data-swarm-feature]').forEach(input => {
     features[input.dataset.swarmFeature] = input.checked;
   });
+  const councilPatch = collectHarnessConfigSections(document.getElementById('settings-council-advanced-sections'));
   patchHarnessConfig({
     modelCouncil: {
+      ...(settingsState.harnessConfig?.modelCouncil || {}),
+      ...(councilPatch.modelCouncil || {}),
       enabled: Boolean(document.getElementById('settings-model-council-enabled')?.checked),
       roles,
     },
     swarmExecution: {
+      ...(settingsState.harnessConfig?.swarmExecution || {}),
       concurrency: Number(document.getElementById('settings-swarm-concurrency')?.value) || 2,
       workerMode: document.getElementById('settings-swarm-worker-mode')?.value || 'model_driven',
       piNative: Boolean(document.getElementById('settings-swarm-pi-native')?.checked),
     },
-    features,
+    features: {
+      ...features,
+      piNativeSwarm: Boolean(document.getElementById('settings-swarm-pi-native')?.checked),
+    },
   });
 }
 
@@ -4742,6 +5112,7 @@ function handleSettingsTabClick(event) {
   if (tab === 'endpoints') renderSettingsEndpointsList();
   if (tab === 'swarm') renderSettingsSwarmSection();
   if (tab === 'harness') renderSettingsRouterSection();
+  if (tab === 'general' || tab === 'production' || tab === 'harness') renderHarnessConfigPanels();
   if (tab === 'secrets') loadStoredSmitheryKey();
   if (tab === 'workplace' && ws?.readyState === WebSocket.OPEN) requestWorkplaceStatus();
   if (tab === 'harness' && ws?.readyState === WebSocket.OPEN) getHarnessConfig();
@@ -5172,6 +5543,8 @@ settingsEndpointsList?.addEventListener('click', (event) => {
 });
 document.getElementById('btn-settings-repair-workplace')?.addEventListener('click', repairWorkplace);
 document.getElementById('btn-settings-save-router')?.addEventListener('click', saveSettingsRouterSection);
+document.getElementById('btn-settings-save-general')?.addEventListener('click', saveSettingsGeneralSection);
+document.getElementById('btn-settings-save-production')?.addEventListener('click', saveSettingsProductionSection);
 document.getElementById('btn-settings-save-swarm')?.addEventListener('click', saveSettingsSwarmSection);
 document.getElementById('btn-settings-save-secrets')?.addEventListener('click', saveSettingsSecrets);
 document.getElementById('btn-settings-apply-pi-thinking')?.addEventListener('click', applyPiThinkingSettings);

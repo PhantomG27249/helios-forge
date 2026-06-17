@@ -118,15 +118,55 @@ export const DEFAULT_HARNESS_CONFIG = {
       mode: 'advisory',
       authority: 'evidence_only',
     },
+    sourceTreeVariants: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
+    backgroundEvolution: {
+      enabled: false,
+      mode: 'offline',
+      authority: 'evidence_only',
+    },
     productionAutonomyPolicy: {
       enabled: false,
       mode: 'advisory',
+      authority: 'evidence_only',
+    },
+    icrLane: {
+      enabled: false,
+      mode: 'offline',
       authority: 'evidence_only',
     },
   },
   icr: {
     enabled: false,
     mode: 'evidence_only',
+    persistOnTask: true,
+    includeRhoComparison: false,
+  },
+  swarmExecution: {
+    concurrency: 1,
+    workerMode: 'model_driven',
+  },
+  vllmHealth: {
+    enabled: true,
+    minConcurrency: 1,
+    maxConcurrency: 4,
+    initialConcurrency: 1,
+    probeConcurrency: 1,
+    timeoutMs: 5000,
+    targetLatencyMs: 8000,
+  },
+  backgroundEvolution: {
+    intervalMs: 300_000,
+  },
+  partialAutonomy: {
+    enabled: false,
+    thresholds: {
+      minReplayCycles: 3,
+      minRollbackDrills: 1,
+    },
   },
 };
 

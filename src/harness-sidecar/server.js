@@ -51,10 +51,12 @@ import { writeMemoryCandidate } from './memory/memoryWriter.js';
 import { scoreMemoryCorpus } from './memory/memoryEvals.js';
 import { createChangeProposal } from './meta/changeProposal.js';
 import { createBackgroundEvolutionWorker } from './meta/backgroundEvolutionWorker.js';
+import { createProductionQueueProvider } from './interop/productionQueueProvider.js';
 import { archiveCandidate } from './meta/candidateArchive.js';
 import { recordCandidateRun } from './meta/candidateRunner.js';
 import { BesMetaOptimizer } from './meta/besMetaOptimizer.js';
 import { summarizeCapabilityGoalStatus } from './meta/capabilityGoalStatus.js';
+import { loadCapabilityGoalInputs } from './meta/capabilityGoalSnapshot.js';
 import {
   decideGovernanceAction,
   planScheduledReplayJobs,
@@ -64,6 +66,7 @@ import {
 import { HarnessOptimizer } from './meta/harnessOptimizer.js';
 import { runMemoryPolicyBesLane } from './meta/memoryPolicyEvolution.js';
 import { evaluatePromotion } from './meta/promotionPolicy.js';
+import { buildIcrEvidenceStatus } from './icr/icrStatusHandler.js';
 import { runResearchPolicyBesLane } from './meta/researchPolicyEvolution.js';
 import { inspectTrace } from './meta/traceInspector.js';
 import { runVerifierEvolutionLoop } from './meta/verifierEvolutionLoop.js';
@@ -371,6 +374,7 @@ export function createHarnessSidecar({
   const vllmHealthControllers = new Map();
   let mountedMcpRuntime = mcpRuntime || null;
   let backgroundEvolutionWorker = null;
+  let productionQueueProvider = null;
   let server = null;
   let actualPort = port;
 
@@ -1568,6 +1572,10 @@ export function createHarnessSidecar({
           autonomyLevel: 2,
           auditEvents: [governanceDecision.auditEvent],
         },
+        capabilityGoals: await loadCapabilityGoalInputs({
+          workspaceRoot: resolvedWorkspaceRoot,
+          harnessConfig,
+        }),
       }),
     });
 
@@ -3196,10 +3204,36 @@ export function createHarnessSidecar({
       });
     }
     if (type === 'a2aStatus') {
+      const gate = await productionGate('productionA2aQueues');
+      const queueState = await readJsonFileIfPresent(path.join('.harness', 'a2a', 'queue-state.json'));
+      return {
+        type,
+        evidenceOnly: true,
+        canPromote: false,
+        gate: {
+          name: 'productionA2aQueues',
+          enabled: gate.enabled === true,
+          mode: gate.mode || 'offline',
+          authority: 'evidence_only',
+        },
+        summary: {
+          itemCount: queueState ? 1 : 0,
+          available: queueState !== null,
+        },
+        items: queueState ? [queueState] : [],
+        productionQueue: productionQueueProvider?.describe?.() ?? {
+          type: 'production_queue_provider',
+          enabled: false,
+          mode: 'offline',
+          authority: 'evidence_only',
+        },
+      };
+    }
+    if (type === 'campaignReports') {
       return productionEvidenceResponse({
         type,
-        gateName: 'productionA2aQueues',
-        items: () => readJsonFileIfPresent(path.join('.harness', 'a2a', 'queue-state.json')),
+        gateName: 'sourceTreeVariants',
+        items: () => readJsonDirectory(path.join('.harness', 'meta', 'campaign-reports')),
       });
     }
     if (type === 'modelCouncilCalibration') {
@@ -3255,6 +3289,31 @@ export function createHarnessSidecar({
         },
         items: autonomyEvidence ? [autonomyEvidence] : [],
       };
+    }
+    if (type === 'productionReports') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'operatorDashboards',
+        items: async () => {
+          const grouped = await readJsonDirectory(path.join('.harness', 'rho', 'production-grouped-rerolls'));
+          const live = await readJsonDirectory(path.join('.harness', 'bes', 'production-live-lanes'));
+          const provenance = await readJsonDirectory(path.join('.harness', 'memory', 'provenance-resolution'));
+          const visual = await readJsonDirectory(path.join('.harness', 'visual', 'production-replay'));
+          const passk = await readJsonDirectory(path.join('.harness', 'model-council', 'production-passk'));
+          return [...grouped, ...live, ...provenance, ...visual, ...passk];
+        },
+      });
+    }
+    if (type === 'a2aPeerCycles') {
+      return productionEvidenceResponse({
+        type,
+        gateName: 'productionA2aTransport',
+        items: () => readJsonDirectory(path.join('.harness', 'a2a', 'peer-cycles')),
+      });
+    }
+    if (type === 'icrStatus') {
+      const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+      return buildIcrEvidenceStatus({ workspaceRoot: resolvedWorkspaceRoot, harnessConfig });
     }
     throw new Error(`Unknown production evidence type: ${type}`);
   }
@@ -3416,6 +3475,10 @@ export function createHarnessSidecar({
         ['/v1/evidence/endpoint-capacity', 'endpointCapacity'],
         ['/v1/evidence/autonomy-rollback', 'autonomyRollback'],
         ['/v1/evidence/background-evolution', 'backgroundEvolution'],
+        ['/v1/evidence/campaign-reports', 'campaignReports'],
+        ['/v1/evidence/production-reports', 'productionReports'],
+        ['/v1/evidence/a2a-peer-cycles', 'a2aPeerCycles'],
+        ['/v1/evidence/icr-status', 'icrStatus'],
       ]);
       if (req.method === 'GET' && evidenceRoutes.has(url.pathname)) {
         try {
@@ -3560,12 +3623,19 @@ export function createHarnessSidecar({
           resolve();
         });
       });
+      const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+      const backgroundIntervalMs = Number(harnessConfig?.backgroundEvolution?.intervalMs) || 300_000;
       backgroundEvolutionWorker = createBackgroundEvolutionWorker({
         workspaceRoot: resolvedWorkspaceRoot,
         loadHarnessConfig: () => loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot }),
         emitEvent,
+        intervalMs: backgroundIntervalMs,
       });
       backgroundEvolutionWorker.start();
+      productionQueueProvider = createProductionQueueProvider({
+        workspaceRoot: resolvedWorkspaceRoot,
+        featureFlags: harnessConfig,
+      });
     },
 
     async stop() {
@@ -3573,6 +3643,7 @@ export function createHarnessSidecar({
         await backgroundEvolutionWorker.stop();
         backgroundEvolutionWorker = null;
       }
+      productionQueueProvider = null;
       if (!server) return;
       const closingServer = server;
       server = null;

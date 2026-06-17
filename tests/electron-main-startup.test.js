@@ -5,10 +5,51 @@ import { test } from 'node:test';
 
 import {
   createRuntimePlan,
+  registerElectronApp,
   shouldAutoRegisterElectronApp,
   startServer,
   stopServer,
 } from '../src/electron/main.js';
+
+function makeFakeElectron({ gotLock = true } = {}) {
+  const appListeners = {};
+  const ipcHandlers = {};
+  const app = {
+    requestSingleInstanceLock: () => gotLock,
+    quit() {
+      this.quitCalled = true;
+    },
+    isPackaged: false,
+    getAppPath: () => process.cwd(),
+    getPath: (key) => (key === 'userData' ? '/tmp/helios-user-data' : '/tmp/docs'),
+    getVersion: () => '0.1.0-test',
+    whenReady: () => ({
+      then() {
+        return { catch: () => {} };
+      },
+    }),
+    on(event, handler) {
+      appListeners[event] = handler;
+    },
+  };
+
+  return {
+    app,
+    appListeners,
+    ipcHandlers,
+    BrowserWindow: class {
+      static getAllWindows() {
+        return [];
+      }
+    },
+    ipcMain: {
+      handle(channel, handler) {
+        ipcHandlers[channel] = handler;
+      },
+    },
+    dialog: {},
+  };
+}
 
 function makeFakeChild() {
   const child = new EventEmitter();
@@ -78,4 +119,22 @@ test('stopServer kills a running server process once', async () => {
 test('Electron app auto-registers based on Electron runtime instead of argv shape', () => {
   assert.equal(shouldAutoRegisterElectronApp({ versions: { electron: '33.0.0' } }), true);
   assert.equal(shouldAutoRegisterElectronApp({ versions: { node: process.versions.node } }), false);
+});
+
+test('registerElectronApp quits when another instance holds the lock', () => {
+  const electron = makeFakeElectron({ gotLock: false });
+  registerElectronApp(electron);
+  assert.equal(electron.app.quitCalled, true);
+});
+
+test('registerElectronApp wires single-instance handler and IPC channels', () => {
+  const electron = makeFakeElectron({ gotLock: true });
+  registerElectronApp(electron);
+
+  assert.ok(electron.appListeners['second-instance']);
+  assert.ok(electron.ipcHandlers['get-runtime-info']);
+  assert.ok(electron.ipcHandlers['check-pi-prerequisites']);
+  assert.ok(electron.ipcHandlers['run-onboarding']);
+  assert.ok(electron.ipcHandlers['select-workspace']);
+  assert.ok(electron.ipcHandlers['get-app-version']);
 });

@@ -40,7 +40,7 @@ This report is based on:
 - Full read of `public/index.html` (layout, modals, harness panel structure, connection dialog).
 - Targeted analysis of `public/app.js` (state, WebSocket handlers, session management, harness rendering, event listeners).
 - CSS review for responsive behavior, component patterns, and mobile breakpoints.
-- Cross-reference with `docs/research-harness/cleaned-product-spec.md` and `docs/architecture/subagent-swarm-ui-and-tracing-plan.md`.
+- Cross-reference with `docs/research-harness/cleaned-product-spec.md` and `docs/architecture/archive/subagent-swarm-ui-and-tracing-plan.md`.
 
 No user testing or analytics were available. Findings are code-grounded affordance and flow analysis.
 
@@ -503,7 +503,7 @@ Strengths: install/search field, Smithery integration, typed sections (Skills, M
 
 ### Swarm tab
 
-Aligns with `docs/architecture/subagent-swarm-ui-and-tracing-plan.md` direction but still dense:
+Aligns with `docs/architecture/archive/subagent-swarm-ui-and-tracing-plan.md` direction but still dense:
 
 - Overview metrics (Local Meta, Memory Hierarchy, Experiments, Capability Goals) use internal jargon
 - Inspector grid (Thinking, Actions, Handoff, Selected Event) has many empty states until tasks run
@@ -793,7 +793,7 @@ See **Configuration Fragmentation & Sync**, **In-app harness bootstrap & default
 | Message actions | `public/app.js` ~3225–3250, 3821–3834 |
 | Responsive sidebar | `public/app.css` ~1530–1542 |
 | Product intent | `docs/research-harness/cleaned-product-spec.md` |
-| Swarm UI target | `docs/architecture/subagent-swarm-ui-and-tracing-plan.md` |
+| Swarm UI target | `docs/architecture/archive/subagent-swarm-ui-and-tracing-plan.md` |
 
 ## Appendix B — Glossary (proposed for in-app help)
 

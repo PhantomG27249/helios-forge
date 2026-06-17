@@ -17,9 +17,9 @@ Related local docs:
 
 - `docs/architecture/paper-implementation-alignment.md`
 - `docs/architecture/feature-architecture-map.md`
-- `docs/architecture/rho-bes-evolution-expansion-roadmap.md`
-- `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`
-- `docs/superpowers/plans/2026-06-09-hierarchical-swarm-meta-harness-implementation.md`
+- `docs/architecture/archive/rho-bes-evolution-expansion-roadmap.md` (historical)
+- `docs/superpowers/plans/archive/2026-06-09-memgraphrag-runtime-completion.md` (archived)
+- `docs/superpowers/plans/archive/2026-06-09-hierarchical-swarm-meta-harness-implementation.md` (archived)
 
 ## Core Thesis
 

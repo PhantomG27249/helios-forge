@@ -1,8 +1,10 @@
 # Paper Implementation Alignment
 
-Current-state note, 2026-06-12:
+Current-state note, 2026-06-17:
 
-This document remains useful for paper-by-paper background, but the freshest implementation status is now the code-audited report at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md` and the paper-grounded report at `docs/architecture/2026-06-12-paper-grounded-current-state-report.md`. Treat the older sections below as historical context where they conflict with the 2026-06-12 code audit. The current audited framing is: Helios has a Level 4-capable engine substrate, while the Level 4 evaluation record remains production-gated and unpopulated by repeated held-out evidence.
+**Canonical status:** `docs/architecture/2026-06-17-implementation-reconciliation.md`
+
+This document remains useful for paper-by-paper background. The June 12 code audit at `docs/architecture/2026-06-12-evolutionary-swarm-meta-harness-codebase-audit.md` and paper-grounded report at `docs/architecture/2026-06-12-paper-grounded-current-state-report.md` remain valid for substrate-vs-proof framing. Treat older sections below as historical context where they conflict with the June 17 reconciliation. Current framing: Helios has a Level 4-capable engine substrate with M0–M4 hot-path wiring; the Level 4 evaluation record remains production-gated.
 
 This note compares the current Helios Forge implementation against four papers that shaped the architecture:
 
@@ -68,11 +70,11 @@ The current design is more conservative than the papers. Most learned behavior i
 Primary orientation files:
 
 - `docs/architecture/feature-architecture-map.md`
-- `docs/architecture/rho-bes-evolution-expansion-roadmap.md`
-- `docs/architecture/swarm-evolution-integration-plan.md`
-- `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`
-- `docs/superpowers/plans/2026-06-09-hierarchical-swarm-meta-harness-implementation.md`
-- `docs/superpowers/plans/2026-06-09-bes-lane-expansion-for-harness-layers.md`
+- `docs/architecture/archive/rho-bes-evolution-expansion-roadmap.md` (historical)
+- `docs/architecture/archive/swarm-evolution-integration-plan.md` (historical)
+- `docs/superpowers/plans/archive/2026-06-09-memgraphrag-runtime-completion.md` (archived)
+- `docs/superpowers/plans/archive/2026-06-09-hierarchical-swarm-meta-harness-implementation.md` (archived)
+- `docs/superpowers/plans/archive/2026-06-09-bes-lane-expansion-for-harness-layers.md` (archived)
 
 ## Current Codebase Snapshot
 
@@ -162,7 +164,7 @@ Not yet paper-complete:
 
 Best next step:
 
-Scale the runtime completion work in `docs/superpowers/plans/2026-06-09-memgraphrag-runtime-completion.md`: replace the deterministic/injected hooks with production guarded model roles, run larger eval suites, broaden task-startup integration, and add more migration/versioning fixtures. The repo now has the runtime skeleton plus lane packets; it needs production-scale feedback and learned adjudication.
+Scale the runtime completion work in `docs/superpowers/plans/archive/2026-06-09-memgraphrag-runtime-completion.md` (archived): replace the deterministic/injected hooks with production guarded model roles, run larger eval suites, broaden task-startup integration, and add more migration/versioning fixtures. The repo now has the runtime skeleton plus lane packets; it needs production-scale feedback and learned adjudication.
 
 ## Meta-Harness Alignment
 

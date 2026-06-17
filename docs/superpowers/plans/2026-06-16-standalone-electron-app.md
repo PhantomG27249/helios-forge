@@ -33,16 +33,14 @@ Helios Forge already has:
 
 **Onboarding strategy (updated):** Electron first-run should pick a workspace via native dialog, optionally call `setupHeliosForge({ bundledPackageRoot })` from main before showing the window, then auto-connect the renderer. After connect, the existing Settings → Workplace **Initialize/Repair** flow (`harness_workplace_initialize`) remains the in-app repair path — do not duplicate that UI in Electron-only code.
 
-Missing for a standalone app:
+Still missing for a standalone app (as of 2026-06-17):
 
-- Packager (`electron-builder` / Forge) and installable artifacts
-- `app.isPackaged` path resolution (today everything assumes repo checkout layout)
-- Dynamic loopback port (today hardcoded `3777` in `main.js`)
-- First-run onboarding that calls setup without `install.ps1`
-- Pi prerequisite UX (detect missing `pi`, surface actionable errors)
-- App icons referenced by `main.js` but not present in repo
-- CI build/signing pipeline
-- Production desktop polish (menus, single-instance lock, file logging)
+- CI Windows `electron:pack` job (`.github/workflows`)
+- Code signing / notarization pipeline
+- Desktop polish modules: application menu, file logger (`menu.js`, `logger.js` as separate modules)
+- User-facing docs: `docs/desktop-install.md`, README desktop section
+- Manual packaged smoke checklist (Chunk 6)
+- Optional: `onPiPrerequisites` IPC event subscription in preload (status currently fetched via `getRuntimeInfo`)
 
 ## Product Decisions (Locked For This Plan)
 
@@ -202,7 +200,7 @@ Must complete before Chunk 2 parallel workers.
 - Create: `tests/electron-app-paths.test.js`
 - Modify: `scripts/setup-helios-forge.js` (accept optional `bundledPackageRoot`)
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```js
 import test from 'node:test';
@@ -237,13 +235,13 @@ test('resolveAppPaths uses resources layout when packaged', () => {
 });
 ```
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node --test tests/electron-app-paths.test.js`
 
 Expected: FAIL because `src/electron/appPaths.js` does not exist.
 
-- [ ] **Step 3: Implement `resolveAppPaths`**
+- [x] **Step 3: Implement `resolveAppPaths`**
 
 ```js
 export function resolveAppPaths({
@@ -269,7 +267,7 @@ export function resolveAppPaths({
 }
 ```
 
-- [ ] **Step 4: Thread `bundledPackageRoot` through setup**
+- [x] **Step 4: Thread `bundledPackageRoot` through setup**
 
 Modify `setupHeliosForge` signature:
 
@@ -284,13 +282,13 @@ export async function setupHeliosForge({
 
 Pass `bundledPackageRoot` into `installPiPackage({ packageRoot: bundledPackageRoot })`.
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run: `node --test tests/electron-app-paths.test.js tests/setup-helios-forge.test.js`
 
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/electron/appPaths.js tests/electron-app-paths.test.js scripts/setup-helios-forge.js tests/setup-helios-forge.test.js
@@ -312,7 +310,7 @@ Dispatch Workers 2A–2E in parallel after Worker 1 lands. File ownership is dis
 - Create: `src/electron/portAllocator.js`
 - Create: `tests/electron-port-allocator.test.js`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Cover:
 
@@ -320,13 +318,13 @@ Cover:
 - respects `preferredPort` when free
 - falls back when preferred port busy (mock `net.createServer`)
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node --test tests/electron-port-allocator.test.js`
 
 Expected: FAIL
 
-- [ ] **Step 3: Implement minimal allocator**
+- [x] **Step 3: Implement minimal allocator**
 
 ```js
 import net from 'node:net';
@@ -351,13 +349,13 @@ export async function allocateLoopbackPort(preferredPort = 3777) {
 }
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `node --test tests/electron-port-allocator.test.js`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: add loopback port allocator for electron runtime"
@@ -374,7 +372,7 @@ git commit -m "feat: add loopback port allocator for electron runtime"
 - Create: `src/electron/piPrerequisites.js`
 - Create: `tests/electron-pi-prerequisites.test.js`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 States to cover:
 
@@ -392,13 +390,13 @@ States to cover:
 
 Also cover happy path when `resolvePiCommand` finds a binary and config files exist (use injectable `existsSync`, `resolvePiCommand`).
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node --test tests/electron-pi-prerequisites.test.js`
 
 Expected: FAIL
 
-- [ ] **Step 3: Implement `checkPiPrerequisites`**
+- [x] **Step 3: Implement `checkPiPrerequisites`**
 
 ```js
 export function checkPiPrerequisites({
@@ -412,13 +410,13 @@ export function checkPiPrerequisites({
 
 Return structured status only; no UI.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `node --test tests/electron-pi-prerequisites.test.js`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: add pi prerequisite checks for desktop onboarding"
@@ -435,7 +433,7 @@ git commit -m "feat: add pi prerequisite checks for desktop onboarding"
 - Create: `src/electron/onboarding.js`
 - Create: `tests/electron-onboarding.test.js`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Cover:
 
@@ -444,13 +442,13 @@ Cover:
 - skips setup when workspace already has `.harness/config.yaml` and `capabilities.json`
 - records completion timestamp
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node --test tests/electron-onboarding.test.js`
 
 Expected: FAIL
 
-- [ ] **Step 3: Implement onboarding module**
+- [x] **Step 3: Implement onboarding module**
 
 Required exports:
 
@@ -465,13 +463,13 @@ export async function ensureWorkspaceReady({
 } = {}) {}
 ```
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `node --test tests/electron-onboarding.test.js`
 
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git commit -m "feat: add electron first-run onboarding orchestrator"
@@ -492,7 +490,7 @@ git commit -m "feat: add electron first-run onboarding orchestrator"
 
 **Do not modify `package.json` scripts yet** (Chunk 3 integrator owns that).
 
-- [ ] **Step 1: Write failing layout test**
+- [x] **Step 1: Write failing layout test**
 
 Assert required packaged paths exist in repo and would be included:
 
@@ -512,13 +510,13 @@ Also assert `electron-builder.yml` contains:
 - `asarUnpack` for `src/server.js` and `src/**` if spawning child process
 - `extraResources` copying `packages/helios-research-harness`
 
-- [ ] **Step 2: Run failing test**
+- [x] **Step 2: Run failing test**
 
 Run: `node --test tests/electron-packaged-layout.test.js`
 
 Expected: FAIL
 
-- [ ] **Step 3: Add `electron-builder.yml`**
+- [x] **Step 3: Add `electron-builder.yml`**
 
 ```yaml
 appId: com.alphahelion.helios-forge
@@ -547,17 +545,17 @@ nsis:
   allowToChangeInstallationDirectory: true
 ```
 
-- [ ] **Step 4: Extend release smoke**
+- [x] **Step 4: Extend release smoke**
 
 Add checks that `electron-builder.yml` exists and `build/icon.ico` is non-empty once icons land (Worker 2E).
 
-- [ ] **Step 5: Verify**
+- [x] **Step 5: Verify**
 
 Run: `node --test tests/electron-packaged-layout.test.js`
 
 Expected: PASS (icon check may be pending until Worker 2E; use conditional skip with clear TODO)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git commit -m "build: add electron-builder scaffold and packaged layout tests"
@@ -576,21 +574,21 @@ git commit -m "build: add electron-builder scaffold and packaged layout tests"
 - Create: `public/icon.png` (copy or generate from source)
 - Modify: `scripts/release-smoke.js` (icon file checks)
 
-- [ ] **Step 1: Add source icon**
+- [x] **Step 1: Add source icon**
 
 Create a simple branded `build/icon.png` (512x512). Convert to `.ico` for Windows.
 
-- [ ] **Step 2: Wire release smoke icon checks**
+- [x] **Step 2: Wire release smoke icon checks**
 
 Fail when `public/icon.png` or `build/icon.ico` missing/empty.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 Run: `npm run release:smoke`
 
 Expected: PASS including icon checks
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git commit -m "chore: add desktop app icons for electron packaging"
@@ -614,7 +612,7 @@ Run only after Chunk 2 workers are merged and green.
 - Modify: `public/app.js`
 - Modify: `tests/electron-main-startup.test.js`
 
-- [ ] **Step 1: Write failing integration tests**
+- [x] **Step 1: Write failing integration tests**
 
 Extend `tests/electron-main-startup.test.js`:
 
@@ -626,13 +624,13 @@ Extend `tests/electron-main-startup.test.js`:
   - `run-onboarding` → onboarding result
   - `check-pi-prerequisites`
 
-- [ ] **Step 2: Run failing tests**
+- [x] **Step 2: Run failing tests**
 
 Run: `node --test tests/electron-main-startup.test.js`
 
 Expected: FAIL
 
-- [ ] **Step 3: Refactor `main.js` into testable helpers**
+- [x] **Step 3: Refactor `main.js` into testable helpers**
 
 Extract:
 
@@ -649,7 +647,7 @@ Wire:
 4. On first launch: `select-workspace` dialog → `ensureWorkspaceReady`
 5. `checkPiPrerequisites()` before or after window creation; send status to renderer via IPC event `pi-prerequisites`
 
-- [ ] **Step 4: Expand preload API**
+- [x] **Step 4: Expand preload API**
 
 ```js
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -663,7 +661,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 });
 ```
 
-- [ ] **Step 5: Renderer onboarding UX (minimal)**
+- [x] **Step 5: Renderer onboarding UX (minimal)**
 
 In `public/app.js`:
 
@@ -671,7 +669,7 @@ In `public/app.js`:
 - If Pi prerequisites fail, show blocking banner with `guidance` strings
 - On first workspace selection, call `runOnboarding`
 
-- [ ] **Step 6: Add package scripts and dependency**
+- [x] **Step 6: Add package scripts and dependency**
 
 In `package.json`:
 
@@ -731,6 +729,8 @@ git commit -m "feat: integrate packaged electron runtime, onboarding, and pi che
 - Modify: `src/electron/main.js` (integrator may delegate via imports only)
 
 Prefer adding modules + tests first; touch `main.js` only if Chunk 3 integrator already merged.
+
+> **Partial (2026-06-17):** Single-instance lock is implemented inline in `main.js` and covered by `tests/electron-main-startup.test.js`. Separate `menu.js` / `logger.js` modules remain open.
 
 - [ ] **Step 1: Tests for menu template + single-instance lock + logger path**
 
@@ -947,29 +947,32 @@ Steps:
 - [ ] Errors surfaced to user, not only `console.error`
 - [ ] `release:smoke` and CI remain fast
 
-- [ ] **Chunk 1 complete** — `appPaths`, `bundledPackageRoot` setup override
-- [ ] **Chunk 2 complete** — port allocator, pi prerequisites, onboarding, builder scaffold, icons
-- [ ] **Chunk 3 complete** — main/preload integration, electron auto-connect in renderer
-- [ ] **Chunk 4 pending** — CI packaging job, desktop polish modules (menu/logger)
+- [x] **Chunk 1 complete** — `appPaths`, `bundledPackageRoot` setup override
+- [x] **Chunk 2 complete** — port allocator, pi prerequisites, onboarding, builder scaffold, icons
+- [x] **Chunk 3 complete** — main/preload integration, electron auto-connect in renderer (Steps 1–6; manual `npm run electron` smoke pending Step 7)
+- [ ] **Chunk 4 pending** — CI packaging job; menu/logger modules (single-instance lock done inline in `main.js`)
 - [ ] **Chunk 5 pending** — `docs/desktop-install.md`, README desktop section
 
-## Implementation Status (2026-06-16)
+## Implementation Status (2026-06-17)
 
 Completed in working tree:
 
 - `src/electron/appPaths.js`, `portAllocator.js`, `piPrerequisites.js`, `onboarding.js`
 - `electron-builder.yml`, `scripts/generate-app-icons.js`, `build/icon.*`, `public/icon.png`
-- Integrated `src/electron/main.js` (dynamic port, packaged paths, onboarding, single-instance, IPC)
+- Integrated `src/electron/main.js` (dynamic port, packaged paths, onboarding, single-instance lock, IPC)
 - Expanded `preload.js` and `public/app.js` Electron auto-connect bootstrap
 - `scripts/setup-helios-forge.js` accepts `bundledPackageRoot`
-- Tests: `electron-*` suite + updated `release-smoke.test.js`
+- Tests: `electron-*` suite (20 tests) + updated `release-smoke.test.js`
+- `registerElectronApp` integration tests for single-instance lock and IPC channels
 
 Remaining follow-ups:
 
 - `.github/workflows` Windows `electron:pack` CI job
 - Code signing / notarization
 - Auto-update
-- `docs/desktop-install.md`
+- `src/electron/menu.js`, `logger.js` (and optional `singleInstance.js` extract)
+- `docs/desktop-install.md`, README desktop section
+- Manual packaged smoke (`npm run electron:pack`, Chunk 6 checklist)
 
 ---
 

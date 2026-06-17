@@ -3,6 +3,10 @@ import {
   runRhoReplayBatch,
   sanitizeEvidenceOnlyValue,
 } from './replayBatchRunner.js';
+import {
+  summarizeRhoImprovementTrends,
+  updateRhoImprovementHistory,
+} from './longitudinalImprovementTracker.js';
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
 
 function asArray(value) {
@@ -290,6 +294,128 @@ async function runBatch({
     judges,
     promotionEvidenceEligible,
   });
+}
+
+function roundMetric(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 1_000_000_000_000) / 1_000_000_000_000;
+}
+
+function preferredRanking(groupedReport = {}) {
+  const rankings = asArray(groupedReport.familySummary?.rankings);
+  const preferredId = groupedReport.familySummary?.preferredCandidateId;
+  return rankings.find((entry) => entry.candidateId === preferredId) ?? rankings[0] ?? null;
+}
+
+function aggregateScoreFromGrouped(groupedReport = {}) {
+  const preferred = preferredRanking(groupedReport);
+  const caseWinRate = Number(preferred?.aggregate?.caseWinRate ?? 0);
+  const validationPassRate = Number(groupedReport.aggregate?.selfValidation?.passRate ?? 0);
+  const consistencyScore = Number(groupedReport.aggregate?.selfConsistency?.meanScore ?? 0);
+  return roundMetric((caseWinRate + validationPassRate + consistencyScore) / 3);
+}
+
+function domainScoresForLongitudinal(groupedReport = {}) {
+  return Object.fromEntries(
+    Object.entries(groupedReport.domainScores ?? {})
+      .map(([domain, entry]) => [domain, roundMetric(entry.validationPassRate ?? 0)])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function replayReportFromGrouped(groupedReport = {}, { suiteId } = {}) {
+  return {
+    reportId: groupedReport.reportId,
+    scheduleId: groupedReport.scheduleId,
+    suiteId: stableString(suiteId ?? groupedReport.scheduleId ?? groupedReport.suiteId, 'grouped_rho_reroll'),
+    candidateIds: groupedReport.candidateIds,
+    aggregateScore: aggregateScoreFromGrouped(groupedReport),
+    domainScores: domainScoresForLongitudinal(groupedReport),
+    budget: groupedReport.budget ?? groupedReport.accounting,
+    regressions: asArray(groupedReport.regressions),
+  };
+}
+
+function candidateFamilyDeltas(groupedReport = {}) {
+  return asArray(groupedReport.familySummary?.rankings).map((entry) => ({
+    candidateId: entry.candidateId,
+    scoreDelta: roundMetric(entry.scoreDelta ?? entry.aggregate?.scoreDelta ?? 0),
+    caseWinRate: roundMetric(entry.aggregate?.caseWinRate ?? 0),
+    authority: 'evidence_only',
+    canPromote: false,
+    promotionAllowed: false,
+  }));
+}
+
+function normalizeProductionGroupedReport(groupedReport = {}) {
+  const safeGrouped = sanitizeEvidenceOnlyValue(groupedReport);
+  return {
+    ...safeGrouped,
+    evidenceOnly: true,
+    canPromote: false,
+    promotionEvidenceOnly: true,
+    promotionAllowed: false,
+    authority: 'evidence_only',
+    familySummary: safeGrouped.familySummary ? {
+      ...safeGrouped.familySummary,
+      rankings: asArray(safeGrouped.familySummary.rankings).map((entry) => ({
+        ...entry,
+        authority: 'evidence_only',
+        canPromote: false,
+        promotionAllowed: false,
+      })),
+    } : safeGrouped.familySummary,
+  };
+}
+
+export function buildProductionGroupedRerollReport({
+  groupedReport,
+  history = [],
+  promotedCandidate = {},
+  suiteId,
+  now,
+} = {}) {
+  if (!groupedReport || typeof groupedReport !== 'object') {
+    throw new Error('groupedReport is required');
+  }
+
+  const safeGrouped = normalizeProductionGroupedReport(groupedReport);
+  const updatedHistory = updateRhoImprovementHistory({
+    history,
+    replayReport: replayReportFromGrouped(safeGrouped, { suiteId }),
+    promotedCandidate,
+    now,
+  });
+  const trendSummary = summarizeRhoImprovementTrends(updatedHistory);
+  const latestRecord = updatedHistory[updatedHistory.length - 1] ?? null;
+
+  return {
+    evidenceType: 'production_grouped_reroll_report',
+    reportId: safeGrouped.reportId,
+    scheduleId: safeGrouped.scheduleId,
+    generatedAt: safeGrouped.generatedAt,
+    suiteId: stableString(suiteId ?? safeGrouped.scheduleId ?? safeGrouped.suiteId, 'grouped_rho_reroll'),
+    aggregateScore: aggregateScoreFromGrouped(safeGrouped),
+    domainScores: domainScoresForLongitudinal(safeGrouped),
+    candidateFamilyDeltas: candidateFamilyDeltas(safeGrouped),
+    groupedReport: safeGrouped,
+    longitudinalTrend: {
+      evidenceType: 'longitudinal_improvement_trend',
+      ...trendSummary,
+      history: updatedHistory,
+      latestImprovementDelta: latestRecord?.aggregateDelta ?? null,
+      domainImprovementDeltas: latestRecord?.domainDrift ?? {},
+      candidateFamilyDeltas: candidateFamilyDeltas(safeGrouped),
+      previousReportId: latestRecord?.previousReportId ?? null,
+      classification: latestRecord?.classification ?? 'new',
+    },
+    evidenceOnly: true,
+    canPromote: false,
+    promotionEvidenceOnly: true,
+    promotionAllowed: false,
+    authority: 'evidence_only',
+  };
 }
 
 export async function runGroupedRhoRerolls({

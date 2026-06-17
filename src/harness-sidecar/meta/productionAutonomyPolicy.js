@@ -1,5 +1,5 @@
+import { evaluateAutonomyEvidenceThresholds } from './autonomyEvidenceAccumulator.js';
 import { quarantineModelVisiblePayload } from '../security/modelVisibleQuarantine.js';
-
 const CANDIDATE_TYPES = Object.freeze({
   docs: { type: 'documentation_change', maxAutonomyLevel: 1 },
   documentation: { type: 'documentation_change', maxAutonomyLevel: 1 },
@@ -81,6 +81,28 @@ function productionGate(operatorPolicy = {}) {
     mode: gate.mode || 'advisory',
     authority: 'evidence_only',
   };
+}
+
+function configuredAccumulatorThresholds(operatorPolicy = {}) {
+  const gate = operatorPolicy.productionCapabilities?.productionAutonomyPolicy
+    || operatorPolicy.productionAutonomyPolicy
+    || {};
+  return {
+    ...(operatorPolicy.partialAutonomy?.thresholds || {}),
+    ...(gate.accumulatorThresholds || {}),
+  };
+}
+
+function resolveAccumulatorThresholds(operatorPolicy = {}, gate = {}) {
+  const configured = configuredAccumulatorThresholds(operatorPolicy);
+  if (gate.enabled && Object.keys(configured).length === 0) {
+    return {
+      minRollbackDrillsPassed: 1,
+      maxRegressionCount: 0,
+      minDashboardDepth: 1,
+    };
+  }
+  return configured;
 }
 
 function normalizeCandidateType(candidate = {}) {
@@ -204,8 +226,8 @@ export function evaluateProductionAutonomy({
   evidence = {},
   risk = {},
   operatorPolicy = {},
-} = {}) {
-  const gate = productionGate(operatorPolicy);
+  autonomyEvidence = null,
+} = {}) {  const gate = productionGate(operatorPolicy);
   const { type: candidateType, maxAutonomyLevel } = normalizeCandidateType(candidate);
   const riskLevel = normalizeRisk({ candidate, risk });
   const blockers = [];
@@ -259,8 +281,22 @@ export function evaluateProductionAutonomy({
     addUnique(reasons, 'missing_vlm_visual_evidence');
   }
 
-  const lowRisk = riskLevel === 'low' || candidate.lowRisk === true;
-  if (
+  let autonomyEvidencePolicy = null;
+  if (maxAutonomyLevel >= 1 && autonomyEvidence != null) {
+    autonomyEvidencePolicy = evaluateAutonomyEvidenceThresholds({
+      state: autonomyEvidence,
+      thresholds: resolveAccumulatorThresholds(operatorPolicy, gate),
+    });
+    if (!autonomyEvidencePolicy.eligible) {
+      for (const blocker of autonomyEvidencePolicy.blockers) {
+        addUnique(blockers, blocker);
+        addUnique(reasons, blocker);
+      }
+      addUnique(reasons, 'accumulator_thresholds_not_met');
+    }
+  }
+
+  const lowRisk = riskLevel === 'low' || candidate.lowRisk === true;  if (
     gate.enabled
     && lowRisk
     && rollback.available
@@ -305,8 +341,8 @@ export function evaluateProductionAutonomy({
       vlmEvidenceSatisfied,
     },
     rollbackPolicy: rollback,
-    quarantine: {
-      quarantined: quarantined.quarantined,
+    autonomyEvidencePolicy,
+    quarantine: {      quarantined: quarantined.quarantined,
       reasons: quarantined.reasons,
       redacted: quarantined.redacted,
     },

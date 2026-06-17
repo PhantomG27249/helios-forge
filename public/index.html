@@ -623,7 +623,9 @@
         <div class="settings-tabs" role="tablist" aria-label="Settings sections">
           <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="connection">Connection</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="workplace">Workplace</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="general">General</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="harness">Harness</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="production">Production</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="endpoints">Endpoints</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="swarm">Swarm</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="secrets">Secrets</button>
@@ -654,6 +656,13 @@
               <button id="btn-settings-init-workplace" class="settings-btn primary" type="button">Initialize workplace</button>
               <button id="btn-settings-repair-workplace" class="settings-btn" type="button">Repair missing</button>
               <button id="btn-settings-load-preset" class="settings-btn" type="button">Load preset</button>
+            </div>
+          </section>
+          <section id="settings-tab-general" class="settings-panel">
+            <p class="settings-hint">Defaults, budgets, permissions, and runtime tuning for the active workplace.</p>
+            <div id="settings-general-sections" class="settings-schema-sections"></div>
+            <div class="settings-actions">
+              <button id="btn-settings-save-general" class="settings-btn primary" type="button">Save general settings</button>
             </div>
           </section>
           <section id="settings-tab-harness" class="settings-panel">
@@ -693,6 +702,21 @@
                 </div>
               </div>
             </details>
+            <details class="settings-collapsible">
+              <summary class="settings-section-title">Router advanced</summary>
+              <div id="settings-router-advanced-sections" class="settings-schema-sections settings-collapsible-body"></div>
+            </details>
+          </section>
+          <section id="settings-tab-production" class="settings-panel">
+            <p class="settings-hint">Production gates collect evidence only. Authority stays <code>evidence_only</code>; nothing here grants promotion.</p>
+            <div id="settings-production-gates" class="settings-production-gates"></div>
+            <details class="settings-collapsible">
+              <summary class="settings-section-title">ICR lane</summary>
+              <div id="settings-icr-sections" class="settings-schema-sections settings-collapsible-body"></div>
+            </details>
+            <div class="settings-actions">
+              <button id="btn-settings-save-production" class="settings-btn primary" type="button">Save production settings</button>
+            </div>
           </section>
           <section id="settings-tab-endpoints" class="settings-panel">
             <div class="settings-section-title">Endpoint profiles</div>
@@ -735,6 +759,10 @@
             <label class="settings-checkbox-row"><input id="settings-swarm-pi-native" type="checkbox" /> Pi-native swarm execution</label>
             <div class="settings-section-title">Feature toggles</div>
             <div id="settings-swarm-features" class="settings-feature-grid"></div>
+            <details class="settings-collapsible">
+              <summary class="settings-section-title">Council advanced</summary>
+              <div id="settings-council-advanced-sections" class="settings-schema-sections settings-collapsible-body"></div>
+            </details>
             <div class="settings-actions">
               <button id="btn-settings-save-swarm" class="settings-btn primary" type="button">Save swarm settings</button>
             </div>
@@ -817,6 +845,7 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
+  <script src="/harnessConfigUiSchema.js?v=20250624"></script>
   <script src="/app.js?v=20250624"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js ESM, `node:test`, existing Helios sidecar modules, BES lane contracts/runtime/fusion, RHO replay batches, JSON/JSONL harness artifacts, model-router/provider hooks, workspace-root-constrained stores, operator dashboard snapshots, and optional browser UI wiring behind a feature flag.
 
-**Implementation Status (2026-06-12):** Implemented in the current working tree as an evidence-only sidecar ICR lane with deterministic fake-runner tests, BES lane evidence, RHO replay comparison, capability dashboard status rows, config defaults, PerfCodeBench-style adapter support, and an architecture snapshot at `docs/architecture/2026-06-12-icr-test-time-compute-lane.md`. The existing dashboard data path was extended; no browser route or visible UI file was changed, so browser launch verification was not applicable. Verified with `npm test`, `npm run release:smoke`, and `git diff --check` after final review fixes.
+**Implementation Status (2026-06-12):** Implemented in the current working tree as an evidence-only sidecar ICR lane with deterministic fake-runner tests, BES lane evidence, RHO replay comparison, capability dashboard status rows, config defaults, PerfCodeBench-style adapter support, and an architecture snapshot at `docs/architecture/archive/2026-06-12-icr-test-time-compute-lane.md`. The existing dashboard data path was extended; no browser route or visible UI file was changed, so browser launch verification was not applicable. Verified with `npm test`, `npm run release:smoke`, and `git diff --check` after final review fixes.
 
 ---
 
@@ -410,6 +410,8 @@ Acceptance:
 
 ### Task 8: Serial Sidecar And UI Integration
 
+> **Wiring plan (2026-06-17):** Parallel subagent execution spec at `docs/superpowers/plans/2026-06-17-icr-wiring-parallel-subagents.md`. Substrate (Tasks 1–7, 9–10) is complete; Task 8 remains open.
+
 Owner: Integration Worker  
 Write scope:
 
@@ -464,7 +466,7 @@ Acceptance:
 Owner: Worker 9  
 Write scope:
 
-- `docs/architecture/2026-06-12-icr-test-time-compute-lane.md`
+- `docs/architecture/archive/2026-06-12-icr-test-time-compute-lane.md`
 - This plan file for checkbox updates only.
 
 Checklist:
@@ -580,7 +582,7 @@ git commit -m "feat: add icr test-time compute substrate"
 git add src/harness-sidecar/bes src/harness-sidecar/meta tests/harness-icr-bes-lane.test.js tests/harness-icr-rho-replay.test.js tests/harness-icr-dashboard.test.js
 git commit -m "feat: wire icr evidence into bes rho and dashboards"
 
-git add docs/architecture/2026-06-12-icr-test-time-compute-lane.md docs/superpowers/plans/2026-06-12-icr-test-time-compute-lane.md
+git add docs/architecture/archive/2026-06-12-icr-test-time-compute-lane.md docs/superpowers/plans/2026-06-12-icr-test-time-compute-lane.md
 git commit -m "docs: document icr test-time compute lane"
 ```
 
