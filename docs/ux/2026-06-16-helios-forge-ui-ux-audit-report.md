@@ -730,49 +730,49 @@ See **Configuration Fragmentation & Sync**, **In-app harness bootstrap & default
 
 ### Phase 0 — Trust (1–3 days)
 
-- [ ] Export: implement or remove
-- [ ] Fix Retry
-- [ ] Mobile sidebar toggle
-- [ ] Delete confirmation
-- [ ] Remove or wire Good button
+- [x] Export: implement or remove
+- [x] Fix Retry
+- [x] Mobile sidebar toggle
+- [x] Delete confirmation
+- [x] Remove or wire Good button
 
 ### Phase 1 — Clarity (1–2 weeks)
 
-- [ ] Settings shell with sections: Connection, Workplace, Harness, Models & endpoints, Swarm & council, Pi, Secrets
-- [ ] Helios endpoint settings (server URL persist, test, reconnect)
-- [ ] Endpoint profile CRUD + **Test endpoint** (sidecar health probe)
-- [ ] Pi settings panel (session model/thinking + read-only global `models.json` summary)
-- [ ] Config sync: drift detection (chat vs harness default) and unified save pipeline
-- [ ] Workplace wizard: health checklist + **Initialize workplace / Load defaults** (wrap `setupHeliosForge`)
-- [ ] Config preset picker (Minimal, Standard research, Multi-model swarm)
-- [ ] Global status bar (connection, sidecar, approvals)
+- [x] Settings shell with sections: Connection, Workplace, Harness, Models & endpoints, Swarm & council, Pi, Secrets
+- [x] Helios endpoint settings (server URL persist, test, reconnect)
+- [x] Endpoint profile CRUD + **Test endpoint** (sidecar health probe)
+- [x] Pi settings panel (session model/thinking + read-only global `models.json` summary)
+- [x] Config sync: drift detection (chat vs harness default) and unified save pipeline
+- [x] Workplace wizard: health checklist + **Initialize workplace / Load defaults** (wrap `setupHeliosForge`)
+- [x] Config preset picker (Minimal, Standard research, Multi-model swarm)
+- [x] Global status bar (connection, sidecar, approvals)
 
 ### Phase 2 — Structure (2–4 weeks)
 
-- [ ] **Swarm role routing matrix** (`modelCouncil.roles` ↔ `endpointProfiles`)
-- [ ] **Swarm execution controls** (`swarmExecution`, swarm-related `features.*`)
-- [ ] `harness_workplace_status` / `harness_workplace_initialize` / `harness_config_apply_preset` APIs
-- [ ] Swarm tab: show resolved routes + “Configure endpoints” when misconfigured
-- [ ] Mode-based layout
-- [ ] Tab-scoped harness panel footers
-- [ ] Capabilities simple/advanced split
-- [ ] Session list search + metadata + persisted pins
-- [ ] Approval inbox
-- [ ] `modelRouter` / `adaptiveSearch` advanced settings panels (in-app)
-- [ ] Deduplicate harness navigation (dock vs tabs)
+- [x] **Swarm role routing matrix** (`modelCouncil.roles` ↔ `endpointProfiles`)
+- [x] **Swarm execution controls** (`swarmExecution`, swarm-related `features.*`)
+- [x] `harness_workplace_status` / `harness_workplace_initialize` / `harness_config_apply_preset` APIs
+- [x] Swarm tab: show resolved routes + “Configure endpoints” when misconfigured
+- [x] Mode-based layout
+- [x] Tab-scoped harness panel footers
+- [x] Capabilities simple/advanced split
+- [x] Session list search + metadata + persisted pins
+- [x] Approval inbox
+- [x] `modelRouter` / `adaptiveSearch` advanced settings panels (in-app)
+- [x] Deduplicate harness navigation (dock vs tabs)
 
 ### Phase 2b — Onboarding & harness polish (can overlap Phase 2)
 
-- [ ] Welcome / empty state rewrite
-- [ ] Background harness toggle + notice
+- [x] Welcome / empty state rewrite
+- [x] Background harness toggle + notice
 
 ### Phase 3 — Polish (ongoing)
 
-- [ ] Accessible dropdowns and tabs
-- [ ] Keyboard shortcuts help
-- [ ] File attachments
-- [ ] Offline/CDN fallback messaging
-- [ ] Theming / contrast options
+- [x] Accessible dropdowns and tabs
+- [x] Keyboard shortcuts help
+- [ ] File attachments (non-image) — deferred; image attach remains
+- [x] Offline/CDN fallback messaging
+- [ ] Theming / contrast options — deferred
 
 ---
 
@@ -819,3 +819,4 @@ See **Configuration Fragmentation & Sync**, **In-app harness bootstrap & default
 | 1.1 | 2026-06-16 | Added configuration fragmentation section; Helios endpoint + Pi settings sync requirements |
 | 1.2 | 2026-06-16 | In-app swarm & endpoint configuration requirement; Theme G; sidecar config API expectations |
 | 1.3 | 2026-06-16 | In-app harness bootstrap & default config loading; Theme H; preset/workplace initialize flows |
+| 1.4 | 2026-06-16 | Mark roadmap phases 0–3 implemented (file attach + theming deferred) |

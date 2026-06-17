@@ -351,6 +351,7 @@ const inputEl = $('#message-input');
 const sendBtn = $('#btn-send');
 const abortBtn = $('#btn-abort');
 const steerBtn = $('#btn-steer');
+const streamingModeHint = $('#streaming-mode-hint');
 const sessionTitle = $('#session-title');
 const assistantActivityEl = $('#assistant-activity');
 const assistantActivityPhase = $('#assistant-activity-phase');
@@ -3665,10 +3666,12 @@ function updateInput() {
     steerBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
     abortBtn.classList.remove('hidden');
+    streamingModeHint?.classList.remove('hidden');
   } else {
     steerBtn.classList.add('hidden');
     sendBtn.classList.remove('hidden');
     abortBtn.classList.add('hidden');
+    streamingModeHint?.classList.add('hidden');
   }
 }
 

@@ -1733,6 +1733,17 @@ body {
   word-break: break-word;
 }
 
+.streaming-mode-hint {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--warning);
+  margin-right: 4px;
+  align-self: center;
+}
+.streaming-mode-hint.hidden { display: none; }
+
 .mode-nav {
   display: flex;
   align-items: center;
