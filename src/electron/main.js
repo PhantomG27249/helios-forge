@@ -5,7 +5,8 @@
  * Runs the Node.js server internally and opens a BrowserWindow.
  */
 
-import { spawn } from 'node:child_process';
+import { fork } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,9 +80,22 @@ export async function createRuntimePlan({
   };
 }
 
+function assertServerSpawnPrerequisites({ serverPath, cwd }) {
+  const cwdStat = statSync(cwd, { throwIfNoEntry: false });
+  if (!cwdStat?.isDirectory()) {
+    throw new Error(
+      `Embedded server working directory must be a real directory, not ${cwd}. ` +
+      'Reinstall the desktop app if packaged resources are missing.',
+    );
+  }
+
+  if (!existsSync(serverPath)) {
+    throw new Error(`Embedded server entry not found: ${serverPath}`);
+  }
+}
+
 export function startServer({
-  spawnFn = spawn,
-  nodePath = process.execPath,
+  forkFn = fork,
   port = '3777',
   cwd,
   serverPath,
@@ -92,6 +106,7 @@ export function startServer({
 } = {}) {
   const resolvedCwd = cwd || paths?.appRoot || path.resolve(__dirname, '..', '..');
   const resolvedServerPath = serverPath || paths?.serverEntry || path.join(resolvedCwd, 'src', 'server.js');
+  assertServerSpawnPrerequisites({ serverPath: resolvedServerPath, cwd: resolvedCwd });
 
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -107,10 +122,10 @@ export function startServer({
       }
     }
 
-    const child = spawnFn(nodePath, [resolvedServerPath], {
+    const child = forkFn(resolvedServerPath, [], {
       cwd: resolvedCwd,
       env: { ...env, ELECTRON_RUN_AS_NODE: '1', PORT: String(port) },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       windowsHide: true,
     });
     serverProcess = child;

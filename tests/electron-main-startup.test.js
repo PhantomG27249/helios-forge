@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 
+import { resolvePackagedRuntimeRoot } from '../src/electron/appPaths.js';
 import {
   createRuntimePlan,
   registerElectronApp,
@@ -77,23 +79,48 @@ test('createRuntimePlan uses dynamic port and dev paths', async () => {
   assert.ok(plan.paths.serverEntry.endsWith('src\\server.js') || plan.paths.serverEntry.endsWith('src/server.js'));
 });
 
-test('startServer pipes stdout and resolves when the server reports readiness', async () => {
+test('resolvePackagedRuntimeRoot maps app.asar to app.asar.unpacked', () => {
+  const resourcesPath = path.resolve('fixtures/resources');
+  const appPath = path.join(resourcesPath, 'app.asar');
+  assert.equal(
+    resolvePackagedRuntimeRoot(appPath),
+    path.join(resourcesPath, 'app.asar.unpacked'),
+  );
+});
+
+test('startServer rejects app.asar as a working directory', () => {
+  const resourcesPath = path.resolve('fixtures/resources');
+  const asarRoot = path.join(resourcesPath, 'app.asar');
+
+  assert.throws(
+    () => startServer({
+      forkFn: () => makeFakeChild(),
+      paths: {
+        appRoot: asarRoot,
+        serverEntry: path.join(asarRoot, 'src', 'server.js'),
+      },
+    }),
+    /working directory must be a real directory/,
+  );
+});
+
+test('startServer forks the server entry and resolves when the server reports readiness', async () => {
   const child = makeFakeChild();
-  const spawnCalls = [];
+  const forkCalls = [];
   const logs = [];
 
   const ready = startServer({
-    spawnFn: (...args) => {
-      spawnCalls.push(args);
+    forkFn: (...args) => {
+      forkCalls.push(args);
       return child;
     },
     port: '4222',
-    env: {},
+    env: process.env,
     log: { log: (message) => logs.push(message), error: () => {} },
     readyTimeoutMs: 1000,
     paths: {
       appRoot: process.cwd(),
-      serverEntry: 'src/server.js',
+      serverEntry: path.join(process.cwd(), 'src', 'server.js'),
     },
   });
 
@@ -101,9 +128,11 @@ test('startServer pipes stdout and resolves when the server reports readiness', 
   const resolvedChild = await ready;
 
   assert.equal(resolvedChild, child);
-  assert.equal(spawnCalls[0][2].stdio[1], 'pipe');
-  assert.equal(spawnCalls[0][2].stdio[2], 'pipe');
-  assert.equal(spawnCalls[0][2].env.PORT, '4222');
+  assert.equal(forkCalls[0][0], path.join(process.cwd(), 'src', 'server.js'));
+  assert.equal(forkCalls[0][2].stdio[1], 'pipe');
+  assert.equal(forkCalls[0][2].stdio[2], 'pipe');
+  assert.equal(forkCalls[0][2].env.PORT, '4222');
+  assert.equal(forkCalls[0][2].env.ELECTRON_RUN_AS_NODE, '1');
   assert.deepEqual(logs, ['[Server] Listening on http://0.0.0.0:4222']);
 });
 

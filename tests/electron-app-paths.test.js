@@ -19,7 +19,7 @@ test('resolveAppPaths uses repo layout in development', () => {
   assert.equal(paths.bundledHarnessPackage, path.join(repoRoot, 'packages', 'helios-research-harness'));
 });
 
-test('resolveAppPaths uses resources layout when packaged', () => {
+test('resolveAppPaths uses unpacked runtime root when packaged', () => {
   const resourcesPath = path.resolve('fixtures/resources');
   const paths = resolveAppPaths({
     isPackaged: true,
@@ -28,6 +28,9 @@ test('resolveAppPaths uses resources layout when packaged', () => {
     dirname: path.join(resourcesPath, 'app.asar', 'src', 'electron'),
   });
 
-  assert.equal(paths.appRoot, path.join(resourcesPath, 'app.asar'));
+  assert.equal(paths.appRoot, path.join(resourcesPath, 'app.asar.unpacked'));
+  assert.equal(paths.asarAppPath, path.join(resourcesPath, 'app.asar'));
+  assert.equal(paths.serverEntry, path.join(resourcesPath, 'app.asar.unpacked', 'src', 'server.js'));
+  assert.equal(paths.publicDir, path.join(resourcesPath, 'app.asar', 'public'));
   assert.equal(paths.bundledHarnessPackage, path.join(resourcesPath, 'helios-research-harness'));
 });

@@ -43,3 +43,4 @@ Desktop runtime logs are written to the Electron user data directory under `logs
 | Missing models/auth | Configure `~/.pi/agent/models.json` and `auth.json` |
 | Workplace missing capabilities | Settings → Workplace → Initialize/Repair |
 | Port conflict | Restart the app; it picks a free loopback port automatically |
+| `Failed to start: spawn ... ENOENT` on Windows | Rebuild with `npm run electron:pack` so `resources/app.asar.unpacked/` exists; do not run from a partial `win-unpacked` folder missing the `.exe` |

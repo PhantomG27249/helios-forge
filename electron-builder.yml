@@ -11,6 +11,7 @@ files:
 asarUnpack:
   - src/server.js
   - src/**/*
+  - public/**/*
 extraResources:
   - from: packages/helios-research-harness
     to: helios-research-harness
