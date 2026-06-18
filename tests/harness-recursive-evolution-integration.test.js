@@ -6,6 +6,7 @@ import { test } from 'node:test';
 
 import { executeApprovedApplyAction } from '../src/harness-sidecar/core/approvalResume.js';
 import { evaluateProposalTrustBoundary } from '../src/harness-sidecar/core/trustKernelGateway.js';
+import { wrapPostTaskEvolution } from '../src/harness-sidecar/meta/postTaskHookGuard.js';
 import {
   buildGovernanceTrustInput,
   runPostTaskRecursiveEvolutionHooks,
@@ -244,6 +245,57 @@ test('G1: post-task hooks emit replay.cycle_completed and meta.campaign_cycle_co
     assert.ok(
       (campaignReport.cycles?.length ?? 0) >= 1 || campaignReport.campaignId || campaignReport.reportId,
     );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+async function createTaskWithPostTaskEvolution({
+  workspaceRoot,
+  source = 'prompt_background',
+  harnessConfig = {},
+} = {}) {
+  const taskId = `task-${source}-integration`;
+  const trace = [];
+  const task = { taskId, source };
+
+  await wrapPostTaskEvolution({
+    task,
+    emitEvent: async (event) => {
+      trace.push(event);
+    },
+    runHooks: async ({ emitEvent }) => runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot,
+      harnessConfig,
+      task,
+      rollbackDrill: { restoreVerified: true, reversible: true },
+      emitEvent,
+    }),
+  });
+
+  return { task, trace };
+}
+
+test('G0: prompt_background createTask trace contains recursive_evolution.coordinated', async () => {
+  const workspaceRoot = await makeWorkspace();
+  try {
+    const { task, trace } = await createTaskWithPostTaskEvolution({
+      workspaceRoot,
+      source: 'prompt_background',
+      harnessConfig: {
+        productionCapabilities: {
+          operatorDashboards: { enabled: true },
+          sourceTreeVariants: { enabled: true },
+        },
+      },
+    });
+
+    const coordinatedEvent = trace.find((event) => event.type === 'recursive_evolution.coordinated');
+    assert.ok(coordinatedEvent, 'expected recursive_evolution.coordinated on prompt_background trace');
+    assert.equal(coordinatedEvent.taskId, task.taskId);
+    assert.equal(coordinatedEvent.evidenceOnly, true);
+    assert.equal(coordinatedEvent.canPromote, false);
+    assert.equal(trace.at(-1).type, 'recursive_evolution.timing');
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }
