@@ -228,7 +228,6 @@ export async function scaffoldWorkplaceEvolution({
   force = false,
 } = {}) {
   const root = path.resolve(workspaceRoot);
-  const suite = await buildDefaultHeldOutSuite({ workspaceRoot: root });
   const benchmarksRoot = path.join(root, '.harness', 'benchmarks');
   const suitesRoot = path.join(benchmarksRoot, 'suites');
   const suitePath = path.join(suitesRoot, `${WORKPLACE_SMOKE_SUITE_ID}.json`);
@@ -236,7 +235,23 @@ export async function scaffoldWorkplaceEvolution({
 
   await mkdir(suitesRoot, { recursive: true });
 
-  if (force || !(await fileExists(suitePath))) {
+  let existingSuite = null;
+  if (!force && (await fileExists(suitePath))) {
+    try {
+      existingSuite = JSON.parse(await readFile(suitePath, 'utf8'));
+    } catch {
+      existingSuite = null;
+    }
+  }
+
+  const suite = await buildDefaultHeldOutSuite({
+    workspaceRoot: root,
+    harnessConfig,
+    existingSuite,
+    force,
+  });
+
+  if (force || !(await fileExists(suitePath)) || existingSuite) {
     await writeFile(suitePath, `${JSON.stringify(suite, null, 2)}\n`, 'utf8');
   }
 

@@ -1,56 +1,49 @@
-import { access, readFile } from 'node:fs/promises';
-import { constants } from 'node:fs';
 import path from 'node:path';
 
-async function fileExists(filePath) {
-  try {
-    await access(filePath, constants.F_OK);
-    return true;
-  } catch {
-    return false;
+import { detectWorkplaceTestRunner } from './workplaceSuiteDetector.js';
+
+export { detectWorkplaceTestRunner } from './workplaceSuiteDetector.js';
+
+function resolveWorkplaceMetadata(options = {}) {
+  if (options.workplaceMetadata && typeof options.workplaceMetadata === 'object') {
+    return options.workplaceMetadata;
   }
+  if (options.harnessConfig && typeof options.harnessConfig === 'object') {
+    return options.harnessConfig;
+  }
+  return {};
 }
 
-export async function detectWorkplaceTestRunner(workspaceRoot) {
-  const root = path.resolve(workspaceRoot);
-  const packageJsonPath = path.join(root, 'package.json');
+export function mergeHeldOutSuiteWithDefaults(existingSuite = {}, defaultSuite = {}) {
+  const existingCases = Array.isArray(existingSuite.cases) ? existingSuite.cases : [];
+  const defaultCases = Array.isArray(defaultSuite.cases) ? defaultSuite.cases : [];
+  const existingById = new Map(existingCases.map((benchmarkCase) => [benchmarkCase.id, benchmarkCase]));
+  const mergedCases = [...existingCases];
 
-  if (await fileExists(packageJsonPath)) {
-    try {
-      const pkg = JSON.parse(await readFile(packageJsonPath, 'utf8'));
-      const testScript = String(pkg?.scripts?.test || '').trim();
-      if (testScript) {
-        if (testScript === 'node --test' || testScript.startsWith('node --test ')) {
-          return { type: 'node-test', executable: 'node', args: ['--test'] };
-        }
-        return { type: 'npm-test', executable: 'npm', args: ['test'] };
-      }
-    } catch {
-      // Fall through to other detectors.
+  for (const defaultCase of defaultCases) {
+    if (!existingById.has(defaultCase.id)) {
+      mergedCases.push(defaultCase);
     }
   }
 
-  const pytestMarkers = ['pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini'];
-  for (const marker of pytestMarkers) {
-    if (await fileExists(path.join(root, marker))) {
-      return { type: 'pytest', executable: 'python', args: ['-m', 'pytest'] };
-    }
-  }
-
-  const requirementsPath = path.join(root, 'requirements.txt');
-  if (await fileExists(requirementsPath)) {
-    const requirements = await readFile(requirementsPath, 'utf8');
-    if (/pytest/i.test(requirements)) {
-      return { type: 'pytest', executable: 'python', args: ['-m', 'pytest'] };
-    }
-  }
-
-  return { type: 'noop', executable: 'node', args: ['-e', 'process.exit(0)'] };
+  return {
+    ...defaultSuite,
+    ...existingSuite,
+    cases: mergedCases,
+    advisory: existingSuite.advisory ?? defaultSuite.advisory ?? null,
+  };
 }
 
-export async function buildDefaultHeldOutSuite({ workspaceRoot }) {
+export async function buildDefaultHeldOutSuite({
+  workspaceRoot,
+  workplaceMetadata,
+  harnessConfig,
+  existingSuite = null,
+  force = false,
+} = {}) {
   const root = path.resolve(workspaceRoot);
-  const primary = await detectWorkplaceTestRunner(root);
+  const metadata = resolveWorkplaceMetadata({ workplaceMetadata, harnessConfig });
+  const primary = await detectWorkplaceTestRunner(root, metadata);
 
   const cases = [
     {
@@ -73,7 +66,7 @@ export async function buildDefaultHeldOutSuite({ workspaceRoot }) {
     },
   ];
 
-  if (primary.type === 'pytest') {
+  if (primary.type === 'pytest' || primary.type === 'pyproject-script') {
     cases.push({
       id: 'workplace-node-sanity',
       domain: 'code',
@@ -95,7 +88,7 @@ export async function buildDefaultHeldOutSuite({ workspaceRoot }) {
     });
   }
 
-  return {
+  const defaultSuite = {
     schemaVersion: 1,
     id: 'workplace-smoke',
     description: 'Default held-out smoke suite scaffolded for workplace evolution replay.',
@@ -106,5 +99,12 @@ export async function buildDefaultHeldOutSuite({ workspaceRoot }) {
       safety: 0.5,
     },
     cases,
+    advisory: primary.advisory ?? null,
   };
+
+  if (force || !existingSuite) {
+    return defaultSuite;
+  }
+
+  return mergeHeldOutSuiteWithDefaults(existingSuite, defaultSuite);
 }
