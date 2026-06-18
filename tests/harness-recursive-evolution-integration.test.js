@@ -200,3 +200,51 @@ test('evaluateProposalTrustBoundary is available from production gateway module'
   assert.equal(boundary.allowed, true);
   assert.equal(boundary.authority, 'evidence_only');
 });
+
+test('G1: post-task hooks emit replay.cycle_completed and meta.campaign_cycle_completed with full gates', async () => {
+  const workspaceRoot = await makeWorkspace();
+  const events = [];
+  try {
+    const result = await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot,
+      harnessConfig: {
+        productionCapabilities: {
+          operatorDashboards: { enabled: true },
+          sourceTreeVariants: { enabled: true },
+        },
+      },
+      task: { taskId: 'task-g1-events' },
+      rollbackDrill: { restoreVerified: true, reversible: true },
+      emitEvent: async (event) => {
+        events.push(event);
+      },
+    });
+
+    assert.equal(result.canPromote, false);
+
+    const replayEvent = events.find((event) => event.type === 'replay.cycle_completed');
+    const campaignEvent = events.find((event) => event.type === 'meta.campaign_cycle_completed');
+    const coordinatedEvent = events.find((event) => event.type === 'recursive_evolution.coordinated');
+
+    assert.ok(replayEvent, 'expected replay.cycle_completed event');
+    assert.ok(campaignEvent, 'expected meta.campaign_cycle_completed event');
+    assert.ok(coordinatedEvent, 'expected recursive_evolution.coordinated event');
+
+    assert.equal(replayEvent.taskId, 'task-g1-events');
+    assert.equal(campaignEvent.taskId, 'task-g1-events');
+    assert.equal(replayEvent.evidenceOnly, true);
+    assert.equal(replayEvent.canPromote, false);
+    assert.equal(campaignEvent.evidenceOnly, true);
+    assert.equal(campaignEvent.canPromote, false);
+    assert.ok(replayEvent.ran?.length >= 1 || result.replay?.ran?.length >= 1);
+    assert.ok(campaignEvent.ran?.length >= 1 || result.campaigns?.ran?.length >= 1);
+
+    const campaignReport = campaignEvent.ran?.[0]?.report || result.campaigns?.ran?.[0]?.report;
+    assert.ok(campaignReport);
+    assert.ok(
+      (campaignReport.cycles?.length ?? 0) >= 1 || campaignReport.campaignId || campaignReport.reportId,
+    );
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});

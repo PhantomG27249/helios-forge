@@ -424,7 +424,7 @@ test('settings modal exposes full harness config panels', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250624/);
-  assert.match(html, /app\.js\?v=20250624/);
-  assert.match(html, /harnessConfigUiSchema\.js\?v=20250624/);
+  assert.match(html, /app\.css\?v=20250626/);
+  assert.match(html, /app\.js\?v=20250626/);
+  assert.match(html, /harnessConfigUiSchema\.js\?v=20250626/);
 });

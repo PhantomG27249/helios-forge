@@ -103,6 +103,53 @@ function hasBackgroundTickRecord(record = {}) {
   return Object.keys(record).length > 0;
 }
 
+const PRODUCTION_TO_SUBSTRATE_EVIDENCE = Object.freeze({
+  persisted_replay_report: ['held_out_suite', 'repeated_cycle'],
+  operator_dashboard_snapshot: ['budget_accounting'],
+  frontier_dashboard_snapshot: ['frontier_trend'],
+  persisted_campaign_report: [
+    'isolated_variant',
+    'source_artifact',
+    'trace_artifact',
+    'metric_artifact',
+    'proposer_context',
+  ],
+  production_grouped_reroll_report: [
+    'grouped_reroll',
+    'embedding_diversity',
+    'candidate_family_delta',
+    'self_preference_signal',
+  ],
+  live_lane_report: [
+    'forward_backward_fusion',
+    'dense_verifier',
+    'trajectory_provenance',
+    'family_recombination',
+    'champion_frontier',
+  ],
+  provenance_resolution_report: [
+    'role_pipeline',
+    'provenance_retrieval',
+    'conflict_adjudication',
+    'migration_record',
+    'eval_signal',
+  ],
+  visual_replay_report: [
+    'visual_benchmark_case',
+    'visual_memory_node',
+    'visual_rho_case',
+    'visual_policy_gate',
+    'vlm_budget_route',
+  ],
+  external_peer_status: ['endpoint_contract', 'peer_negotiation', 'multi_hop_lineage'],
+  durable_queue_snapshot: ['persistent_queue', 'issuer_secret'],
+  background_tick_record: [
+    'background_tick_record',
+    'recursive_replay_evidence',
+    'recursive_campaign_evidence',
+  ],
+});
+
 function createSignalAccumulator() {
   const signals = new Map();
 
@@ -128,6 +175,13 @@ function createSignalAccumulator() {
     if (!signal.productionEvidence.includes(normalizedEvidence)) {
       signal.productionEvidence.push(normalizedEvidence);
     }
+
+    for (const substrateType of PRODUCTION_TO_SUBSTRATE_EVIDENCE[normalizedEvidence] || []) {
+      if (!signal.evidence.includes(substrateType)) {
+        signal.evidence.push(substrateType);
+      }
+    }
+
     signal.persistedProductionEvidence = signal.productionEvidence.length > 0;
     signal.updatedAt = latestTimestamp(signal.updatedAt, updatedAt);
   }
@@ -137,6 +191,7 @@ function createSignalAccumulator() {
     values() {
       return [...signals.values()].map((signal) => ({
         ...signal,
+        evidence: [...signal.evidence].sort(),
         productionEvidence: [...signal.productionEvidence].sort(),
       }));
     },

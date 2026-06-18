@@ -468,6 +468,8 @@ test('full runtime adapts swarm concurrency from vLLM health probes', async () =
             'models:',
             '  swarmBaseUrl: http://model.test/v1',
             '  swarmModelId: local-test',
+            'swarmExecution:',
+            '  workerMode: auto',
             'vllmHealth:',
             '  probeConcurrency: 2',
             '  maxConcurrency: 4',

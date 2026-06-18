@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250624">
+  <link rel="stylesheet" href="/app.css?v=20250626">
   <script src="/vendor/marked.min.js"></script>
   <link rel="stylesheet" href="/vendor/github-dark.min.css">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
@@ -710,9 +710,9 @@
           <section id="settings-tab-production" class="settings-panel">
             <p class="settings-hint">Production gates collect evidence only. Authority stays <code>evidence_only</code>; nothing here grants promotion.</p>
             <div id="settings-production-gates" class="settings-production-gates"></div>
-            <details class="settings-collapsible">
+            <details class="settings-collapsible settings-icr-collapsible" open>
               <summary class="settings-section-title">ICR lane</summary>
-              <div id="settings-icr-sections" class="settings-schema-sections settings-collapsible-body"></div>
+              <div id="settings-icr-sections" class="settings-schema-sections settings-collapsible-body settings-icr-fields"></div>
             </details>
             <div class="settings-actions">
               <button id="btn-settings-save-production" class="settings-btn primary" type="button">Save production settings</button>
@@ -845,7 +845,7 @@
       <textarea id="debug-log" readonly class="debug-log"></textarea>
     </div>
   </div>
-  <script src="/harnessConfigUiSchema.js?v=20250624"></script>
-  <script src="/app.js?v=20250624"></script>
+  <script src="/harnessConfigUiSchema.js?v=20250626"></script>
+  <script src="/app.js?v=20250626"></script>
 </body>
 </html>

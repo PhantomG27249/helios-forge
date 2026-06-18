@@ -1548,6 +1548,28 @@ function renderHarnessHierarchyFeedback() {
   if (harnessExperimentDecision) harnessExperimentDecision.textContent = experiments.decision || 'n/a';
 }
 
+function formatCapabilityGoalSuffix(goal = {}) {
+  const blockers = (goal.blockers || []).length;
+  if (blockers) {
+    return `${blockers} blocker${blockers === 1 ? '' : 's'}`;
+  }
+
+  const missingProduction = (goal.missingProductionEvidence || []).length;
+  const missingSubstrate = (goal.missingEvidence || []).length;
+  const paperGaps = (goal.paperGradeAutonomyGaps || []).length;
+
+  if (missingSubstrate > 0) {
+    return `${missingSubstrate} evidence gap${missingSubstrate === 1 ? '' : 's'}`;
+  }
+  if (missingProduction > 0) {
+    return `${missingProduction} production artifact${missingProduction === 1 ? '' : 's'} needed`;
+  }
+  if (paperGaps > 0) {
+    return `substrate complete · ${paperGaps} paper gap${paperGaps === 1 ? '' : 's'}`;
+  }
+  return 'evidence complete';
+}
+
 function renderCapabilityGoalRows() {
   const goals = harnessState.capabilityGoals;
   if (!goals) {
@@ -1567,10 +1589,9 @@ function renderCapabilityGoalRows() {
   if (harnessCapabilityGoalsOpen) harnessCapabilityGoalsOpen.textContent = String(open);
   if (!harnessCapabilityGoalRows) return;
 
-  const rows = (goals.goals || []).slice(0, 8).map((goal) => {
-    const missing = (goal.missingEvidence || []).length;
-    const blockers = (goal.blockers || []).length;
-    const suffix = blockers ? `${blockers} blockers` : missing ? `${missing} missing` : 'evidence complete';
+  const goalRows = goals.goals || [];
+  const rows = goalRows.map((goal) => {
+    const suffix = formatCapabilityGoalSuffix(goal);
     return `
       <div class="harness-list-row">
         <span>${esc(goal.label || goal.goalId || 'goal')}</span>
@@ -4207,7 +4228,7 @@ function renderHarnessConfigField(field, config) {
     </label>`;
 }
 
-function renderHarnessConfigSections(container, sectionIds = []) {
+function renderHarnessConfigSections(container, sectionIds = [], { hideTitles = false } = {}) {
   if (!container) return;
   const schema = window.HELIOS_HARNESS_CONFIG_UI;
   const config = settingsState.harnessConfig || {};
@@ -4220,7 +4241,7 @@ function renderHarnessConfigSections(container, sectionIds = []) {
     if (!section) return '';
     return `
       <div class="settings-schema-group" data-schema-section="${escAttr(sectionId)}">
-        <div class="settings-section-title">${esc(section.title)}</div>
+        ${hideTitles ? '' : `<div class="settings-section-title">${esc(section.title)}</div>`}
         ${section.fields.map((field) => renderHarnessConfigField(field, config)).join('')}
       </div>`;
   }).join('');
@@ -4238,6 +4259,7 @@ function renderHarnessProductionGates() {
     return;
   }
   container.innerHTML = `
+    <div class="settings-section-title settings-production-gates-title">Production gates</div>
     <div class="settings-production-gates-head">
       <span>Gate</span>
       <span>Enabled</span>
@@ -4252,7 +4274,7 @@ function renderHarnessProductionGates() {
       return `
         <div class="settings-production-gate-row" data-production-gate="${escAttr(gateId)}">
           <div class="settings-production-gate-label">${esc(label)}</div>
-          <label class="settings-checkbox-row settings-production-gate-enabled">
+          <label class="settings-production-gate-checkbox" aria-label="Enable ${escAttr(label)}">
             <input type="checkbox" data-production-gate-enabled="${escAttr(gateId)}" ${enabled ? 'checked' : ''} />
           </label>
           <select class="settings-select" data-production-gate-mode="${escAttr(gateId)}">${modeOptions}</select>
@@ -4307,7 +4329,7 @@ function renderHarnessConfigPanels() {
   renderHarnessConfigSections(document.getElementById('settings-general-sections'), ['general', 'runtime']);
   renderHarnessConfigSections(document.getElementById('settings-router-advanced-sections'), ['routerAdvanced']);
   renderHarnessConfigSections(document.getElementById('settings-council-advanced-sections'), ['councilAdvanced']);
-  renderHarnessConfigSections(document.getElementById('settings-icr-sections'), ['icr']);
+  renderHarnessConfigSections(document.getElementById('settings-icr-sections'), ['icr'], { hideTitles: true });
   renderHarnessProductionGates();
 }
 
@@ -4473,6 +4495,10 @@ const WORKPLACE_HEALTH_LABELS = {
   capabilitiesJson: 'capabilities.json',
   runtimeMount: 'runtime mount manifest',
   bundledPackage: 'bundled harness package',
+  heldOutSuite: 'held-out suite (workplace-smoke)',
+  evolutionConfig: 'evolution config',
+  swarmEndpointConfigured: 'swarm model endpoint',
+  evolutionReady: 'evolution ready',
 };
 
 function workplaceHealthState(item) {
@@ -4499,7 +4525,7 @@ function renderSettingsWorkplaceHealth(status) {
     return;
   }
 
-  const artifactKeys = ['harnessDir', 'configYaml', 'capabilitiesJson', 'runtimeMount', 'bundledPackage'];
+  const artifactKeys = ['harnessDir', 'configYaml', 'capabilitiesJson', 'runtimeMount', 'bundledPackage', 'heldOutSuite', 'evolutionConfig'];
   const rows = artifactKeys
     .filter((key) => status?.[key] && typeof status[key] === 'object')
     .map((key) => {
@@ -4512,6 +4538,22 @@ function renderSettingsWorkplaceHealth(status) {
           <span>${esc(WORKPLACE_HEALTH_LABELS[key] || key)}${esc(suffix)}</span>
         </div>`;
     });
+
+  if (typeof status?.swarmEndpointConfigured === 'boolean') {
+    rows.push(`
+      <div class="settings-health-item">
+        <span class="settings-health-dot ${status.swarmEndpointConfigured ? 'ok' : 'warn'}"></span>
+        <span>${esc(WORKPLACE_HEALTH_LABELS.swarmEndpointConfigured)}</span>
+      </div>`);
+  }
+
+  if (typeof status?.evolutionReady === 'boolean') {
+    rows.push(`
+      <div class="settings-health-item">
+        <span class="settings-health-dot ${status.evolutionReady ? 'ok' : 'warn'}"></span>
+        <span>${esc(WORKPLACE_HEALTH_LABELS.evolutionReady)}</span>
+      </div>`);
+  }
 
   if (!rows.length) {
     const message = status?.message || status?.summary || 'Open Settings while connected to load workplace health.';

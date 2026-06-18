@@ -22,6 +22,17 @@ On first launch:
 
 Use **Settings → Workplace** for Initialize/Repair after changing workplaces.
 
+## Workplace evolution scaffold
+
+New workplaces receive an evolution-ready `.harness/` layout automatically:
+
+- **Held-out suite:** `.harness/benchmarks/suites/workplace-smoke.json` runs real project test commands (not synthetic 0.5/0.55 stub scores).
+- **Evolution config:** `.harness/config.yaml` includes an `evolution:` block (`syntheticReplay: false`, `defaultSuiteId: workplace-smoke`).
+- **Swarm endpoint:** Set `models.swarmBaseUrl` in config (or `HELIOS_SWARM_MODEL_BASE_URL`) for model-driven swarm; the UI shows an advisory when unset.
+- **Repair path:** Settings → Workplace → Repair merges missing evolution assets without overwriting operator edits.
+
+Existing workplaces pick up the same scaffold via Repair without wiping custom config.
+
 ## Build an installable package (maintainers)
 
 ```powershell

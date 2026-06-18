@@ -119,7 +119,7 @@ Tracked in `capabilityGoalStatus.js` and surfaced in UI via `/v1/evidence/*` end
 | Goal | Substrate | Hot-path wiring | Production evidence |
 | --- | --- | --- | --- |
 | `benchmark_spine` | Yes | Replay scheduler + dashboards | Needs repeated cycles |
-| `meta_harness_loop` | Yes | Campaign scheduler (stub on post-task) | Needs real campaign reports |
+| `meta_harness_loop` | Yes | Campaign scheduler + real post-task bindings (2026-06-18 wiring) | Needs repeated campaign reports |
 | `memgraphrag_depth` | Yes | Task bridge | Needs production eval dashboards |
 | `soul_coverage` | Yes | Nested swarm behind flag | Nested execution **implemented**; production proof pending |
 | `rho_at_scale` | Partial | Not production-wired | Open |
@@ -138,6 +138,18 @@ Tracked in `capabilityGoalStatus.js` and surfaced in UI via `/v1/evidence/*` end
 3. **ICR wiring** — see `docs/superpowers/plans/2026-06-17-icr-wiring-parallel-subagents.md` (parallel track).
 4. **Chunk 9 security audit** — authority audit subagent not yet run.
 5. **Electron product track** — standalone app plan is separate.
+
+### Addendum — 2026-06-18 meta-harness evolution wiring
+
+Integration worker landed **G0–G6** from `2026-06-18-meta-harness-evolution-wiring-parallel-subagents.md`:
+
+- **G0:** `setupHeliosForge` scaffolds `workplace-smoke` held-out suite + evolution config block.
+- **G1–G4:** Post-task path delegates to `postTaskEvolutionOrchestrator` (real replay commands, source-tree campaigns, per-task campaign reports, frontier JSONL).
+- **G5–G6:** Frontier persistence + `repairWorkplace` merge via `scaffoldWorkplaceEvolution` without wiping operator YAML.
+- Stub `defaultBaselineRunner` / `smokeSuiteFallback` removed from hot path unless `evolution.syntheticReplay: true`.
+- Background ticks persist full hook results under `.harness/meta/background-ticks/`.
+
+Remaining: repeated production proof at scale, operator `models.swarmBaseUrl` configuration, promotion loop closure in `coordinateRecursiveEvolution`.
 
 ---
 

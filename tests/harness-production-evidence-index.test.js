@@ -163,7 +163,12 @@ test('loadPersistedProductionSignals maps persisted artifacts to capability goal
       'operator_dashboard_snapshot',
       'persisted_replay_report',
     ]);
-    assert.deepEqual(benchmark.evidence, []);
+    assert.deepEqual(benchmark.evidence, [
+      'budget_accounting',
+      'frontier_trend',
+      'held_out_suite',
+      'repeated_cycle',
+    ]);
     assert.deepEqual(benchmark.blockers, []);
     assert.equal(benchmark.updatedAt, FIXED_NOW);
 
@@ -247,6 +252,11 @@ test('summarizeCapabilityGoalStatus reflects persisted production evidence compl
 
     const benchmark = status.goals.find((goal) => goal.goalId === 'benchmark_spine');
     assert.deepEqual(benchmark.missingProductionEvidence, []);
-    assert.equal(benchmark.status, 'missing');
+    assert.equal(benchmark.status, 'implemented');
+    assert.deepEqual(benchmark.missingEvidence, []);
+
+    const metaHarness = status.goals.find((goal) => goal.goalId === 'meta_harness_loop');
+    assert.equal(metaHarness.status, 'implemented');
+    assert.deepEqual(metaHarness.missingEvidence, []);
   });
 });

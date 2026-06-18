@@ -105,6 +105,7 @@ import { chooseChampion } from './swarm/championSelector.js';
 import { buildModelCouncilRuntime } from './swarm/modelCouncil.js';
 import { orchestrateSwarm } from './swarm/swarmOrchestrator.js';
 import { runSwarmPolicyBesLane } from './swarm/evolutionSwarmPlanner.js';
+import { resolveSwarmRuntime } from './swarm/resolveSwarmRuntime.js';
 import { summarizeSwarmOutcome } from './swarm/swarmOutcomeRecorder.js';
 import { createDefaultToolRegistry } from './tools/defaultToolRegistry.js';
 import { createGitApplyAdapter } from './tools/gitApplyAdapter.js';
@@ -650,34 +651,26 @@ export function createHarnessSidecar({
       const vlmProfileName = process.env.HELIOS_VLM_MODEL_PROFILE
         || harnessConfig?.defaults?.vlmModelProfile
         || 'qwen36_vlm_fast';
-      let profile;
-      try {
-        profile = getModelProfile(profileName);
-      } catch (error) {
-        await emitEvent({
-          type: 'swarm.model_gateway_unavailable',
-          taskId: task.taskId,
-          profileName,
-          reason: error.message,
-        });
-        return null;
-      }
-
-      const baseUrl = process.env.HELIOS_SWARM_MODEL_BASE_URL
-        || harnessConfig?.models?.swarmBaseUrl
-        || profile.baseUrl;
+      const { gateway, advisory } = resolveSwarmRuntime({
+        harnessConfig,
+        profileName,
+        getModelProfile,
+      });
+      const profile = gateway?.profile || null;
+      const baseUrl = process.env.HELIOS_SWARM_MODEL_BASE_URL || gateway?.baseUrl;
       const modelId = process.env.HELIOS_SWARM_MODEL_ID
-        || harnessConfig?.models?.swarmModelId
-        || profile.model;
+        || gateway?.modelId
+        || profile?.model;
       const supportsVision = process.env.HELIOS_SWARM_MODEL_SUPPORTS_VISION === '1'
         || harnessConfig?.models?.swarmSupportsVision === true
-        || profile.supportsVision;
+        || profile?.supportsVision;
       if (!baseUrl) {
         await emitEvent({
           type: 'swarm.model_gateway_unavailable',
           taskId: task.taskId,
           profileName,
-          reason: 'No baseUrl configured for model-driven swarm.',
+          reason: advisory?.setupHint || advisory?.reason || 'No baseUrl configured for model-driven swarm.',
+          advisory,
         });
         return null;
       }
@@ -2514,18 +2507,45 @@ export function createHarnessSidecar({
       ...(attempt.evolutionOutput?.memoryProposals || []),
       ...(attempt.localMeta?.candidates || []).flatMap((candidate) => candidate.memoryProposals || []),
     ]);
-    await runPostTaskRecursiveEvolutionHooks({
-      workspaceRoot: resolvedWorkspaceRoot,
-      harnessConfig,
-      task,
-      memoryProposals: swarmMemoryProposals,
-      rollbackDrill: {
-        candidateId: champion?.attemptId || task.taskId,
-        restoreVerified: true,
-        reversible: true,
-      },
-      emitEvent,
-    });
+    let recursiveCoordinatedEmitted = false;
+    const evolutionEmitEvent = async (event) => {
+      if (event?.type === 'recursive_evolution.coordinated') {
+        recursiveCoordinatedEmitted = true;
+      }
+      return emitEvent(event);
+    };
+    try {
+      await runPostTaskRecursiveEvolutionHooks({
+        workspaceRoot: resolvedWorkspaceRoot,
+        harnessConfig,
+        task,
+        memoryProposals: swarmMemoryProposals,
+        rollbackDrill: {
+          candidateId: champion?.attemptId || task.taskId,
+          restoreVerified: true,
+          reversible: true,
+        },
+        emitEvent: evolutionEmitEvent,
+      });
+    } catch (error) {
+      await emitEvent({
+        type: 'recursive_evolution.failed',
+        taskId: task.taskId,
+        reason: error.message,
+        evidenceOnly: true,
+        canPromote: false,
+      });
+    } finally {
+      if (!recursiveCoordinatedEmitted) {
+        await emitEvent({
+          type: 'recursive_evolution.coordinated',
+          taskId: task.taskId,
+          coordinated: null,
+          evidenceOnly: true,
+          canPromote: false,
+        });
+      }
+    }
   }
 
   async function createTask(body) {

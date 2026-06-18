@@ -7,8 +7,12 @@ import {
   buildDefaultHarnessIcrConfig,
   formatHarnessIcrYamlSection,
 } from '../harness-sidecar/icr/icrHarnessDefaults.js';
+import {
+  formatEvolutionYamlSection,
+  scaffoldWorkplaceEvolution,
+} from '../harness-sidecar/meta/harnessEvolutionDefaults.js';
 import { setupHeliosForge } from '../../scripts/setup-helios-forge.js';
-import { getWorkplaceStatus } from './workplaceStatus.js';
+import { getWorkplaceStatus, normalizeHeldOutSuiteFile } from './workplaceStatus.js';
 
 const STANDARD_CONFIG_YAML = [
   'project:',
@@ -39,6 +43,11 @@ const STANDARD_CONFIG_YAML = [
   '  maxActionsPerTask: 8',
   '  allowProfileSwitching: true',
   formatHarnessIcrYamlSection({ enabled: true, includeProductionGate: true }),
+  formatEvolutionYamlSection(),
+  'models:',
+  '  # Set swarmBaseUrl for model-driven swarm (OpenAI-compatible endpoint)',
+  '  swarmBaseUrl: null',
+  '  swarmModelId: null',
   '',
 ].join('\n');
 
@@ -357,6 +366,15 @@ export async function repairWorkplace(workspaceRoot) {
   if (needsScaffold) {
     await setupHeliosForge({ workspaceRoot, forceConfig: false });
     repairs.push('scaffold');
+  }
+
+  const statusBeforeEvolution = await getWorkplaceStatus(workspaceRoot);
+  const needsEvolutionScaffold = !statusBeforeEvolution.heldOutSuite?.present
+    || !statusBeforeEvolution.evolutionConfig?.present;
+  if (needsEvolutionScaffold) {
+    await scaffoldWorkplaceEvolution({ workspaceRoot });
+    await normalizeHeldOutSuiteFile(workspaceRoot);
+    repairs.push('evolution');
   }
 
   const after = await getWorkplaceStatus(workspaceRoot);

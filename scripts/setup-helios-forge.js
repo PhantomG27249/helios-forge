@@ -9,6 +9,10 @@ import {
 } from '../src/harness-sidecar/capabilities/capabilityStore.js';
 import { installPiPackage } from '../src/harness-sidecar/capabilities/piPackageInstaller.js';
 import { formatHarnessIcrYamlSection } from '../src/harness-sidecar/icr/icrHarnessDefaults.js';
+import {
+  formatEvolutionYamlSection,
+  scaffoldWorkplaceEvolution,
+} from '../src/harness-sidecar/meta/harnessEvolutionDefaults.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundledPackageRoot = path.join(repoRoot, 'packages', 'helios-research-harness');
@@ -42,6 +46,11 @@ const DEFAULT_CONFIG = [
   '  maxActionsPerTask: 8',
   '  allowProfileSwitching: true',
   formatHarnessIcrYamlSection({ enabled: true, includeProductionGate: true }),
+  formatEvolutionYamlSection(),
+  'models:',
+  '  # Set swarmBaseUrl for model-driven swarm (OpenAI-compatible endpoint)',
+  '  swarmBaseUrl: null',
+  '  swarmModelId: null',
   '',
 ].join('\n');
 
@@ -92,6 +101,13 @@ export async function setupHeliosForge({
     profileId: 'default',
   });
 
+  const evolutionScaffold = (config.created || forceConfig)
+    ? await scaffoldWorkplaceEvolution({
+      workspaceRoot: resolvedWorkspaceRoot,
+      force: forceConfig,
+    })
+    : null;
+
   return {
     workspaceRoot: resolvedWorkspaceRoot,
     config,
@@ -100,6 +116,7 @@ export async function setupHeliosForge({
     capabilityCount: installedPackage.capabilities.length,
     runtimeManifestPath: manifest.manifestPath,
     runtimeCounts: manifest.counts,
+    evolutionScaffold,
   };
 }
 

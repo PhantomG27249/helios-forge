@@ -8,6 +8,7 @@ import {
 import { buildOperatorDashboardSnapshot } from './operatorDashboardStore.js';
 import { persistAutonomyProofArtifacts } from './autonomyProofRecorder.js';
 import { applyPartialAutonomousImprovements } from './partialAutonomyApply.js';
+import { writeBackgroundTickRecord } from './frontierPersistence.js';
 import { runPostTaskRecursiveEvolutionHooks } from './recursiveEvolutionRuntimeHook.js';
 
 const AUTONOMY_EVIDENCE_REL = '.harness/meta/autonomy-evidence.json';
@@ -123,6 +124,24 @@ export async function runBackgroundEvolutionTick({
     autonomyState,
     harnessConfig,
     now,
+  });
+
+  const tickRecordedAt = parseTime(typeof now === 'function' ? now() : now).toISOString();
+  const tickHookResults = {
+    evidenceOnly: true,
+    canPromote: false,
+    tickId,
+    replay: hookResults.replay,
+    campaigns: hookResults.campaigns,
+    coordinated: hookResults.coordinated,
+    autonomy: autonomyState,
+    partialApply,
+  };
+  await writeBackgroundTickRecord({
+    workspaceRoot,
+    tickId,
+    hookResults: tickHookResults,
+    recordedAt: tickRecordedAt,
   });
 
   return {

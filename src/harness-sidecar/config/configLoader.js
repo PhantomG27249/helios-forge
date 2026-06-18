@@ -5,6 +5,7 @@ import {
   buildDefaultHarnessIcrConfig,
   buildDefaultHarnessIcrLaneGate,
 } from '../icr/icrHarnessDefaults.js';
+import { buildDefaultEvolutionConfig } from '../meta/harnessEvolutionDefaults.js';
 
 export const DEFAULT_HARNESS_CONFIG = {
   project: {
@@ -141,6 +142,11 @@ export const DEFAULT_HARNESS_CONFIG = {
     icrLane: buildDefaultHarnessIcrLaneGate(),
   },
   icr: buildDefaultHarnessIcrConfig(),
+  evolution: buildDefaultEvolutionConfig(),
+  models: {
+    swarmBaseUrl: null,
+    swarmModelId: null,
+  },
   swarmExecution: {
     concurrency: 1,
     workerMode: 'model_driven',
