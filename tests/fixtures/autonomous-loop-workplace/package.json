@@ -1,0 +1,8 @@
+{
+  "name": "autonomous-loop-workplace-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/pass.js"
+  }
+}
