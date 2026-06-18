@@ -51,6 +51,51 @@ export const FIXTURE_HARNESS_CONFIG = Object.freeze({
   },
 });
 
+export const FIXTURE_HELD_OUT_SUITE = Object.freeze({
+  id: 'workplace-smoke',
+  domains: ['code', 'safety'],
+  cases: [
+    {
+      id: 'workplace-pass',
+      domain: 'code',
+      description: 'Fixture command that exits 0.',
+      command: 'node scripts/pass.js',
+    },
+    {
+      id: 'workplace-fail',
+      domain: 'safety',
+      description: 'Fixture command that exits 1.',
+      command: 'node scripts/fail.js',
+    },
+  ],
+});
+
+export const FIXTURE_CONFIG_YAML = `productionCapabilities:
+  operatorDashboards:
+    enabled: true
+  sourceTreeVariants:
+    enabled: true
+  backgroundEvolution:
+    enabled: true
+
+evolution:
+  syntheticReplay: false
+  defaultSuiteId: workplace-smoke
+  persistFrontier: true
+  feedbackToChat: true
+
+partialAutonomy:
+  enabled: true
+  maxLevel: 3
+  thresholds:
+    minRollbackDrillsPassed: 0
+    maxRegressionCount: 99
+    minDashboardDepth: 0
+
+adaptiveSearch:
+  maxActionsPerTask: 8
+`;
+
 export function createPromptBackgroundTask(taskId = 'task_prompt_bg_1') {
   return {
     taskId,
@@ -59,11 +104,26 @@ export function createPromptBackgroundTask(taskId = 'task_prompt_bg_1') {
   };
 }
 
+export async function scaffoldFixtureHarness(workspaceRoot) {
+  const configPath = path.join(workspaceRoot, '.harness', 'config.yaml');
+  const suitePath = path.join(
+    workspaceRoot,
+    '.harness',
+    'benchmarks',
+    'suites',
+    'workplace-smoke.json',
+  );
+  await mkdir(path.dirname(suitePath), { recursive: true });
+  await writeFile(configPath, FIXTURE_CONFIG_YAML, 'utf8');
+  await writeFile(suitePath, `${JSON.stringify(FIXTURE_HELD_OUT_SUITE, null, 2)}\n`, 'utf8');
+}
+
 export async function copyFixtureWorkplace(targetRoot) {
   await cp(FIXTURE_ROOT, targetRoot, {
     recursive: true,
     filter: (source) => !source.includes(`${path.sep}loopTestHarness.js`),
   });
+  await scaffoldFixtureHarness(targetRoot);
 }
 
 export async function loadFixtureSuite(workspaceRoot) {
@@ -74,7 +134,12 @@ export async function loadFixtureSuite(workspaceRoot) {
     'suites',
     'workplace-smoke.json',
   );
-  return JSON.parse(await readFile(suitePath, 'utf8'));
+  try {
+    return JSON.parse(await readFile(suitePath, 'utf8'));
+  } catch (error) {
+    if (error?.code === 'ENOENT') return FIXTURE_HELD_OUT_SUITE;
+    throw error;
+  }
 }
 
 async function persistReplayReport(workspaceRoot, report) {
