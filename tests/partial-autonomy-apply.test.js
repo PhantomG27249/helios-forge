@@ -9,6 +9,10 @@ import {
   extractPolicyHintsFromReplayReport,
   partialAutonomyEnabled,
 } from '../src/harness-sidecar/meta/partialAutonomyApply.js';
+import {
+  defaultPartialAutonomyThresholds,
+  runAutonomyApplyOrchestrator,
+} from '../src/harness-sidecar/meta/postTaskAutonomyApply.js';
 
 async function withWorkspace(fn) {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'helios-partial-autonomy-'));
@@ -136,6 +140,14 @@ test('applyPartialAutonomousImprovements skips when partial autonomy disabled', 
     assert.equal(result.applied, false);
     assert.equal(result.reason, 'partial_autonomy_disabled');
   });
+});
+
+test('postTaskAutonomyApply exports shared orchestrator for background delegation', () => {
+  assert.equal(typeof runAutonomyApplyOrchestrator, 'function');
+  assert.equal(typeof defaultPartialAutonomyThresholds, 'function');
+  const thresholds = defaultPartialAutonomyThresholds(enabledConfig);
+  assert.equal(thresholds.minDashboardDepth, 1);
+  assert.equal(thresholds.maxRegressionCount, 0);
 });
 
 test('applyPartialAutonomousImprovements never writes outside harness runtime/meta scope', async () => {
