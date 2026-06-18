@@ -424,7 +424,47 @@ test('settings modal exposes full harness config panels', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250626/);
-  assert.match(html, /app\.js\?v=20250626/);
-  assert.match(html, /harnessConfigUiSchema\.js\?v=20250626/);
+  assert.match(html, /app\.css\?v=20250627/);
+  assert.match(html, /app\.js\?v=20250627/);
+  assert.match(html, /harnessConfigUiSchema\.js\?v=20250627/);
+});
+
+test('harness panel renders autonomous self-improvement loop observability', async () => {
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(appJs, /function formatIcrLaneEvent/);
+  assert.match(appJs, /function renderAutonomyLoopStatus/);
+  assert.match(appJs, /function formatRecursiveEvolutionCoordinatedEvent/);
+  assert.match(appJs, /function updateAutonomyLoopFromEvent/);
+  assert.match(appJs, /icr\.lane_completed/);
+  assert.match(appJs, /recursive_evolution\.coordinated/);
+  assert.match(appJs, /replay\.cycle_completed/);
+  assert.match(appJs, /partial_autonomy\.applied/);
+
+  const icrHandlerStart = appJs.indexOf("event.type === 'icr.lane_completed'");
+  assert.ok(icrHandlerStart > -1, 'expected icr.lane_completed handler');
+  const icrHandlerChunk = appJs.slice(icrHandlerStart, icrHandlerStart + 500);
+  assert.match(icrHandlerChunk, /formatIcrLaneEvent\(event\)/);
+  assert.doesNotMatch(icrHandlerChunk, /\[object Object\]/);
+
+  const coordinatedHandlerStart = appJs.indexOf("event.type === 'recursive_evolution.coordinated'");
+  assert.ok(coordinatedHandlerStart > -1, 'expected recursive_evolution.coordinated handler');
+  const coordinatedHandlerChunk = appJs.slice(coordinatedHandlerStart, coordinatedHandlerStart + 200);
+  assert.match(coordinatedHandlerChunk, /formatRecursiveEvolutionCoordinatedEvent\(event\)/);
+
+  const coordinatedFormatStart = appJs.indexOf('function formatRecursiveEvolutionCoordinatedEvent');
+  assert.ok(coordinatedFormatStart > -1, 'expected formatRecursiveEvolutionCoordinatedEvent helper');
+  const coordinatedFormatChunk = appJs.slice(coordinatedFormatStart, coordinatedFormatStart + 900);
+  assert.match(coordinatedFormatChunk, /sources/);
+  assert.match(coordinatedFormatChunk, /replay/);
+  assert.match(coordinatedFormatChunk, /campaign/);
+  assert.match(coordinatedFormatChunk, /icr/);
+
+  assert.match(appJs, /Autonomy loop/);
+  assert.match(appJs, /lastReplayDelta/);
+  assert.match(appJs, /autonomyLevel/);
+  assert.match(appJs, /regressionCount/);
+  assert.match(appJs, /livePolicyVersion/);
+  assert.match(appJs, /shadowPolicyVersion/);
+  assert.match(appJs, /renderAutonomyLoopStatus\(\)/);
 });

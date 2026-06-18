@@ -107,6 +107,15 @@ let harnessState = {
   productionEvidence: {},
   recursiveEvolutionEvidence: null,
   autonomyDashboard: null,
+  autonomyLoop: {
+    lastReplayDelta: null,
+    autonomyLevel: 0,
+    regressionCount: 0,
+    livePolicyVersion: null,
+    shadowPolicyVersion: null,
+    sources: [],
+    icrRan: false,
+  },
 };
 const PRODUCTION_EVIDENCE_TYPES = [
   ['heldOutSuites', 'Held-out suites'],
@@ -444,6 +453,7 @@ let harnessRecursiveEvolutionEvidenceStatus = null;
 let harnessRecursiveEvolutionEvidenceRows = null;
 let harnessAutonomyDashboardStatus = null;
 let harnessAutonomyDashboardRows = null;
+let harnessAutonomyLoopRow = null;
 const harnessLocalMetaStatus = $('#harness-local-meta-status');
 const harnessLocalMetaCandidates = $('#harness-local-meta-candidates');
 const harnessLocalMetaCell = $('#harness-local-meta-cell');
@@ -1005,6 +1015,14 @@ function handleHarnessEvent(event) {
     event.summary = event.summary || `model council report: ${event.modelDiversity?.uniqueModelProfiles || 0} model profiles`;
   }
 
+  if (event.type === 'icr.lane_completed') {
+    event.summary = formatIcrLaneEvent(event);
+  }
+  if (event.type === 'recursive_evolution.coordinated') {
+    event.summary = formatRecursiveEvolutionCoordinatedEvent(event);
+  }
+  updateAutonomyLoopFromEvent(event);
+
   updateHarnessSubagent(event);
   pruneHarnessSubagents();
   updateHarnessVerifierEvolution(event);
@@ -1028,6 +1046,145 @@ function handleHarnessEvent(event) {
   }
 
   scheduleHarnessRender();
+}
+
+function asHarnessEventArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function replayDeltaFromReport(report = {}) {
+  const delta = report.aggregateDelta ?? report.scoreDelta ?? report.delta;
+  const numeric = Number(delta);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function latestReplayDeltaFromPayload(payload = {}) {
+  const coordinatedReports = asHarnessEventArray(payload.coordinated?.replayReports);
+  const coordinatedDelta = coordinatedReports.map(replayDeltaFromReport).filter((value) => value !== null).at(-1);
+  if (coordinatedDelta !== undefined && coordinatedDelta !== null) return coordinatedDelta;
+
+  const ranEntries = asHarnessEventArray(payload.ran);
+  const ranDelta = ranEntries.map((entry) => replayDeltaFromReport(entry.report || entry)).filter((value) => value !== null).at(-1);
+  return ranDelta ?? null;
+}
+
+function formatReplayDelta(delta) {
+  if (delta === null || delta === undefined) return 'n/a';
+  const numeric = Number(delta);
+  if (!Number.isFinite(numeric)) return 'n/a';
+  const prefix = numeric > 0 ? '+' : '';
+  return `${prefix}${numeric.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`;
+}
+
+function policyVersionLabel(value) {
+  if (value === undefined || value === null || value === '') return 'n/a';
+  if (typeof value === 'object') {
+    return value.schemaVersion ?? value.updatedAt ?? value.version ?? 'n/a';
+  }
+  const text = String(value);
+  return text.split('/').pop() || text;
+}
+
+function formatIcrLaneEvent(event = {}) {
+  const raw = event.summary;
+  if (typeof raw === 'string') return raw;
+  const summary = raw && typeof raw === 'object' ? raw : {};
+  const branchCount = summary.branchCount ?? '?';
+  const costGate = summary.costGateStatus || 'unknown';
+  const parts = [`ICR lane: ${branchCount} branches`, `cost gate ${costGate}`];
+  if (summary.rhoUpliftHeadline) {
+    parts.push(`rho uplift ${summary.rhoUpliftHeadline}`);
+  }
+  if (summary.finalCandidateId) {
+    parts.push(`candidate ${compactText(summary.finalCandidateId, summary.finalCandidateId)}`);
+  } else if (summary.candidateFamilyId) {
+    parts.push(`family ${compactText(summary.candidateFamilyId, summary.candidateFamilyId)}`);
+  }
+  return parts.join(' | ');
+}
+
+function formatRecursiveEvolutionCoordinatedEvent(event = {}) {
+  const coordinated = event.coordinated || {};
+  const sources = asHarnessEventArray(coordinated.sources).map((source) => String(source || '').trim()).filter(Boolean);
+  if (harnessState.autonomyLoop.icrRan && !sources.includes('icr')) {
+    sources.push('icr');
+  }
+  if (!sources.length) {
+    return event.coordinated == null
+      ? 'recursive evolution coordinated (none) | replay, campaign, icr pending'
+      : 'recursive evolution coordinated (none) | replay, campaign, icr';
+  }
+  const ordered = ['replay', 'campaign', 'icr', 'promotion_loop']
+    .filter((key) => sources.includes(key))
+    .concat(sources.filter((key) => !['replay', 'campaign', 'icr', 'promotion_loop'].includes(key)));
+  return `recursive evolution coordinated (${ordered.join(', ')}) | sources: replay, campaign, icr`;
+}
+
+function updateAutonomyLoopFromEvent(event = {}) {
+  const loop = harnessState.autonomyLoop;
+  if (event.type === 'icr.lane_completed') {
+    loop.icrRan = true;
+  }
+  if (event.type === 'replay.cycle_completed') {
+    const delta = latestReplayDeltaFromPayload(event);
+    if (delta !== null) loop.lastReplayDelta = delta;
+    const regressions = asHarnessEventArray(event.ran)
+      .flatMap((entry) => asHarnessEventArray(entry.report?.regressions));
+    if (regressions.length) {
+      loop.regressionCount = (loop.regressionCount || 0) + regressions.length;
+    }
+  }
+  if (event.type === 'recursive_evolution.coordinated') {
+    loop.sources = asHarnessEventArray(event.coordinated?.sources);
+    if (loop.icrRan && !loop.sources.includes('icr')) {
+      loop.sources = [...loop.sources, 'icr'];
+    }
+    const delta = latestReplayDeltaFromPayload(event);
+    if (delta !== null) loop.lastReplayDelta = delta;
+    const regressions = asHarnessEventArray(event.coordinated?.replayReports)
+      .flatMap((report) => asHarnessEventArray(report.regressions));
+    if (regressions.length) {
+      loop.regressionCount = regressions.length;
+    }
+  }
+  if (event.type === 'partial_autonomy.applied') {
+    loop.shadowPolicyVersion = policyVersionLabel(
+      event.shadowPolicyVersion ?? event.shadowPolicy ?? event.shadowPolicyPath ?? loop.shadowPolicyVersion,
+    );
+    loop.livePolicyVersion = policyVersionLabel(
+      event.livePolicyVersion ?? event.livePolicy ?? event.livePolicyPath ?? loop.livePolicyVersion,
+    );
+    const level = event.autonomyLevel ?? event.level ?? event.partialAutonomy?.level;
+    if (level !== undefined && level !== null) loop.autonomyLevel = level;
+  }
+}
+
+function renderAutonomyLoopStatus() {
+  ensureAutonomyDashboardPanel();
+  if (!harnessAutonomyLoopRow) return;
+
+  const loop = harnessState.autonomyLoop || {};
+  const accumulator = harnessState.autonomyDashboard?.accumulator || {};
+  const regressionCount = loop.regressionCount ?? accumulator.regressionCount ?? 0;
+  const autonomyLevel = loop.autonomyLevel ?? accumulator.autonomyLevel ?? accumulator.level ?? 0;
+  const lastReplayDelta = formatReplayDelta(
+    loop.lastReplayDelta ?? accumulator.lastReplayDelta ?? accumulator.latestImprovementDelta,
+  );
+  const livePolicyVersion = policyVersionLabel(loop.livePolicyVersion ?? accumulator.livePolicyVersion);
+  const shadowPolicyVersion = policyVersionLabel(loop.shadowPolicyVersion ?? accumulator.shadowPolicyVersion);
+  const sources = asHarnessEventArray(loop.sources);
+  const sourceSummary = sources.length
+    ? sources.join(', ')
+    : (loop.icrRan ? 'icr' : 'replay, campaign, icr pending');
+
+  harnessAutonomyLoopRow.innerHTML = `
+    <div>
+      <strong>Autonomy loop</strong>
+      <span>delta ${esc(lastReplayDelta)} | level ${esc(String(autonomyLevel))} | regressions ${esc(String(regressionCount))}</span>
+    </div>
+    <span>live ${esc(String(livePolicyVersion))} | shadow ${esc(String(shadowPolicyVersion))} | sources ${esc(sourceSummary)}</span>
+  `;
 }
 
 function updateHarnessPolicyEvolution(event) {
@@ -1623,6 +1780,7 @@ function renderHarnessPanel() {
   renderCapabilityGoalRows();
   renderHarnessHierarchyFeedback();
   renderHarnessTraces();
+  renderAutonomyLoopStatus();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
       <div class="harness-event-main">
@@ -1958,11 +2116,13 @@ function ensureAutonomyDashboardPanel() {
       <button id="btn-harness-autonomy-dashboard-refresh" class="harness-btn" type="button">Refresh</button>
     </div>
     <div id="harness-autonomy-dashboard-status" class="harness-muted-line">No autonomy evidence loaded</div>
+    <div id="harness-autonomy-loop-row" class="harness-list-row harness-autonomy-loop-row"></div>
     <div id="harness-autonomy-dashboard-rows" class="harness-list compact"></div>
   `;
   anchor.insertAdjacentElement('afterend', section);
   harnessAutonomyDashboardStatus = $('#harness-autonomy-dashboard-status');
   harnessAutonomyDashboardRows = $('#harness-autonomy-dashboard-rows');
+  harnessAutonomyLoopRow = $('#harness-autonomy-loop-row');
   $('#btn-harness-autonomy-dashboard-refresh')?.addEventListener('click', requestAutonomyDashboard);
 }
 
@@ -1996,6 +2156,7 @@ function syncAutonomyDashboardFromState() {
     accumulator: extractAutonomyAccumulatorState(autonomyRollback, backgroundEvolution),
   };
   renderAutonomyDashboard();
+  renderAutonomyLoopStatus();
 }
 
 function renderAutonomyDashboard() {
