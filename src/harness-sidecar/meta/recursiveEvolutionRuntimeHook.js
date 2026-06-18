@@ -12,6 +12,8 @@ import { runProductionReportCycle } from './productionReportOrchestrator.js';
 import { runA2aPeerCycle } from '../interop/a2aPeerCycleRunner.js';
 import { runPostTaskIcrHooks } from '../icr/icrPostTaskHook.js';
 import { createDeterministicIcrRunners } from '../icr/icrRuntimeCoordinator.js';
+import { runAutonomyRollbackDrill } from './autonomyRollbackRunner.js';
+import { runPostTaskAutonomyApply } from './postTaskAutonomyApply.js';
 import {
   createReplayEvidenceStore,
   runPostTaskEvolutionOrchestrator,
@@ -20,6 +22,22 @@ import {
 function asArray(value) {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
+}
+
+function collectReplayReports(replay) {
+  return asArray(replay?.ran).map((entry) => entry.report).filter(Boolean);
+}
+
+function replayResultsHaveRegression(replay) {
+  return asArray(replay?.ran).some((entry) => {
+    const report = entry?.report;
+    if (!report) return false;
+    return asArray(report.regressions).length > 0 || report.rollbackDrillRequired === true;
+  });
+}
+
+function isBackgroundEvolutionTask(task = {}) {
+  return task.source === 'background' || task.taskId === 'background-evolution';
 }
 
 function productionGateEnabled(harnessConfig = {}, gateName) {
@@ -154,6 +172,8 @@ export async function runPostTaskRecursiveEvolutionHooks({
     campaigns: null,
     coordinated: null,
     autonomy: null,
+    autonomyApply: null,
+    regressionRollback: null,
     productionReports: null,
     a2aPeerCycle: null,
     icr: null,
@@ -197,6 +217,8 @@ export async function runPostTaskRecursiveEvolutionHooks({
   results.campaigns = evolutionResults.campaigns;
   results.coordinated = evolutionResults.coordinated;
 
+  const replayReports = collectReplayReports(evolutionResults.replay);
+
   let autonomyState = {};
   if (rollbackDrill) {
       autonomyState = accumulateAutonomyEvidence({
@@ -218,6 +240,44 @@ export async function runPostTaskRecursiveEvolutionHooks({
       dashboardSnapshot: entry.snapshot,
     });
   }
+
+  if (replayResultsHaveRegression(evolutionResults.replay)) {
+    const latestReport = replayReports[replayReports.length - 1];
+    const policyVersion = latestReport?.reportId || `regression-${task.taskId || 'unknown'}`;
+    try {
+      results.regressionRollback = await runAutonomyRollbackDrill({
+        workspaceRoot,
+        policyVersion,
+        emitEvent,
+      });
+      autonomyState = accumulateAutonomyEvidence({
+        existing: autonomyState,
+        rollbackDrill: {
+          ...results.regressionRollback,
+          status: results.regressionRollback.status
+            || (results.regressionRollback.restoreVerified === false ? 'failed' : 'passed'),
+        },
+      });
+    } catch (error) {
+      results.regressionRollback = {
+        status: 'failed',
+        reason: error.message,
+        evidenceOnly: true,
+        canPromote: false,
+      };
+    }
+  }
+
+  if (!isBackgroundEvolutionTask(task)) {
+    results.autonomyApply = await runPostTaskAutonomyApply({
+      workspaceRoot,
+      harnessConfig,
+      replayReports,
+      autonomyState,
+      emitEvent,
+    });
+  }
+
   results.autonomy = autonomyState;
 
   results.productionReports = await runProductionReportCycle({

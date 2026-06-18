@@ -17,6 +17,7 @@ const DEFAULT_EVOLUTION = {
   campaignMaxCycles: 3,
   persistFrontier: true,
   requireSwarmEndpoint: true,
+  feedbackToChat: true,
 };
 
 test('buildDefaultEvolutionConfig returns workplace evolution defaults', () => {
@@ -32,6 +33,7 @@ test('formatEvolutionYamlSection emits evolution block with defaults', () => {
   assert.match(yaml, /campaignMaxCycles: 3/);
   assert.match(yaml, /persistFrontier: true/);
   assert.match(yaml, /requireSwarmEndpoint: true/);
+  assert.match(yaml, /feedbackToChat: true/);
 });
 
 test('formatEvolutionYamlSection applies overrides without dropping other defaults', () => {

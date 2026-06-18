@@ -3,11 +3,10 @@ import path from 'node:path';
 
 import {
   accumulateAutonomyEvidence,
-  evaluateAutonomyEvidenceThresholds,
 } from './autonomyEvidenceAccumulator.js';
 import { buildOperatorDashboardSnapshot } from './operatorDashboardStore.js';
 import { persistAutonomyProofArtifacts } from './autonomyProofRecorder.js';
-import { applyPartialAutonomousImprovements } from './partialAutonomyApply.js';
+import { runAutonomyApplyOrchestrator } from './postTaskAutonomyApply.js';
 import { writeBackgroundTickRecord } from './frontierPersistence.js';
 import { runPostTaskRecursiveEvolutionHooks } from './recursiveEvolutionRuntimeHook.js';
 
@@ -29,14 +28,6 @@ export function backgroundEvolutionEnabled(harnessConfig = {}) {
   const cap = harnessConfig.productionCapabilities?.backgroundEvolution;
   if (cap?.enabled === true || cap === true) return true;
   return harnessConfig.features?.backgroundEvolution === true;
-}
-
-function defaultPartialAutonomyThresholds(harnessConfig = {}) {
-  return {
-    minDashboardDepth: 1,
-    maxRegressionCount: 0,
-    ...(harnessConfig.partialAutonomy?.thresholds || {}),
-  };
 }
 
 async function loadAutonomyEvidenceState(workspaceRoot) {
@@ -100,23 +91,16 @@ export async function runBackgroundEvolutionTick({
     });
   }
 
-  const thresholdEval = evaluateAutonomyEvidenceThresholds({
-    state: autonomyState,
-    thresholds: defaultPartialAutonomyThresholds(harnessConfig),
+  const replayReports = asArray(hookResults.replay?.ran).map((entry) => entry.report).filter(Boolean);
+  const autonomyApply = await runAutonomyApplyOrchestrator({
+    workspaceRoot,
+    harnessConfig,
+    replayReports,
+    autonomyState,
+    emitEvent,
+    now,
   });
-
-  let partialApply = null;
-  if (thresholdEval.eligible) {
-    const replayReports = asArray(hookResults.replay?.ran).map((entry) => entry.report).filter(Boolean);
-    partialApply = await applyPartialAutonomousImprovements({
-      workspaceRoot,
-      harnessConfig,
-      autonomyState,
-      replayReports,
-      emitEvent,
-      now,
-    });
-  }
+  const partialApply = autonomyApply.partialApply;
 
   await persistAutonomyEvidenceState(workspaceRoot, autonomyState);
   await persistAutonomyProofArtifacts({

@@ -165,6 +165,7 @@ export const DEFAULT_HARNESS_CONFIG = {
   },
   partialAutonomy: {
     enabled: false,
+    maxLevel: 2,
     thresholds: {
       minReplayCycles: 3,
       minRollbackDrills: 1,

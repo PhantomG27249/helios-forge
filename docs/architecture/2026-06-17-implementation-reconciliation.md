@@ -151,6 +151,19 @@ Integration worker landed **G0–G6** from `2026-06-18-meta-harness-evolution-wi
 
 Remaining: repeated production proof at scale, operator `models.swarmBaseUrl` configuration, promotion loop closure in `coordinateRecursiveEvolution`.
 
+### Addendum — 2026-06-19 autonomous self-improvement closed loop
+
+Integration worker wired **G0–G7** from `2026-06-19-autonomous-self-improvement-loop-parallel-subagents.md`:
+
+- **G0–G1:** `wrapPostTaskEvolution` guards every full task (`prompt_background` included); `recursive_evolution.coordinated` always emitted.
+- **G2:** `loadRuntimePolicy` + `applyRuntimePolicyToHarnessConfig` at task start (immutable config merge; no `src/` writes).
+- **G3:** `bridgeReplayFeedback` injects replay delta/regression warnings into next Pi prompt when `evolution.feedbackToChat` is enabled.
+- **G4:** `runPostTaskAutonomyApply` on post-task path; background worker delegates to `runAutonomyApplyOrchestrator`.
+- **G6:** Regression on replay triggers `runAutonomyRollbackDrill` before L3 apply.
+- Defaults: `partialAutonomy.maxLevel: 2`, `evolution.feedbackToChat: true`.
+
+Remaining: optional manual smoke on a configured workplace with real held-out commands; L4 promotion loop closure.
+
 ---
 
 ## Test Evidence

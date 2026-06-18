@@ -14,6 +14,6 @@ test('chat input supports pasted clipboard images through the existing preview f
 test('frontend asset version changes when paste support changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250626/);
-  assert.match(html, /app\.js\?v=20250626/);
+  assert.match(html, /app\.css\?v=20250627/);
+  assert.match(html, /app\.js\?v=20250627/);
 });

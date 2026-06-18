@@ -74,6 +74,9 @@ import {
   buildGovernanceTrustInput,
   runPostTaskRecursiveEvolutionHooks,
 } from './meta/recursiveEvolutionRuntimeHook.js';
+import { wrapPostTaskEvolution } from './meta/postTaskHookGuard.js';
+import { applyRuntimePolicyToHarnessConfig } from './meta/runtimePolicyConsumer.js';
+import { loadRuntimePolicy } from './meta/runtimePolicyStore.js';
 import { composeGraphRagContext } from './rag/graphRagComposer.js';
 import { composeUnifiedContext } from './rag/unifiedContextComposer.js';
 import { buildRhoCoreset } from './rho/coresetBuilder.js';
@@ -639,7 +642,9 @@ export function createHarnessSidecar({
     patchArtifact,
     budgetManager,
     harnessConfig,
+    emitEvent: emitEventOverride,
   }) {
+    const activeEmitEvent = emitEventOverride || emitEvent;
     async function createRuntimeSwarmModelGateway() {
       const enabled = harnessConfig?.features?.modelDrivenSwarm === true
         || process.env.HELIOS_SWARM_MODEL_DRIVEN === '1';
@@ -2507,45 +2512,18 @@ export function createHarnessSidecar({
       ...(attempt.evolutionOutput?.memoryProposals || []),
       ...(attempt.localMeta?.candidates || []).flatMap((candidate) => candidate.memoryProposals || []),
     ]);
-    let recursiveCoordinatedEmitted = false;
-    const evolutionEmitEvent = async (event) => {
-      if (event?.type === 'recursive_evolution.coordinated') {
-        recursiveCoordinatedEmitted = true;
-      }
-      return emitEvent(event);
-    };
-    try {
-      await runPostTaskRecursiveEvolutionHooks({
-        workspaceRoot: resolvedWorkspaceRoot,
-        harnessConfig,
-        task,
-        memoryProposals: swarmMemoryProposals,
-        rollbackDrill: {
-          candidateId: champion?.attemptId || task.taskId,
-          restoreVerified: true,
-          reversible: true,
-        },
-        emitEvent: evolutionEmitEvent,
-      });
-    } catch (error) {
-      await emitEvent({
-        type: 'recursive_evolution.failed',
-        taskId: task.taskId,
-        reason: error.message,
-        evidenceOnly: true,
-        canPromote: false,
-      });
-    } finally {
-      if (!recursiveCoordinatedEmitted) {
-        await emitEvent({
-          type: 'recursive_evolution.coordinated',
-          taskId: task.taskId,
-          coordinated: null,
-          evidenceOnly: true,
-          canPromote: false,
-        });
-      }
-    }
+    await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot: resolvedWorkspaceRoot,
+      harnessConfig,
+      task,
+      memoryProposals: swarmMemoryProposals,
+      rollbackDrill: {
+        candidateId: champion?.attemptId || task.taskId,
+        restoreVerified: true,
+        reversible: true,
+      },
+      emitEvent: activeEmitEvent,
+    });
   }
 
   async function createTask(body) {
@@ -2589,7 +2567,14 @@ export function createHarnessSidecar({
       },
       emitEvent,
     });
-    const harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+    let harnessConfig = await loadHarnessConfig({ workspaceRoot: resolvedWorkspaceRoot });
+    try {
+      const runtimePolicy = await loadRuntimePolicy({ workspaceRoot: resolvedWorkspaceRoot });
+      const policyResult = applyRuntimePolicyToHarnessConfig(harnessConfig, runtimePolicy);
+      harnessConfig = policyResult.harnessConfig;
+    } catch {
+      // advisory-only — proceed with base harness config when policy load fails
+    }
     const autonomousToolLoopEnabled = task.mode !== 'mvp' && (
       harnessConfig?.features?.autonomousToolLoop === true
       || process.env.HELIOS_AUTONOMOUS_TOOL_LOOP === '1'
@@ -2770,14 +2755,19 @@ export function createHarnessSidecar({
       artifacts: [patchArtifact],
     });
     if (task.mode !== 'mvp') {
-      await runFullRuntimeSubsystems({
+      await wrapPostTaskEvolution({
         task,
-        subgoals,
-        workspaceIndex,
-        contextPack,
-        patchArtifact,
-        budgetManager,
-        harnessConfig,
+        emitEvent,
+        runHooks: ({ emitEvent: trackedEmitEvent }) => runFullRuntimeSubsystems({
+          task,
+          subgoals,
+          workspaceIndex,
+          contextPack,
+          patchArtifact,
+          budgetManager,
+          harnessConfig,
+          emitEvent: trackedEmitEvent,
+        }),
       });
     }
     await emitEvent({

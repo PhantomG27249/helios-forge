@@ -25,6 +25,7 @@ export function buildDefaultEvolutionConfig() {
     campaignMaxCycles: 3,
     persistFrontier: true,
     requireSwarmEndpoint: true,
+    feedbackToChat: true,
   };
 }
 

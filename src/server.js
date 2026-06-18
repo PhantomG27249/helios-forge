@@ -11,6 +11,7 @@ import { createServer } from 'http';
 import os from 'os';
 import { HarnessClient } from './harness/harnessClient.js';
 import { applyHarnessFeedbackToPrompt, createHarnessFeedbackBuffer } from './harness/harnessFeedbackContext.js';
+import { bridgeReplayFeedback } from './harness-sidecar/meta/replayFeedbackBridge.js';
 import {
   buildHeliosChatContext,
   ensurePiWorkplaceBridge,
@@ -407,9 +408,21 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         const opts = {};
         if (msg.streamingBehavior) opts.streamingBehavior = msg.streamingBehavior;
         if (msg.images?.length) opts.images = normalizePromptImages(msg.images);
+        let replayFeedback = null;
+        if (msg.useHarnessFeedback !== false) {
+          try {
+            const { config: harnessConfig } = await getHarnessConfig(pi.cwd);
+            if (harnessConfig?.evolution?.feedbackToChat !== false) {
+              replayFeedback = await bridgeReplayFeedback({ workspaceRoot: pi.cwd });
+            }
+          } catch {
+            // advisory-only — skip replay bridge when workplace config is unavailable
+          }
+        }
         let message = applyHarnessFeedbackToPrompt({
           message: msg.message,
           feedback,
+          replayFeedback,
           enabled: msg.useHarnessFeedback !== false,
         });
         const heliosContext = await buildHeliosChatContext(pi.cwd);
