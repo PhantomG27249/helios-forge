@@ -1,4 +1,4 @@
-const HIGH_SIGNAL_EVENT_TYPES = new Set([
+export const HIGH_SIGNAL_EVENT_TYPES = new Set([
   'bes.recombination_proposed',
   'capabilities.runtime_mounted',
   'graph.context_composed',
@@ -7,10 +7,36 @@ const HIGH_SIGNAL_EVENT_TYPES = new Set([
   'experiment.decision_written',
   'swarm.orchestration_completed',
   'verifier.finished',
+  'replay.cycle_completed',
+  'recursive_evolution.coordinated',
+  'partial_autonomy.applied',
 ]);
 
 function taskPrefix(event) {
   return event.taskId ? `${event.taskId} ` : '';
+}
+
+function asArray(value) {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function normalizeReplayFeedback(replayFeedback) {
+  if (!replayFeedback) return { items: [], regressionCount: 0 };
+  if (Array.isArray(replayFeedback)) {
+    return {
+      items: replayFeedback,
+      regressionCount: replayFeedback.reduce(
+        (max, item) => Math.max(max, Number(item?.regressionCount) || 0),
+        0,
+      ),
+    };
+  }
+  const items = asArray(replayFeedback.items);
+  const regressionCount = Number.isFinite(Number(replayFeedback.regressionCount))
+    ? Number(replayFeedback.regressionCount)
+    : items.reduce((max, item) => Math.max(max, Number(item?.regressionCount) || 0), 0);
+  return { items, regressionCount };
 }
 
 export function summarizeHarnessEvent(event = {}) {
@@ -36,6 +62,15 @@ export function summarizeHarnessEvent(event = {}) {
       return `${taskPrefix(event)}swarm champion ${event.archivedChampion?.attemptId || 'unknown'} is ready for approval`;
     case 'verifier.finished':
       return `${taskPrefix(event)}verifier finished with exit ${event.result?.exitCode ?? event.exitCode ?? 'unknown'}`;
+    case 'replay.cycle_completed': {
+      const ranCount = asArray(event.ran).length;
+      const skippedCount = asArray(event.skipped).length;
+      return `${taskPrefix(event)}replay cycle completed (ran ${ranCount}, skipped ${skippedCount})`;
+    }
+    case 'recursive_evolution.coordinated':
+      return `${taskPrefix(event)}recursive evolution coordinated`;
+    case 'partial_autonomy.applied':
+      return `${taskPrefix(event)}partial autonomy applied${event.replayReportId ? ` from replay ${event.replayReportId}` : ''}`;
     default:
       return '';
   }
@@ -73,15 +108,28 @@ export function createHarnessFeedbackBuffer({ maxItems = 8 } = {}) {
   };
 }
 
-export function applyHarnessFeedbackToPrompt({ message, feedback, enabled = true } = {}) {
-  if (!enabled || !feedback) return message;
-  const items = feedback.drain();
+export function applyHarnessFeedbackToPrompt({
+  message,
+  feedback,
+  replayFeedback,
+  enabled = true,
+} = {}) {
+  if (!enabled) return message;
+  if (!feedback && !replayFeedback) return message;
+
+  const bufferItems = typeof feedback?.drain === 'function' ? feedback.drain() : [];
+  const { items: replayItems, regressionCount } = normalizeReplayFeedback(replayFeedback);
+  const items = [...bufferItems, ...replayItems];
   if (!items.length) return message;
 
-  const context = items.map((item) => `- ${item.summary}`).join('\n');
+  const contextLines = items.map((item) => `- ${item.summary}`);
+  if (regressionCount > 0 && !contextLines.some((line) => /regression warning/i.test(line))) {
+    contextLines.push(`- regression warning: ${regressionCount} replay regression(s) require review`);
+  }
+
   return [
     '[Helios Harness Context]',
-    context,
+    contextLines.join('\n'),
     '[/Helios Harness Context]',
     '',
     'User request:',
