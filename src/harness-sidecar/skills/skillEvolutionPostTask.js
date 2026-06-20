@@ -1,9 +1,11 @@
 import { listTraces, readTrace } from '../core/traceReader.js';
 import { buildRhoCoreset } from '../rho/coresetBuilder.js';
 import { mineSkillNeedsFromRho } from './skillNeedMiner.js';
-import { generateSkillCandidates } from './skillEvolution.js';
+import { generateSkillCandidates, runSkillCandidateBesLane } from './skillEvolution.js';
 import { evaluateSkillCandidate } from './skillCandidateEvaluator.js';
 import { writeSkillCandidate } from './skillCandidateStore.js';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { buildSkillEvolutionSearchContext } from './skillEvolutionScheduler.js';
 
 const DEFAULT_TRACE_LIMIT = 8;
@@ -152,6 +154,36 @@ export async function runSkillEvolutionPostTask({
         path: saved.skill?.path || null,
       });
       allCandidates.push(generated);
+
+      if (harnessConfig?.skillEvolution?.besLane !== false) {
+        try {
+          const besLane = await (deps.runSkillCandidateBesLane || runSkillCandidateBesLane)({
+            taskId: task.taskId || 'skill_evolution_post_task',
+            skillNeed,
+            count: 1,
+            now: nowFn,
+          });
+          const candidatePath = path.join(
+            path.resolve(workspaceRoot),
+            '.harness',
+            'meta',
+            'skill-candidates',
+            saved.candidateId,
+            'candidate.json',
+          );
+          const existing = JSON.parse(await readFile(candidatePath, 'utf8'));
+          await writeFile(candidatePath, `${JSON.stringify({
+            ...existing,
+            besLane: {
+              evidence: besLane,
+              evidenceOnly: true,
+              canPromote: false,
+            },
+          }, null, 2)}\n`, 'utf8');
+        } catch {
+          // BES lane evidence is advisory-only; post-task must not fail on lane errors.
+        }
+      }
     }
   }
 

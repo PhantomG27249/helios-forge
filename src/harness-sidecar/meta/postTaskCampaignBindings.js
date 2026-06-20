@@ -205,14 +205,28 @@ export function createPostTaskCampaignBindings({
     evaluator: async ({ replayReport } = {}) => {
       const report = replayReport || latestReplay || replayMetrics?.report || null;
       const quality = Number(report?.aggregateScore ?? report?.metrics?.quality ?? replayMetrics?.quality);
+      const besAdvisoryScore = metricValue(quality, 0.5);
       return {
         metrics: {
-          quality: metricValue(quality, 0.5),
+          quality: besAdvisoryScore,
           safety: metricValue(report?.metrics?.safety, metricValue(replayMetrics?.safety, 0.85)),
           cost: metricValue(report?.metrics?.cost, metricValue(replayMetrics?.cost, 0.5)),
           latency: metricValue(report?.metrics?.latency, metricValue(replayMetrics?.latency, 0.5)),
         },
         replayReport: report,
+        evidence: {
+          bes: {
+            advisoryScore: besAdvisoryScore,
+            authority: 'evidence_only',
+            canPromote: false,
+          },
+          rho: {
+            reportId: report?.reportId || report?.replayId || null,
+            regressionCount: asArray(report?.regressions).length,
+            authority: 'evidence_only',
+            canPromote: false,
+          },
+        },
       };
     },
   };

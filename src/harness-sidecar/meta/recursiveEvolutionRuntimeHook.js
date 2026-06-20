@@ -14,6 +14,7 @@ import { runPostTaskIcrHooks } from '../icr/icrPostTaskHook.js';
 import { createDeterministicIcrRunners } from '../icr/icrRuntimeCoordinator.js';
 import { runAutonomyRollbackDrill } from './autonomyRollbackRunner.js';
 import { runPostTaskAutonomyApply } from './postTaskAutonomyApply.js';
+import { runPostTaskPromotionOrchestrator } from './postTaskPromotionOrchestrator.js';
 import { runPostTaskPromotionBridge } from './postTaskPromotionBridge.js';
 import { coordinateRecursiveEvolution } from './recursiveEvolutionCoordinator.js';
 import {
@@ -295,6 +296,12 @@ export async function runPostTaskRecursiveEvolutionHooks({
     autonomyState,
     replayReports,
     campaignResults: campaignReports,
+  });
+  results.promotionOrchestration = await runPostTaskPromotionOrchestrator({
+    workspaceRoot,
+    harnessConfig,
+    promotionBridgeResult: results.promotion,
+    replayReports,
   });
   results.coordinated = coordinateRecursiveEvolution({
     replayReports,
