@@ -162,7 +162,21 @@ Integration worker wired **G0–G7** from `2026-06-19-autonomous-self-improvemen
 - **G6:** Regression on replay triggers `runAutonomyRollbackDrill` before L3 apply.
 - Defaults: `partialAutonomy.maxLevel: 2`, `evolution.feedbackToChat: true`.
 
-Remaining: optional manual smoke on a configured workplace with real held-out commands; L4 promotion loop closure.
+Remaining: optional manual smoke on a configured workplace with real held-out commands; operator approval still required for durable apply.
+
+---
+
+## Addendum (2026-06-20): Full architecture leverage (L1–L5)
+
+| Gate | Status | Code anchors |
+| --- | --- | --- |
+| **L1** Pi unified context pack | **Wired** | `piBridgeContextPack.js`, `piWorkspaceBridge.js`, main chat prepend |
+| **L2** Pi extension v2 + telemetry | **Wired** | `helios-forge.ts`, `piBridgeTelemetry.js`, `piBridgeState.js` |
+| **L3** BES skill + promotion orchestration | **Wired (gated)** | `skillEvolutionPostTask.js` BES lane, `postTaskPromotionOrchestrator.js` |
+| **L4** MemGraphRAG + ICR in pack | **Wired when enabled** | `memoryBridgeContext.js`, `icrBridgeContext.js` |
+| **L5** Operator UI + full-evolution profile | **Wired** | `public/app.js` bridge/queue panels, `fullEvolutionProfile.js` |
+
+Promotion queue remains **evidence-only**; `canPromote: false` on all bridge-injected context. Production proof at scale is still operator configuration work (`docs/operator/full-evolution-config.example.yaml`).
 
 ---
 
