@@ -4109,8 +4109,8 @@ function finalizeStream() {
   if (!activeStream) return;
   const { el, contentEl, text, liveEl } = activeStream;
   const hasThinking = contentEl.querySelector('.thinking-block');
-  if (!text && !hasThinking && el) {
-    el.remove();
+  if (!text && !hasThinking && activeStream.el) {
+    activeStream.el.remove();
     activeStream = null;
     scheduleScroll();
     return;

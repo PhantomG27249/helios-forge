@@ -7,14 +7,16 @@ test('harness controls expose mode navigation and minimal tool dock', async () =
   const css = await readFile('public/app.css', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');
 
-  assert.match(html, /id="mode-nav" class="mode-nav"/);
+  assert.match(html, /id="mode-nav" class="session-nav"/);
   assert.match(html, /data-mode="research"/);
+  assert.match(html, /data-session-tab="swarm"/);
   assert.match(html, /data-mode="capabilities"/);
   assert.match(html, /data-mode="traces"/);
   assert.match(html, /<div class="topbar-actions bottom-left-tool-dock dock-minimal" aria-label="Workspace tools">/);
   assert.match(html, /id="btn-export"/);
   assert.match(html, /id="btn-stats"/);
   assert.doesNotMatch(html, /id="btn-deep-research"/);
+  assert.match(appJs, /function switchSessionTab/);
   assert.match(appJs, /function setAppMode/);
   assert.match(appJs, /activeAppMode/);
   const inputStart = html.indexOf('<div id="input-area">');
@@ -74,7 +76,7 @@ test('harness controls expose trace replay as a compact toolbar and tab surface'
   const serverJs = await readFile('src/server.js', 'utf8');
 
   assert.match(html, /data-mode="traces"/);
-  assert.match(html, /data-harness-tab="traces"/);
+  assert.match(html, /data-session-tab="traces"/);
   assert.match(html, /id="harness-trace-list"/);
   assert.match(html, /id="harness-trace-events"/);
   assert.match(html, /id="btn-harness-replay-next"/);
@@ -174,7 +176,7 @@ test('harness panel surfaces production evidence dashboards without apply contro
   assert.match(harnessClientJs, /\/v1\/evidence\/held-out-suites/);
 
   const productionEvidenceStart = html.indexOf('id="harness-production-evidence"');
-  const productionEvidenceEnd = html.indexOf('</section>', productionEvidenceStart);
+  const productionEvidenceEnd = html.indexOf('</details>', productionEvidenceStart);
   const productionEvidenceHtml = html.slice(productionEvidenceStart, productionEvidenceEnd);
   assert.doesNotMatch(productionEvidenceHtml, /apply|promote/i);
   assert.doesNotMatch(appJs, /harness_production_evidence_(?:apply|promote)/);
@@ -194,7 +196,8 @@ test('harness tools live in a persistent left side panel outside the chat feed',
 
   assert.match(css, /\.workspace-layout\s*\{/);
   assert.match(css, /\.chat-workspace\s*\{/);
-  assert.match(css, /\.workspace-layout\s*\{[^}]*grid-template-columns:\s*minmax\(\s*360px,\s*420px\)\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /\.workspace-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
+  assert.match(css, /#main\.harness-focus \.harness-panel/);
   assert.match(css, /#main:has\(\.harness-panel:not\(\.hidden\)\)\s*#input-area/);
   assert.match(css, /\.harness-panel\s*\{[^}]*overflow-y:\s*auto/s);
   assert.match(css, /@media \(max-width:\s*1180px\)[\s\S]*\.workspace-layout[\s\S]*grid-template-columns:\s*1fr/);
@@ -212,7 +215,7 @@ test('browser harness prompt routing recognizes installed slash commands safely'
 
 test('session sidebar uses safe data attributes for Pi session ids', async () => {
   const appJs = await readFile('public/app.js', 'utf8');
-  const renderItemStart = appJs.indexOf('function renderSessionItem(s)');
+  const renderItemStart = appJs.indexOf('function renderSessionItem(s');
   const renderItemEnd = appJs.indexOf('function togglePin(id)', renderItemStart);
   const renderPiStart = appJs.indexOf('function renderPiSessions(sessionFiles)');
   const renderPiEnd = appJs.indexOf('renderSessions();', renderPiStart);
@@ -227,7 +230,7 @@ test('session sidebar uses safe data attributes for Pi session ids', async () =>
   assert.doesNotMatch(renderItem, /onclick="selectSession/);
   assert.doesNotMatch(renderItem, /onclick="event\.stopPropagation\(\);togglePin/);
   assert.doesNotMatch(renderItem, /onclick="event\.stopPropagation\(\);deleteSession/);
-  assert.match(renderPiSessions, /const shortId = s\.id \|\| String\(s\.path \|\| ''\)\.split\('\/'\)\.pop\(\)\.split\('\\\\'\)\.pop\(\)\.replace\(\/\\\.jsonl\$\/i, ''\)/);
+  assert.match(renderPiSessions, /const shortId = s\.id \|\| pathBasename\(s\.path\)/);
   assert.match(renderPiSessions, /id: `pi_\$\{shortId\}`/);
   assert.doesNotMatch(renderPiSessions, /id: 'pi_' \+ s\.path/);
 });
@@ -280,7 +283,7 @@ test('harness panel exposes live subagent activity', async () => {
   const html = await readFile('public/index.html', 'utf8');
   const appJs = await readFile('public/app.js', 'utf8');
 
-  assert.match(html, /data-harness-tab="swarm"/);
+  assert.match(html, /data-session-tab="swarm"/);
   assert.match(html, /id="harness-subagents"/);
   assert.match(html, /id="harness-swarm-attempts"/);
   assert.match(html, /id="harness-swarm-attempt-detail"/);
@@ -424,9 +427,23 @@ test('settings modal exposes full harness config panels', async () => {
 test('frontend asset version changes when harness UI changes', async () => {
   const html = await readFile('public/index.html', 'utf8');
 
-  assert.match(html, /app\.css\?v=20250627/);
-  assert.match(html, /app\.js\?v=20250627/);
+  assert.match(html, /app\.css\?v=20250628/);
+  assert.match(html, /app\.js\?v=20250628/);
   assert.match(html, /harnessConfigUiSchema\.js\?v=20250627/);
+});
+
+test('deep research tab exposes composer, presets, and pipeline status', async () => {
+  const html = await readFile('public/index.html', 'utf8');
+  const appJs = await readFile('public/app.js', 'utf8');
+
+  assert.match(html, /id="harness-tab-deep-research"/);
+  assert.match(html, /id="harness-deep-task-input"/);
+  assert.match(html, /data-deep-preset="standard"/);
+  assert.match(html, /id="harness-deep-pipeline"/);
+  assert.match(html, /id="harness-deep-artifacts"/);
+  assert.match(appJs, /function renderDeepResearchPanel/);
+  assert.match(appJs, /mode: 'deep_research'/);
+  assert.match(appJs, /maxSources/);
 });
 
 test('harness panel renders autonomous self-improvement loop observability', async () => {
