@@ -28,6 +28,14 @@ import { normalizePromptImages } from './pi/normalizePromptImages.js';
 import { resolvePiCommand } from './pi/resolvePiCommand.js';
 import { selectWorkspaceFolder } from './workspace/workspacePicker.js';
 import {
+  buildSessionLinkIndex,
+  enrichSessionRecord,
+  formatSessionDisplayName,
+  parseSessionFileContent,
+  registerPendingParentSession,
+  repairAllWorkspaceSessionLinks,
+} from './sessionMetadata.js';
+import {
   applyConfigPreset,
   getHarnessConfig,
   initializeWorkplace,
@@ -172,29 +180,6 @@ const VENDOR_ROUTES = {
   '/vendor/katex/katex.min.css': join(ROOT, 'node_modules/katex/dist/katex.min.css'),
   '/vendor/katex/contrib/auto-render.min.js': join(ROOT, 'node_modules/katex/dist/contrib/auto-render.min.js'),
 };
-
-function formatSessionDisplayName({ sessionId, timestamp, rawName }) {
-  if (rawName && rawName !== 'Untitled') {
-    const text = String(rawName).replace(/\s+/g, ' ').trim();
-    const looksLikeSystemPrompt = /^(you are |# |system:|<\/?system)/i.test(text)
-      || text.length > 80
-      || text.includes('\n');
-    if (!looksLikeSystemPrompt) {
-      return text.length > 48 ? `${text.slice(0, 45)}…` : text;
-    }
-  }
-  if (timestamp) {
-    const parsed = new Date(timestamp);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toLocaleString(undefined, {
-        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      });
-    }
-    return timestamp.slice(0, 16).replace('T', ' ');
-  }
-  const shortId = String(sessionId || '').slice(0, 8);
-  return shortId ? `Session ${shortId}` : 'Untitled';
-}
 
 function serveFile(res, filePath) {
   if (!existsSync(filePath)) {
@@ -696,6 +681,14 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
       }
       case 'harness_task_start': {
         await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const workspaceRoot = msg.workspaceRoot || harness.manager.workspaceRoot || pi.cwd;
+        let parentSessionPath = null;
+        try {
+          const state = await pi.sendCommand({ type: 'get_state' });
+          parentSessionPath = state?.data?.sessionFile || null;
+        } catch {
+          // optional — subagent nesting falls back to heuristics
+        }
         const task = await harness.client.startTask({
           workspaceId: msg.workspaceId || 'local',
           task: msg.task || msg.message || '',
@@ -704,6 +697,9 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           source: msg.source || 'manual',
           profileId: msg.profileId || msg.capabilityProfileId || 'default',
         });
+        if (parentSessionPath && task?.taskId) {
+          registerPendingParentSession(workspaceRoot, task.taskId, parentSessionPath);
+        }
         ws.send(JSON.stringify({ type: 'harness_task_started', data: task }));
         break;
       }
@@ -905,65 +901,64 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
           } catch { /* ignore */ }
           
           const allSessions = [];
+          const workspaceRoots = new Set();
           for (const dir of dirs) {
             const dirPath = path.join(sessionsDir, dir);
             try {
               const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
               for (const file of files) {
                 const filePath = path.join(dirPath, file);
-                let sessionName = 'Untitled';
                 let sessionId = file.replace('.jsonl', '');
-                let timestamp = '';
-                let cwd = '';
-                
+                let parsed = {
+                  sessionId,
+                  timestamp: '',
+                  cwd: '',
+                  firstUserText: '',
+                  subagent: null,
+                  isSubagent: false,
+                };
+
                 try {
                   const fileContent = fs.readFileSync(filePath, 'utf-8');
-                  const lines = fileContent.split('\n').filter(l => l.trim());
-                  
-                  for (const line of lines) {
-                    try {
-                      const d = JSON.parse(line);
-                      if (d.type === 'session') {
-                        sessionId = d.id || sessionId;
-                        timestamp = d.timestamp || '';
-                        cwd = d.cwd || '';
-                      }
-                      if (d.type === 'message') {
-                        const msg = d.message || {};
-                        if (msg.role === 'user') {
-                          const c = msg.content;
-                          if (Array.isArray(c)) {
-                            for (const block of c) {
-                              if (block.type === 'text') {
-                                sessionName = block.text?.slice(0, 100) || 'Untitled';
-                                break;
-                              }
-                            }
-                          } else if (typeof c === 'string') {
-                            sessionName = c.slice(0, 100) || 'Untitled';
-                          }
-                          break; // Got the first user message
-                        }
-                      }
-                    } catch { /* skip unparseable lines */ }
-                  }
+                  parsed = { ...parsed, ...parseSessionFileContent(fileContent) };
+                  sessionId = parsed.sessionId || sessionId;
+                  if (parsed.cwd) workspaceRoots.add(parsed.cwd);
                 } catch { /* skip unreadable files */ }
-                
+
                 allSessions.push({
                   path: filePath,
                   id: sessionId,
-                  timestamp,
-                  name: formatSessionDisplayName({ sessionId, timestamp, rawName: sessionName }),
-                  cwd
+                  timestamp: parsed.timestamp,
+                  cwd: parsed.cwd,
+                  isSubagent: parsed.isSubagent,
+                  subagent: parsed.subagent,
+                  name: formatSessionDisplayName({
+                    sessionId,
+                    timestamp: parsed.timestamp,
+                    rawName: parsed.firstUserText || 'Untitled',
+                    subagent: parsed.subagent,
+                  }),
                 });
               }
             } catch { /* skip dir */ }
           }
+
+          const repairSummary = repairAllWorkspaceSessionLinks(allSessions);
+          const linkIndex = buildSessionLinkIndex([...workspaceRoots]);
+          const enrichedSessions = allSessions.map((session) =>
+            enrichSessionRecord(session, linkIndex, allSessions),
+          );
+
+          enrichedSessions.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
           
-          allSessions.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
-          
-          console.log('[Server] Sending session_files:', allSessions.length, 'sessions');
-          ws.send(JSON.stringify({ type: 'session_files', data: { sessions: allSessions.slice(0, 50) } }));
+          console.log('[Server] Sending session_files:', allSessions.length, 'sessions', repairSummary);
+          ws.send(JSON.stringify({
+            type: 'session_files',
+            data: {
+              sessions: enrichedSessions.slice(0, 50),
+              sessionLinksRepaired: repairSummary,
+            },
+          }));
           console.log('[Server] session_files sent');
         } catch (err) {
           console.error('[Server] Error in get_session_files:', err.message);

@@ -3,6 +3,7 @@ import { redactSecrets } from '../interop/agentCards.js';
 import { buildSwarmA2AEnvelope } from '../interop/a2aSwarmEnvelope.js';
 import { repairJsonObject } from '../model/structuredOutputRepair.js';
 import { normalizeCompactHandoff, scoreCompactHandoff } from './subagentRunner.js';
+import { registerSubagentSessionLink } from '../../sessionMetadata.js';
 import {
   normalizeEvolutionOutput,
   normalizeSwarmCellOutput,
@@ -591,6 +592,23 @@ export async function runPiNativeAttempt({
       a2a,
     });
     if (typeof worker.start === 'function') await worker.start();
+
+    let subagentSessionPath = null;
+    try {
+      const workerState = await worker.sendCommand({ type: 'get_state' });
+      subagentSessionPath = workerState?.data?.sessionFile || null;
+      if (subagentSessionPath) {
+        registerSubagentSessionLink({
+          workspaceRoot,
+          sessionPath: subagentSessionPath,
+          taskId,
+          attemptId,
+          role,
+        });
+      }
+    } catch {
+      // optional — parent nesting can still use timestamp heuristics
+    }
 
     emit(traceEvent({
       taskId,

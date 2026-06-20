@@ -7,11 +7,12 @@ files:
   - package.json
   - src/**/*
   - public/**/*
-  - scripts/setup-helios-forge.js
+  - scripts/**/*
 asarUnpack:
   - src/server.js
   - src/**/*
   - public/**/*
+  - scripts/**/*
 extraResources:
   - from: packages/helios-research-harness
     to: helios-research-harness

@@ -254,6 +254,76 @@ body {
   color: var(--text-primary);
 }
 
+.session-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.session-children {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-left: 10px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+}
+
+.session-children.collapsed {
+  display: none;
+}
+
+.session-item-child,
+.session-item-subagent {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.session-item-subagent .session-name {
+  font-weight: 400;
+}
+
+.session-children-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.session-children-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.session-group:has(.session-children:not(.collapsed)) .session-children-toggle svg {
+  transform: rotate(0deg);
+}
+
+.session-group:has(.session-children.collapsed) .session-children-toggle svg {
+  transform: rotate(-90deg);
+}
+
+.session-subagent-badge,
+.session-child-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
 .session-name {
   flex: 1;
   overflow: hidden;
@@ -586,6 +656,9 @@ body {
 .message {
   margin-bottom: 32px;
   animation: msgIn 250ms var(--ease-out) both;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+  contain: layout style paint;
 }
 
 @keyframes msgIn {
@@ -824,10 +897,16 @@ body {
 
 .tool-call.expanded .tool-result { display: block; }
 
+.stream-live {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tool-result pre {
   margin: 6px 0 0;
   max-height: 350px;
   overflow: auto;
+  content-visibility: auto;
   padding: 10px;
   background: var(--code-bg);
   border-radius: var(--radius-xs);

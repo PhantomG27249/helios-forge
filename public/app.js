@@ -20,8 +20,10 @@ let pendingToolCalls = new Map();
 let serverUrl = '';
 let currentSessionInfo = null;
 let uploadedImages = [];
-let savedThinkingBlocks = [];
 let workspacePath = ''; // Persist across text_start
+let scrollScheduled = false;
+const DEBUG_LOG_MAX = 400;
+const WS_DEBUG_SKIP = new Set(['message_update', 'tool_execution_update']);
 let currentSessionId = null;
 let autoHarnessEnabled = true;
 let lastBackgroundHarnessAt = 0;
@@ -33,6 +35,7 @@ const STORAGE_SERVER_URL = 'helios_server_url';
 const STORAGE_WORKSPACE_PATH = 'helios_workspace_path';
 const STORAGE_SMITHERY_KEY = 'helios_smithery_key';
 const STORAGE_PINNED_SESSIONS = 'helios_pinned_sessions';
+const STORAGE_SESSION_TITLES = 'helios_session_titles';
 const STORAGE_CONFIG_DRIFT_DISMISSED = 'helios_config_drift_dismissed';
 const LS_AUTO_HARNESS = 'helios_auto_harness';
 const KNOWN_MODEL_PROFILES = [
@@ -196,6 +199,7 @@ function debug(msg) {
   const entry = `[${new Date().toLocaleTimeString()}] ${msg}`;
   console.log(entry);
   debugLog.push(entry);
+  if (debugLog.length > DEBUG_LOG_MAX) debugLog.splice(0, debugLog.length - DEBUG_LOG_MAX);
   const el = document.getElementById('debug-log');
   if (el) { el.value = debugLog.join('\n'); el.scrollTop = el.scrollHeight; }
 }
@@ -390,6 +394,7 @@ const sidebarEl = $('#sidebar');
 const sidebarOverlay = $('#sidebar-overlay');
 const sidebarToggle = $('#btn-sidebar-toggle');
 let sessions = []; // Session list for sidebar
+const sessionCollapsedParents = new Set();
 const userStatus = $('#user-status');
 const statusChipConnection = $('#status-chip-connection');
 const statusChipSidecar = $('#status-chip-sidecar');
@@ -499,6 +504,20 @@ function syncWorkspaceInputs(path) {
   if (workspaceBreadcrumb) workspaceBreadcrumb.textContent = truncatePath(path);
   const settingsPathEl = document.getElementById('settings-workspace-path');
   if (settingsPathEl) settingsPathEl.value = path || '';
+  updateWelcomeWorkspace(path);
+}
+
+function updateWelcomeWorkspace(path = getSelectedWorkspacePath()) {
+  const welcome = messagesEl?.querySelector('.welcome');
+  if (!welcome) return;
+  const target = welcome.querySelector('.welcome-workspace');
+  if (!target) return;
+  const wsPath = String(path || '').trim();
+  if (wsPath) {
+    target.innerHTML = `Workplace: <code>${esc(wsPath)}</code>`;
+  } else {
+    target.textContent = 'Set your workplace path in the composer or connection dialog.';
+  }
 }
 
 function getSelectedWorkspacePath() {
@@ -617,7 +636,7 @@ function connect() {
     if (socket !== ws) return;
     try {
       const msg = JSON.parse(e.data);
-      debug(`WS: ${describeWsMessage(msg)}`);
+      if (!WS_DEBUG_SKIP.has(msg.type)) debug(`WS: ${describeWsMessage(msg)}`);
       handleMessage(msg);
     } catch (err) { debug(`WS: Parse error: ${err.message}`); }
   };
@@ -807,6 +826,10 @@ function handleMessage(msg) {
   }
   if (msg.type === 'session_files' && msg.data?.sessions) {
     if (typeof sessions === 'undefined') sessions = [];
+    const repaired = msg.data.sessionLinksRepaired;
+    if (repaired?.added > 0) {
+      toast(`Organized ${repaired.added} subagent chat${repaired.added === 1 ? '' : 's'} under parent sessions`, 'info');
+    }
     renderPiSessions(msg.data.sessions);
     return;
   }
@@ -944,7 +967,6 @@ function handleMessage(msg) {
     case 'turn_start': 
       activeStream = null; 
       activeThinking = null;
-      savedThinkingBlocks = [];
       setAssistantActivity({ phase: 'starting', detail: 'Turn started.' });
       break;
     case 'turn_end':
@@ -954,7 +976,7 @@ function handleMessage(msg) {
     case 'message_start':
       if (msg.message.role === 'assistant') {
         const el = createAssistantMsg();
-        activeStream = { el, contentEl: el.querySelector('.msg-content'), text: '' };
+        activeStream = { el, contentEl: el.querySelector('.msg-content'), text: '', textEl: null, liveEl: null };
         setAssistantActivity({ phase: 'writing', detail: 'Assistant message opened.' });
       }
       break;
@@ -3472,12 +3494,25 @@ function toggleThinkingTrace(button) {
   if (!block) return;
   const expanded = block.classList.toggle('expanded');
   button.setAttribute('aria-expanded', String(expanded));
+}
 
-  if (activeStream?.contentEl?.contains(block)) {
-    savedThinkingBlocks = Array.from(activeStream.contentEl.querySelectorAll('.thinking-block')).map(el => el.outerHTML);
-  } else if (activeThinking?.el === block && savedThinkingBlocks.length) {
-    savedThinkingBlocks[savedThinkingBlocks.length - 1] = block.outerHTML;
+function ensureStreamShell(contentEl) {
+  let liveEl = contentEl.querySelector('.stream-live');
+  if (!liveEl) {
+    liveEl = document.createElement('div');
+    liveEl.className = 'stream-live';
+    const textEl = document.createElement('span');
+    textEl.className = 'stream-text';
+    liveEl.appendChild(textEl);
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    liveEl.appendChild(cursor);
+    contentEl.appendChild(liveEl);
   }
+  return {
+    liveEl,
+    textEl: liveEl.querySelector('.stream-text'),
+  };
 }
 
 function handleMessageUpdate(msg) {
@@ -3488,8 +3523,9 @@ function handleMessageUpdate(msg) {
     case 'text_start':
       setAssistantActivity({ phase: 'writing', detail: 'Writing response.' });
       if (activeStream && !activeStream.text) {
-        // Don't clear thinking blocks - they're saved
-        activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + '<span class="cursor"></span>';
+        const shell = ensureStreamShell(activeStream.contentEl);
+        activeStream.textEl = shell.textEl;
+        activeStream.liveEl = shell.liveEl;
       }
       break;
     case 'text_delta':
@@ -3499,10 +3535,14 @@ function handleMessageUpdate(msg) {
         textChars: assistantActivity.textChars + String(ev.delta || '').length,
       });
       if (activeStream) {
+        if (!activeStream.textEl) {
+          const shell = ensureStreamShell(activeStream.contentEl);
+          activeStream.textEl = shell.textEl;
+          activeStream.liveEl = shell.liveEl;
+        }
         activeStream.text += ev.delta;
-        activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + renderMD(activeStream.text) + '<span class="cursor"></span>';
-        renderMath(activeStream.contentEl);
-        scroll();
+        activeStream.textEl.textContent = activeStream.text;
+        scheduleScroll();
       }
       break;
     case 'thinking_start': 
@@ -3517,26 +3557,23 @@ function handleMessageUpdate(msg) {
       });
       if (activeThinking) {
         activeThinking.text += ev.delta;
-        const preview = activeThinking.el.querySelector('.thinking-preview');
-        if (preview) preview.textContent = activeThinking.text.trim();
-        activeThinking.contentEl.innerHTML = renderMD(activeThinking.text) + '<div class="done-line"><span class="check">⟳</span> Thinking...</div>';
-        renderMath(activeThinking.contentEl);
-        // Update saved HTML
-        savedThinkingBlocks[savedThinkingBlocks.length - 1] = activeThinking.el.outerHTML;
-        scroll();
+        if (activeThinking.previewEl) {
+          activeThinking.previewEl.textContent = activeThinking.text.trim();
+        }
+        scheduleScroll();
       }
       break;
     case 'thinking_end':
       setAssistantActivity({ phase: 'writing', detail: 'Thinking trace complete.' });
       if (activeThinking) {
         activeThinking.el.classList.add('thinking-done');
-        const preview = activeThinking.el.querySelector('.thinking-preview');
-        if (preview) preview.textContent = activeThinking.text.trim();
+        if (activeThinking.previewEl) {
+          activeThinking.previewEl.textContent = activeThinking.text.trim();
+        }
         activeThinking.contentEl.innerHTML = renderMD(activeThinking.text) + '<div class="done-line"><span class="check">✓</span> Done</div>';
         renderMath(activeThinking.contentEl);
-        // Update saved HTML
-        savedThinkingBlocks[savedThinkingBlocks.length - 1] = activeThinking.el.outerHTML;
-        highlightCode();
+        highlightCode(activeThinking.contentEl);
+        activeThinking = null;
       }
       break;
     case 'done': finalizeStream(); break;
@@ -3545,19 +3582,25 @@ function handleMessageUpdate(msg) {
 
 function finalizeStream() {
   if (!activeStream) return;
-  if (!activeStream.text && !savedThinkingBlocks.length && activeStream.el) {
-    activeStream.el.remove();
+  const { el, contentEl, text, liveEl } = activeStream;
+  const hasThinking = contentEl.querySelector('.thinking-block');
+  if (!text && !hasThinking && el) {
+    el.remove();
     activeStream = null;
-    savedThinkingBlocks = [];
-    scroll();
+    scheduleScroll();
     return;
   }
-  activeStream.contentEl.innerHTML = savedThinkingBlocks.join('') + (activeStream.text ? renderMD(activeStream.text) : '');
-  renderMath(activeStream.contentEl);
-  highlightCode();
+  if (liveEl) liveEl.remove();
+  if (text) {
+    const rendered = document.createElement('div');
+    rendered.className = 'stream-final';
+    rendered.innerHTML = renderMD(text);
+    contentEl.appendChild(rendered);
+    renderMath(rendered);
+    highlightCode(rendered);
+  }
   activeStream = null;
-  savedThinkingBlocks = [];
-  scroll();
+  scheduleScroll();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3586,7 +3629,6 @@ function handleMessageEnd(msg) {
   if (error) {
     renderAssistantError(activeStream.contentEl, msg.message || msg);
     activeStream = null;
-    savedThinkingBlocks = [];
     setAssistantActivity({
       phase: 'error',
       detail: error,
@@ -3645,7 +3687,7 @@ function renderHistory(messages) {
         contentEl.appendChild(tel);
       });
 
-      highlightCode();
+      highlightCode(contentEl);
       renderMath(contentEl);
     } else if (msg.role === 'toolResult' && lastAssistant) {
       // Append tool result to last assistant message
@@ -3663,14 +3705,8 @@ function renderHistory(messages) {
     }
   });
 
-  highlightCode();
   // Force scroll to bottom for session restore
-  requestAnimationFrame(() => {
-    const chatContainer = document.getElementById('chat-container');
-    if (chatContainer) {
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-  });
+  requestAnimationFrame(() => scrollNow(true));
 }
 
 function createThinkingBlockStatic(text) {
@@ -3713,7 +3749,13 @@ function createToolElStatic(name, args, status) {
 }
 
 function updateSessionTitle(data) {
-  if (data?.sessionName) {
+  const path = data?.sessionFile;
+  const overrides = readSessionTitleOverrides();
+  if (path && overrides[path]) {
+    sessionTitle.textContent = overrides[path];
+    return;
+  }
+  if (data?.sessionName && !isGenericSessionTitle(data.sessionName)) {
     sessionTitle.textContent = data.sessionName;
   } else if (data?.sessionId) {
     sessionTitle.textContent = `Session ${data.sessionId.slice(0, 8)}`;
@@ -3830,9 +3872,7 @@ function createThinkingBlock() {
     <div class="thinking-content"></div>`;
   parent.appendChild(el);
   activeThinking = { el, contentEl: el.querySelector('.thinking-content'), previewEl: el.querySelector('.thinking-preview'), text: '' };
-  // Save the initial HTML
-  savedThinkingBlocks.push(el.outerHTML);
-  scroll();
+  scheduleScroll();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -3884,9 +3924,10 @@ function createUserMsg(text, images) {
   if (text) html += `<div class="msg-content">${renderMD(text)}</div>`;
   el.innerHTML = html;
   messagesEl.appendChild(el);
-  highlightCode();
-  if (el.querySelector('.msg-content')) renderMath(el.querySelector('.msg-content'));
-  scroll();
+  const content = el.querySelector('.msg-content');
+  if (content) highlightCode(content);
+  if (content) renderMath(content);
+  scheduleScroll();
 }
 
 function showWelcome() {
@@ -3953,9 +3994,10 @@ function renderMath(el) {
   } catch {}
 }
 
-function highlightCode() {
+function highlightCode(root = document) {
   if (typeof hljs === 'undefined') return;
-  document.querySelectorAll('.msg-content pre code').forEach(el => {
+  const scope = root instanceof Element ? root : document;
+  scope.querySelectorAll('pre code').forEach(el => {
     if (el.className.includes('hljs')) return;
     const text = el.textContent || '';
     let lang = '';
@@ -3985,17 +4027,27 @@ function escAttr(text) {
   return esc(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function scroll() {
+function scrollNow(force = false) {
+  const chatContainer = document.getElementById('chat-container');
+  if (!chatContainer) return;
+  const threshold = 120;
+  const nearBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < threshold;
+  if (force || nearBottom) {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+  }
+}
+
+function scheduleScroll(force = false) {
+  if (scrollScheduled) return;
+  scrollScheduled = true;
   requestAnimationFrame(() => {
-    const chatContainer = document.getElementById('chat-container');
-    if (chatContainer) {
-      const obs = new IntersectionObserver(entries => {
-        if (entries[0]?.isIntersecting) chatContainer.scrollTop = chatContainer.scrollHeight;
-      }, { root: chatContainer, threshold: 1 });
-      obs.observe(scrollSentinel);
-      setTimeout(() => obs.disconnect(), 100);
-    }
+    scrollScheduled = false;
+    scrollNow(force);
   });
+}
+
+function scroll(force = false) {
+  scheduleScroll(force);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -4169,6 +4221,7 @@ function sendMessage(mode = 'prompt') {
 
   if (mode === 'prompt' && !wasStreaming) {
     createUserMsg(text, uploadedImages.length ? [...uploadedImages] : null);
+    applyChatTitleFromPrompt(text);
   }
 
   if (harnessOnlyCommand) {
@@ -5205,6 +5258,8 @@ function commitInlineSessionRename() {
   sessionTitle.classList.remove('hidden');
   if (!name) return;
   sessionTitle.textContent = name;
+  const path = currentSessionInfo?.sessionFile;
+  if (path) saveSessionTitleOverride(path, name);
   const s = sessions.find(s => s.id === currentSessionId);
   if (s) { s.name = name; renderSessions(); }
 }
@@ -5398,6 +5453,128 @@ function toast(message, type = 'info') {
 // ═══════════════════════════════════════════════════════════
 // Sessions
 // ═══════════════════════════════════════════════════════════
+function readSessionTitleOverrides() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_SESSION_TITLES) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function saveSessionTitleOverride(path, title) {
+  if (!path || !title) return;
+  const overrides = readSessionTitleOverrides();
+  overrides[path] = title;
+  try { localStorage.setItem(STORAGE_SESSION_TITLES, JSON.stringify(overrides)); } catch {}
+}
+
+function truncateSessionTitle(text, max = 48) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!value) return '';
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function deriveChatTitle(text) {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned || cleaned === '[Image]') return '';
+  const firstLine = cleaned.split('\n')[0].trim();
+  if (/^(you are |# |system:|<\/?system)/i.test(firstLine)) {
+    const taskLine = cleaned.match(/^Task:\s*(.+)$/m)?.[1]?.trim();
+    return taskLine ? truncateSessionTitle(taskLine) : '';
+  }
+  const sentence = firstLine.match(/^.{1,100}?[.!?](?:\s|$)/)?.[0]?.trim() || firstLine;
+  return truncateSessionTitle(sentence);
+}
+
+function isGenericSessionTitle(name) {
+  return !name
+    || /^Session [a-f0-9]{6,}/i.test(name)
+    || /^[A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2}/.test(name)
+    || name === 'Untitled'
+    || name === 'Session';
+}
+
+function applyChatTitleFromPrompt(text) {
+  const title = deriveChatTitle(text);
+  if (!title) return;
+  const path = currentSessionInfo?.sessionFile;
+  const currentTitle = sessionTitle?.textContent?.trim() || '';
+  if (!path && isGenericSessionTitle(currentTitle)) {
+    sessionTitle.textContent = title;
+    return;
+  }
+  if (path) {
+    const overrides = readSessionTitleOverrides();
+    if (!overrides[path] && isGenericSessionTitle(currentTitle)) {
+      upsertCurrentSessionInSidebar(title);
+    }
+  }
+}
+
+function upsertCurrentSessionInSidebar(title) {
+  const path = currentSessionInfo?.sessionFile;
+  if (!path) {
+    if (sessionTitle) sessionTitle.textContent = title;
+    return;
+  }
+  saveSessionTitleOverride(path, title);
+  if (sessionTitle) sessionTitle.textContent = title;
+  let session = sessions.find((item) => item.path === path);
+  if (!session) {
+    const shortId = pathBasename(path);
+    session = {
+      id: `pi_${shortId}`,
+      name: title,
+      pinned: false,
+      path,
+    };
+    sessions.unshift(session);
+    currentSessionId = session.id;
+  } else {
+    session.name = title;
+    currentSessionId = session.id;
+  }
+  renderSessions();
+}
+
+function buildSessionTree(list) {
+  const normalized = list.map((session) => ({ ...session }));
+  const childrenByParent = new Map();
+
+  for (const session of normalized) {
+    if (!session.isSubagent || !session.parentSessionPath) continue;
+    const siblings = childrenByParent.get(session.parentSessionPath) || [];
+    siblings.push(session);
+    childrenByParent.set(session.parentSessionPath, siblings);
+  }
+
+  for (const children of childrenByParent.values()) {
+    children.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+  }
+
+  const childPaths = new Set();
+  for (const children of childrenByParent.values()) {
+    for (const child of children) childPaths.add(child.path);
+  }
+
+  const roots = normalized.filter((session) => !childPaths.has(session.path));
+  roots.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+  return { roots, childrenByParent };
+}
+
+function disambiguateSiblingNames(items) {
+  const seen = new Map();
+  return items.map((session) => {
+    const baseName = session.name;
+    const count = (seen.get(baseName) || 0) + 1;
+    seen.set(baseName, count);
+    if (count === 1) return session;
+    const shortId = String(session.id || pathBasename(session.path)).replace(/^pi_/, '').slice(0, 6);
+    return { ...session, name: `${baseName} · ${shortId}` };
+  });
+}
+
 function addSession(name) {
   if (!name) return;
   const existing = sessions.find(s => s.name === name);
@@ -5411,16 +5588,55 @@ function addSession(name) {
 
 function renderSessions() {
   const filtered = filterSessions(sessions);
-  pinnedList.innerHTML = filtered.filter(s => s.pinned).map(renderSessionItem).join('');
-  recentsList.innerHTML = filtered.filter(s => !s.pinned).map(renderSessionItem).join('');
+  const titleOverrides = readSessionTitleOverrides();
+  const decorated = filtered.map((session) => ({
+    ...session,
+    name: (session.path && titleOverrides[session.path]) || session.name,
+  }));
+  const pinned = decorated.filter(s => s.pinned);
+  const unpinned = decorated.filter(s => !s.pinned);
+  const { roots, childrenByParent } = buildSessionTree(unpinned);
+
+  pinnedList.innerHTML = disambiguateSiblingNames(pinned)
+    .map((session) => renderSessionNode(session, childrenByParent))
+    .join('');
+  recentsList.innerHTML = disambiguateSiblingNames(roots)
+    .map((session) => renderSessionNode(session, childrenByParent))
+    .join('');
   attachSessionEventListeners();
+}
+
+function renderSessionNode(session, childrenByParent, depth = 0) {
+  const children = session.path ? (childrenByParent.get(session.path) || []) : [];
+  const hasChildren = children.length > 0;
+  const expanded = !session.path || !sessionCollapsedParents.has(session.path);
+  const itemHtml = renderSessionItem(session, { depth, isChild: depth > 0, hasChildren, expanded, childCount: children.length });
+  if (!hasChildren) return itemHtml;
+
+  return `
+    <div class="session-group" data-parent-path="${escAttr(session.path || '')}">
+      ${itemHtml}
+      <div class="session-children ${expanded ? '' : 'collapsed'}">
+        ${disambiguateSiblingNames(children).map((child) => renderSessionItem(child, { depth: depth + 1, isChild: true })).join('')}
+      </div>
+    </div>`;
 }
 
 function attachSessionEventListeners() {
   document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
     el.addEventListener('click', (event) => {
-      if (event.target.closest('.session-action-btn')) return;
+      if (event.target.closest('.session-action-btn') || event.target.closest('.session-children-toggle')) return;
       selectSession(el.dataset.sessionId);
+    });
+  });
+  document.querySelectorAll('.session-children-toggle[data-parent-path]').forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const parentPath = button.dataset.parentPath;
+      if (!parentPath) return;
+      if (sessionCollapsedParents.has(parentPath)) sessionCollapsedParents.delete(parentPath);
+      else sessionCollapsedParents.add(parentPath);
+      renderSessions();
     });
   });
   document.querySelectorAll('.session-pin-btn[data-session-id]').forEach(button => {
@@ -5437,14 +5653,27 @@ function attachSessionEventListeners() {
   });
 }
 
-function renderSessionItem(s) {
+function renderSessionItem(s, { depth = 0, isChild = false, hasChildren = false, expanded = true, childCount = 0 } = {}) {
   const sessionId = escAttr(s.id);
   const countLabel = Number.isFinite(s.messageCount) && s.messageCount > 0
     ? `<span class="session-message-count">${s.messageCount}</span>`
     : '';
+  const childCountLabel = hasChildren && childCount > 0
+    ? `<span class="session-child-count" title="${childCount} subagent run${childCount === 1 ? '' : 's'}">${childCount}</span>`
+    : '';
+  const subagentBadge = s.isSubagent
+    ? `<span class="session-subagent-badge">${esc(s.subagentRole || 'agent')}</span>`
+    : '';
+  const toggle = hasChildren ? `
+    <button type="button" class="session-children-toggle" data-parent-path="${escAttr(s.path || '')}" aria-expanded="${expanded}" title="Toggle subagent runs">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>` : '';
   return `
-    <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" data-session-id="${sessionId}">
+    <div class="session-item ${s.id === currentSessionId ? 'active' : ''} ${isChild ? 'session-item-child' : ''} ${s.isSubagent ? 'session-item-subagent' : ''}" data-session-id="${sessionId}" style="--session-depth:${depth}">
+      ${toggle}
       <span class="session-name">${esc(s.name)}</span>
+      ${subagentBadge}
+      ${childCountLabel}
       ${countLabel}
       <div class="session-actions">
         <button class="session-action-btn session-pin-btn" title="${s.pinned ? 'Unpin' : 'Pin'}" data-session-id="${sessionId}">
@@ -5528,35 +5757,37 @@ function toggleSidebar() {
 function renderPiSessions(sessionFiles) {
   if (!sessionFiles || !sessionFiles.length) return;
   const currentPath = currentSessionInfo?.sessionFile;
+  const titleOverrides = readSessionTitleOverrides();
   const MAX_SESSIONS = 30;
 
   const existingPinned = sessions.filter(s => s.pinned);
   sessions = [...existingPinned];
-  const seenNames = new Map();
+  const incoming = [];
 
   sessionFiles.slice(0, MAX_SESSIONS).forEach(s => {
     if (s.path === currentPath) return;
 
-    let sessionName = s.name || s.timestamp?.slice(0, 16).replace('T', ' ') || 'Session';
-    const nameCount = (seenNames.get(sessionName) || 0) + 1;
-    seenNames.set(sessionName, nameCount);
-    if (nameCount > 1) {
-      const shortId = (s.id || pathBasename(s.path)).slice(0, 6);
-      sessionName = `${sessionName} · ${shortId}`;
-    }
-
-    const alreadyExists = sessions.find(existing => existing.path === s.path);
-    if (!alreadyExists) {
-      const shortId = s.id || String(s.path || '').split('/').pop().split('\\').pop().replace(/\.jsonl$/i, '');
-      sessions.push({
-        id: `pi_${shortId}`,
-        name: sessionName,
-        pinned: false,
-        path: s.path,
-        messageCount: s.messageCount,
-      });
-    }
+    const sessionName = (s.path && titleOverrides[s.path]) || s.name || 'Untitled';
+    const shortId = s.id || pathBasename(s.path);
+    incoming.push({
+      id: `pi_${shortId}`,
+      name: sessionName,
+      pinned: false,
+      path: s.path,
+      messageCount: s.messageCount,
+      timestamp: s.timestamp,
+      cwd: s.cwd,
+      isSubagent: Boolean(s.isSubagent),
+      parentSessionPath: s.parentSessionPath || null,
+      subagentRole: s.subagentRole || s.subagent?.role || null,
+      subagentAttemptId: s.subagentAttemptId || s.subagent?.attemptId || null,
+    });
   });
+
+  for (const session of incoming) {
+    const alreadyExists = sessions.find(existing => existing.path === session.path);
+    if (!alreadyExists) sessions.push(session);
+  }
 
   applyPinnedSessionsFromStorage();
   renderSessions();

@@ -3,7 +3,13 @@ node_modules/
 
 # Build output
 dist/
+dist-build/
+dist-fresh/
+dist-local/
 *.tsbuildinfo
+
+# Local Helios app state
+.helios/
 
 # Harness runtime state and local setup output
 .harness/

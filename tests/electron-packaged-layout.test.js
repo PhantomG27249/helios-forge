@@ -11,6 +11,7 @@ const requiredPackagedFiles = [
   'src/electron/main.js',
   'src/electron/preload.js',
   'public/index.html',
+  'scripts/setup-helios-forge.js',
   'packages/helios-research-harness/helios-package.json',
 ];
 
@@ -28,6 +29,7 @@ test('electron-builder config declares app id and bundled harness extraResources
   assert.match(configText, /appId:\s*com\.alphahelion\.helios-forge/);
   assert.match(configText, /helios-research-harness/);
   assert.match(configText, /asarUnpack/);
+  assert.match(configText, /scripts\/\*\*\/\*/);
 });
 
 test('desktop icon assets exist', async () => {
