@@ -749,6 +749,19 @@ To begin execution in a fresh session:
 
 Helios does not need more architecture modules. It needs **wiring**, **measurement**, and **proof**. This plan uses subagents to do that in gated milestones: trust kernel first, scoreboard second, recursion third, then campaigns, memory depth, paper-grade scale, network, and earned autonomy.
 
+## Implementation Status (2026-06-20)
+
+| Worker | Status |
+| --- | --- |
+| G1 postTaskPromotionBridge | **Done** |
+| G2 skillEvolutionPostTask | **Done** |
+| G3 workplaceEvolutionGoals | **Done** |
+| Integration hot-path wiring | **Done** |
+
+See also: [2026-06-20-continuous-evolution-closure-parallel-subagents.md](./2026-06-20-continuous-evolution-closure-parallel-subagents.md)
+
+---
+
 ## Implementation Status (2026-06-17)
 
 Canonical detail: `docs/architecture/2026-06-17-implementation-reconciliation.md`
