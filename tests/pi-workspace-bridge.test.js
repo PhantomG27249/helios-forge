@@ -24,14 +24,14 @@ test('ensurePiWorkplaceBridge installs the Helios package when missing', async (
   }
 });
 
-test('buildHeliosChatContext advertises deep research when enabled', async () => {
+test('buildHeliosChatContext includes unified bridge pack sections', async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), 'helios-pi-bridge-'));
   try {
     await setupHeliosForge({ workspaceRoot });
     const context = await buildHeliosChatContext(workspaceRoot);
-    assert.match(context, /Deep research is enabled/);
+    assert.match(context, /Unified Helios bridge context/);
+    assert.match(context, /Deep Research/);
     assert.match(context, /\/deep-research/);
-    assert.match(context, /deep-research/i);
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

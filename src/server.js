@@ -15,6 +15,7 @@ import { bridgeReplayFeedback } from './harness-sidecar/meta/replayFeedbackBridg
 import {
   buildHeliosChatContext,
   ensurePiWorkplaceBridge,
+  piBridgeContextJsonPath,
   prependHeliosChatContext,
 } from './harness/piWorkspaceBridge.js';
 import { HarnessManager } from './harness/harnessManager.js';
@@ -49,122 +50,6 @@ import { setModelEnableThinking } from './harness/piModelsService.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-
-class PiRpcManager {
-  constructor() {
-    this.process = null;
-    this.cwd = process.cwd();
-    this.buffer = '';
-    this.pending = new Map();
-    this.idCounter = 0;
-    this.clients = new Set();
-    this.readyData = null;
-    this._restarting = false;
-  }
-
-  async start() {
-    return new Promise((resolve) => {
-      console.log('[PiRPC] Starting...');
-      const piCommand = resolvePiCommand();
-      this.process = spawn(piCommand.command, [...piCommand.args, '--mode', 'rpc'], {
-        cwd: this.cwd,
-        env: { ...process.env, FORCE_COLOR: '1' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      this.process.stdout.on('data', (chunk) => {
-        this.buffer += chunk.toString('utf8');
-        this.processOutput();
-      });
-
-      this.process.stderr.on('data', (chunk) => {
-        if (chunk.toString().includes('Error')) console.error(chunk.toString().trim());
-      });
-
-      this.process.on('close', (code) => {
-        if (this._restarting) {
-          // We're intentionally restarting, don't auto-restart
-          this._restarting = false;
-          return;
-        }
-        this.readyData = null;
-        this.broadcast({ type: 'system', event: 'pi_disconnected', code });
-        setTimeout(() => this.start(), 3000);
-      });
-
-      this.process.on('error', (err) => {
-        this.broadcast({ type: 'system', event: 'pi_error', error: err.message });
-      });
-
-      // Wait for pi to be ready, then resolve
-      setTimeout(() => this.checkReady(resolve), 2000);
-    });
-  }
-
-  checkReady(resolve) {
-    if (!this.process || this.process.exitCode !== null) return;
-    this.sendCommand({ type: 'get_state' })
-      .then((resp) => {
-        if (resp.success) {
-          this.readyData = resp.data;
-          console.log('[PiRPC] Ready — Model:', resp.data?.model?.name || 'unknown');
-          this.broadcast({ type: 'system', event: 'pi_ready', data: resp.data });
-          if (resolve) resolve();
-        } else {
-          setTimeout(() => this.checkReady(resolve), 1500);
-        }
-      })
-      .catch(() => setTimeout(() => this.checkReady(resolve), 1500));
-  }
-
-  processOutput() {
-    while (true) {
-      const idx = this.buffer.indexOf('\n');
-      if (idx === -1) break;
-      let line = this.buffer.slice(0, idx);
-      this.buffer = this.buffer.slice(idx + 1);
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.type === 'response') {
-          const pending = this.pending.get(parsed.id);
-          if (pending) { clearTimeout(pending.timeout); this.pending.delete(parsed.id); pending.resolve(parsed); }
-        } else {
-          this.broadcast(parsed);
-        }
-      } catch (e) { /* skip */ }
-    }
-  }
-
-  sendCommand(cmd) {
-    if (!this.process || this.process.exitCode !== null) return Promise.reject(new Error('Pi not running'));
-    const id = `cmd-${++this.idCounter}`;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { this.pending.delete(id); reject(new Error('Timeout')); }, 60000);
-      this.pending.set(id, { resolve, reject, timeout });
-      this.process.stdin.write(JSON.stringify({ ...cmd, id }) + '\n');
-    });
-  }
-
-  addClient(ws) { this.clients.add(ws); }
-  removeClient(ws) { this.clients.delete(ws); }
-
-  broadcast(msg) {
-    const data = JSON.stringify(msg);
-    for (const client of this.clients) {
-      if (client.readyState === 1) {
-        try { client.send(data); } catch (e) { this.clients.delete(client); }
-      }
-    }
-  }
-
-  sendReadyToClient(ws) {
-    if (this.readyData && ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'system', event: 'pi_ready', data: this.readyData }));
-    }
-  }
-}
 
 const MIMES = {
   html: 'text/html', js: 'application/javascript', css: 'text/css',
@@ -342,9 +227,16 @@ function syncPiCapabilitiesManifest(pi, manifestPath) {
   }
 }
 
+function syncPiBridgeContext(pi, contextPath) {
+  if (typeof pi.setBridgeContextPath === 'function') {
+    pi.setBridgeContextPath(contextPath || null);
+  }
+}
+
 async function applyPiWorkplaceBridge(pi, workspaceRoot) {
   const bridge = await ensurePiWorkplaceBridge(workspaceRoot);
   syncPiCapabilitiesManifest(pi, bridge.manifestPath);
+  syncPiBridgeContext(pi, bridge.contextJsonPath || null);
   if (bridge.repaired && typeof pi.changeWorkspace === 'function') {
     await pi.changeWorkspace(workspaceRoot);
   }

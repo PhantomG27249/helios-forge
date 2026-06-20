@@ -3358,7 +3358,6 @@ export function createHarnessSidecar({
       if (req.method === 'GET' && url.pathname === '/v1/pi-bridge/state') {
         const state = await buildPiBridgeState({
           workspaceRoot: resolvedWorkspaceRoot,
-          manifestConsumedByPi: url.searchParams.get('manifestConsumedByPi') === 'true',
         });
         sendJson(res, 200, state);
         return;

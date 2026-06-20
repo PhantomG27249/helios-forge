@@ -125,6 +125,14 @@ export class PiRpcManager {
     }
   }
 
+  setBridgeContextPath(contextPath) {
+    if (contextPath) {
+      this.scopedEnv.HELIOS_BRIDGE_CONTEXT_JSON = contextPath;
+    } else {
+      delete this.scopedEnv.HELIOS_BRIDGE_CONTEXT_JSON;
+    }
+  }
+
   async stopForRestart() {
     const child = this.process;
     if (!child || child.exitCode !== null) return;

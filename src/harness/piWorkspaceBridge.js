@@ -1,8 +1,12 @@
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { buildRuntimeMountManifest } from '../harness-sidecar/capabilities/capabilityStore.js';
 import { loadHarnessConfig } from '../harness-sidecar/config/configLoader.js';
-import { buildHeliosSkillInventory } from '../harness-sidecar/pi/heliosSkillBridge.js';
+import {
+  buildPiBridgeContextPack,
+  renderPiBridgeContextMarkdown,
+} from '../harness-sidecar/pi/piBridgeContextPack.js';
 import { repairWorkplace } from './harnessConfigService.js';
 import { getWorkplaceStatus } from './workplaceStatus.js';
 
@@ -28,15 +32,36 @@ export async function ensurePiWorkplaceBridge(workspaceRoot) {
   }
 
   const after = await getWorkplaceStatus(resolvedRoot);
+  let contextJsonPath = null;
+  if (after.bundledPackage?.present) {
+    try {
+      await buildHeliosChatContext(resolvedRoot, { persistJson: true });
+      contextJsonPath = piBridgeContextJsonPath(resolvedRoot);
+    } catch {
+      contextJsonPath = null;
+    }
+  }
   return {
     repaired: Boolean(repair?.repairs?.length),
     repairs: repair?.repairs || [],
     manifestPath: runtimeManifestPath(resolvedRoot),
+    contextJsonPath,
     status: after,
   };
 }
 
-export async function buildHeliosChatContext(workspaceRoot) {
+export function piBridgeContextJsonPath(workspaceRoot) {
+  return path.join(path.resolve(workspaceRoot), '.harness', 'runtime', 'pi-bridge-context.json');
+}
+
+export async function persistPiBridgeContextJson(workspaceRoot, pack) {
+  const filePath = piBridgeContextJsonPath(workspaceRoot);
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, `${JSON.stringify(pack)}\n`, 'utf8');
+  return filePath;
+}
+
+export async function buildHeliosChatContext(workspaceRoot, options = {}) {
   const resolvedRoot = path.resolve(workspaceRoot);
   const status = await getWorkplaceStatus(resolvedRoot);
   if (!status.harnessDir?.present) return null;
@@ -48,41 +73,23 @@ export async function buildHeliosChatContext(workspaceRoot) {
     config = { features: {} };
   }
 
-  const features = config.features || {};
-  const inventory = await buildHeliosSkillInventory({ workspaceRoot: resolvedRoot });
-  const skills = inventory.skills.slice(0, 12);
-
-  const lines = [
-    '[Helios Forge]',
-    'This workplace is wired for Helios Forge harness capabilities.',
-  ];
-
   if (!status.bundledPackage?.present) {
-    lines.push('Helios package is not installed yet — open Settings → Workplace and run Initialize/Repair.');
-    lines.push('[/Helios Forge]');
-    return lines.join('\n');
+    return [
+      '[Helios Forge]',
+      'Helios package is not installed yet — open Settings → Workplace and run Initialize/Repair.',
+      '[/Helios Forge]',
+    ].join('\n');
   }
 
-  if (features.deepResearch) {
-    lines.push('Deep research is enabled for this workplace.');
-    lines.push('Use the deep-research skill and the /deep-research slash command for source-grounded research with citations and contradiction tracking.');
+  const pack = await buildPiBridgeContextPack({
+    workspaceRoot: resolvedRoot,
+    harnessConfig: config,
+    options,
+  });
+  if (options.persistJson !== false) {
+    await persistPiBridgeContextJson(resolvedRoot, pack);
   }
-  if (features.swarm) {
-    lines.push('Swarm orchestration is enabled — /harness and /research slash commands can launch harness tasks.');
-  }
-
-  if (skills.length) {
-    lines.push('Available Helios skills:');
-    for (const skill of skills) {
-      const label = skill.name || skill.id;
-      const detail = skill.description ? ` — ${skill.description}` : '';
-      lines.push(`- ${label}${detail}`);
-    }
-  }
-
-  lines.push('Slash commands: /harness, /research, /deep-research, /forge');
-  lines.push('[/Helios Forge]');
-  return lines.join('\n');
+  return renderPiBridgeContextMarkdown(pack, { maxChars: options.maxChars });
 }
 
 export function prependHeliosChatContext(message, context) {

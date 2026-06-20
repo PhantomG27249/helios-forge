@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildHeliosSkillInventory } from './heliosSkillBridge.js';
+import { buildPiBridgeHealthFromTelemetry } from './piBridgeTelemetry.js';
 import { parseZeusArgs } from '../../pi/modelArgs.js';
 
 const DEFAULT_PACKAGE_ID = 'helios-research-harness';
@@ -101,12 +102,14 @@ export async function buildPiBridgeState({
     defaultPackageInstalled,
     globalKwargsExtensionPresent,
     globalHeliosForgeExtensionPresent,
+    bridgeTelemetry,
   ] = await Promise.all([
     exists(registryPath),
     exists(runtimeManifestPath),
     exists(packagePath),
     kwargsExtensionPath ? exists(kwargsExtensionPath) : false,
     heliosForgeExtensionPath ? exists(heliosForgeExtensionPath) : false,
+    buildPiBridgeHealthFromTelemetry({ workspaceRoot: resolvedWorkspaceRoot }),
   ]);
   const registry = await readJsonIfPresent(registryPath);
   const workspaceKwargsExtensionRegistered = hasKwargsExtension(registry);
@@ -123,7 +126,7 @@ export async function buildPiBridgeState({
 
   const bridgeHealth = {
     manifestPresent,
-    manifestConsumedByPi: manifestConsumedByPi === true,
+    manifestConsumedByPi: manifestConsumedByPi === true || bridgeTelemetry?.manifestConsumedByPi === true,
     defaultPackageInstalled,
     piKwargsExtensionInstalled: workspaceKwargsExtensionRegistered || globalKwargsExtensionPresent,
     piHeliosForgeExtensionInstalled: workspaceHeliosForgeExtensionRegistered || globalHeliosForgeExtensionPresent,
@@ -137,6 +140,7 @@ export async function buildPiBridgeState({
     },
     reasoningParserForwarded: piState?.reasoningParserForwarded === true,
     activeModelThinkingEnabled: isThinkingEnabled(piState),
+    telemetry: bridgeTelemetry,
   };
 
   return {

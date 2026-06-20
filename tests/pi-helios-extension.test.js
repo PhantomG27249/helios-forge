@@ -77,6 +77,7 @@ test('metadata builder emits a compact bridge warning when the manifest is missi
     manifestId: null,
     counts: {},
     refs: [],
+    manifestConsumed: false,
   });
 });
 

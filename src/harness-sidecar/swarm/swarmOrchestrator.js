@@ -20,6 +20,11 @@ import { getDefaultSwarmCells, resolveSwarmCell } from './swarmCellRegistry.js';
 import { orchestrateNestedSwarm } from './nestedSwarmOrchestrator.js';
 import { allocateOversoulBudget } from './oversoulBudgetRouter.js';
 import { runWorktreeAttempt } from './worktreeAttemptRunner.js';
+import {
+  buildPiBridgeContextPack,
+  compactPiBridgeContextForSwarm,
+} from '../pi/piBridgeContextPack.js';
+import { loadHarnessConfig } from '../config/configLoader.js';
 
 function buildRiskPolicy(context = {}, riskPolicy = {}) {
   return {
@@ -458,6 +463,24 @@ export async function orchestrateSwarm({
   oversoulContext = null,
 } = {}) {
   const taskId = task.taskId || 'task_swarm';
+  let resolvedPiBridgeContext = piBridgeContext;
+  if (workspaceRoot) {
+    try {
+      const harnessConfig = await loadHarnessConfig({ workspaceRoot });
+      const pack = await buildPiBridgeContextPack({
+        workspaceRoot,
+        harnessConfig,
+        task,
+      });
+      const compact = compactPiBridgeContextForSwarm(pack);
+      resolvedPiBridgeContext = {
+        ...compact,
+        ...(piBridgeContext || {}),
+      };
+    } catch {
+      resolvedPiBridgeContext = piBridgeContext;
+    }
+  }
   if (featureEnabled(featureFlags, 'nestedSwarmCells')) {
     const cells = getDefaultSwarmCells().slice(0, 3);
     const budgetPlan = allocateOversoulBudget({
@@ -715,7 +738,7 @@ export async function orchestrateSwarm({
       modelRoute: scheduledAttempt.modelRoute,
       piNativeEnabled,
       piWorkerFactory,
-      piBridgeContext,
+      piBridgeContext: resolvedPiBridgeContext,
       capabilitiesManifest,
       emitAttemptTrace: publishAttemptEvent,
     });
