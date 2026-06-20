@@ -129,6 +129,7 @@ import { createVisualDiffArtifact } from './vlm/visualDiff.js';
 import { runVisualModelObservation } from './vlm/visualModelRunner.js';
 import { listSkillCandidates, readSkillCandidate } from './skills/skillCandidateStore.js';
 import { runSkillCandidateBesLane } from './skills/skillEvolution.js';
+import { mineSkillNeedsFromRho } from './skills/skillNeedMiner.js';
 import {
   approveSkillCandidateForReview,
   redactSkillCandidatePayload,
@@ -1224,19 +1225,27 @@ export function createHarnessSidecar({
         maxCandidates: 2,
       }),
     });
+    const minedSkillNeeds = mineSkillNeedsFromRho({
+      coreset: rhoCoreset,
+      traces: retrospectiveTraces,
+      existingCapabilities: [],
+    });
+    const runtimeSkillNeed = minedSkillNeeds[0] || {
+      needId: `skill_need_${task.taskId}`,
+      title: 'Runtime hard-case handling skill',
+      summary: task.task,
+      failureModes: rhoCoreset.items.flatMap((item) => item.reasons || []).filter(Boolean),
+      evidence: rhoCoreset.items.map((item) => ({
+        traceId: item.taskId || item.traceId,
+        eventId: item.caseId || item.id,
+        reason: item.reasons?.[0],
+      })),
+    };
     await runRuntimeBesLane({
       lane: 'skill',
       runLane: () => runSkillCandidateBesLane({
         taskId: task.taskId,
-        skillNeed: {
-          needId: `skill_need_${task.taskId}`,
-          title: 'Runtime hard-case handling skill',
-          summary: task.task,
-          hardCases: rhoCoreset.items.map((item) => ({
-            caseId: item.caseId || item.taskId,
-            reasons: item.reasons,
-          })),
-        },
+        skillNeed: runtimeSkillNeed,
         count: 2,
       }),
     });

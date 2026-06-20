@@ -34,6 +34,7 @@ export const DEFAULT_HARNESS_CONFIG = {
     experiments: false,
     visualArtifacts: false,
     adaptiveSearch: false,
+    skillEvolution: true,
   },
   modelCouncil: {
     enabled: false,

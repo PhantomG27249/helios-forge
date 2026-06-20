@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -296,6 +296,118 @@ test('G0: prompt_background createTask trace contains recursive_evolution.coordi
     assert.equal(coordinatedEvent.evidenceOnly, true);
     assert.equal(coordinatedEvent.canPromote, false);
     assert.equal(trace.at(-1).type, 'recursive_evolution.timing');
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('post-task hooks scaffold workplace evolution goals', async () => {
+  const workspaceRoot = await makeWorkspace();
+  try {
+    await writeFile(
+      path.join(workspaceRoot, 'package.json'),
+      JSON.stringify({ scripts: { test: 'node -e "process.exit(0)"' } }),
+      'utf8',
+    );
+    await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot,
+      harnessConfig: {
+        productionCapabilities: {
+          operatorDashboards: { enabled: true },
+        },
+      },
+      task: { taskId: 'task-goals-1' },
+    });
+
+    const goalsPath = path.join(workspaceRoot, '.harness', 'meta', 'evolution-goals.json');
+    const record = JSON.parse(await readFile(goalsPath, 'utf8'));
+    assert.equal(record.canPromote, false);
+    assert.equal(record.evidenceOnly, true);
+    assert.ok(record.goals.some((goal) => goal.goalId === 'primary_test_pass'));
+    assert.ok(record.goals.some((goal) => goal.goalId === 'frontier_uplift'));
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('post-task hooks queue L4 promotion proposal when eligible with campaign evidence', async () => {
+  const workspaceRoot = await makeWorkspace();
+  try {
+    const result = await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot,
+      harnessConfig: {
+        productionCapabilities: {
+          operatorDashboards: { enabled: true },
+          sourceTreeVariants: { enabled: true },
+          productionAutonomyPolicy: { enabled: true },
+        },
+        partialAutonomy: {
+          thresholds: {
+            minRollbackDrillsPassed: 0,
+            maxRegressionCount: 99,
+            minDashboardDepth: 0,
+          },
+        },
+      },
+      task: { taskId: 'task-promotion-1' },
+      rollbackDrill: { restoreVerified: true, reversible: true, status: 'passed' },
+    });
+
+    assert.equal(result.canPromote, false);
+    assert.ok(result.coordinated?.sources?.includes('promotion_loop') || result.promotion?.skipped);
+    if (result.promotion?.proposal) {
+      assert.equal(result.promotion.canPromote, false);
+      const queueRaw = await readFile(result.promotion.queuePath, 'utf8');
+      const queued = JSON.parse(queueRaw);
+      assert.equal(queued.canPromote, false);
+    }
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test('post-task hooks persist skill candidates when traces contain verifier failures', async () => {
+  const workspaceRoot = await makeWorkspace();
+  const taskId = 'task-skill-evolution-1';
+  const traceDir = path.join(workspaceRoot, '.harness', 'meta', 'traces', taskId);
+  try {
+    await mkdir(traceDir, { recursive: true });
+    await writeFile(path.join(traceDir, 'trace.json'), `${JSON.stringify({
+      taskId,
+      events: [
+        { type: 'verifier.missing_evidence', verifierEvidence: { missing: true } },
+      ],
+      summary: {
+        failures: [{ category: 'missing_verifier_evidence' }],
+        latestState: { status: 'failed' },
+      },
+    }, null, 2)}\n`, 'utf8');
+    await writeFile(path.join(traceDir, 'summary.json'), `${JSON.stringify({
+      taskId,
+      failures: [{ category: 'missing_verifier_evidence' }],
+      latestState: { status: 'failed' },
+    }, null, 2)}\n`, 'utf8');
+
+    const result = await runPostTaskRecursiveEvolutionHooks({
+      workspaceRoot,
+      harnessConfig: {
+        features: { skillEvolution: true },
+      },
+      task: { taskId: 'task-skill-hook-1' },
+    });
+
+    assert.equal(result.canPromote, false);
+    if (result.skillEvolution?.persisted?.length) {
+      assert.equal(result.skillEvolution.canPromote, false);
+      const candidateDir = path.join(
+        workspaceRoot,
+        '.harness',
+        'meta',
+        'skill-candidates',
+        result.skillEvolution.persisted[0].candidateId,
+      );
+      await readFile(path.join(candidateDir, 'SKILL.md'), 'utf8');
+    }
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

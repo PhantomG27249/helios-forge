@@ -14,10 +14,14 @@ import { runPostTaskIcrHooks } from '../icr/icrPostTaskHook.js';
 import { createDeterministicIcrRunners } from '../icr/icrRuntimeCoordinator.js';
 import { runAutonomyRollbackDrill } from './autonomyRollbackRunner.js';
 import { runPostTaskAutonomyApply } from './postTaskAutonomyApply.js';
+import { runPostTaskPromotionBridge } from './postTaskPromotionBridge.js';
+import { coordinateRecursiveEvolution } from './recursiveEvolutionCoordinator.js';
 import {
   createReplayEvidenceStore,
   runPostTaskEvolutionOrchestrator,
 } from './postTaskEvolutionOrchestrator.js';
+import { scaffoldWorkplaceEvolutionGoals } from './workplaceEvolutionGoals.js';
+import { runSkillEvolutionPostTask } from '../skills/skillEvolutionPostTask.js';
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -63,6 +67,7 @@ async function ensureEvolutionWorkplaceReady({
   if (!replayGate && !campaignGate) return;
 
   await scaffoldWorkplaceEvolution({ workspaceRoot });
+  await scaffoldWorkplaceEvolutionGoals({ workspaceRoot, harnessConfig });
   await normalizeHeldOutSuiteCommands(workspaceRoot);
 
   if (campaignGate) {
@@ -177,6 +182,9 @@ export async function runPostTaskRecursiveEvolutionHooks({
     productionReports: null,
     a2aPeerCycle: null,
     icr: null,
+    promotion: null,
+    skillEvolution: null,
+    evolutionGoals: null,
   };
 
   await ensureEvolutionWorkplaceReady({ workspaceRoot, harnessConfig });
@@ -279,6 +287,50 @@ export async function runPostTaskRecursiveEvolutionHooks({
   }
 
   results.autonomy = autonomyState;
+
+  const campaignReports = asArray(results.campaigns?.ran).map((entry) => entry.report).filter(Boolean);
+  results.promotion = await runPostTaskPromotionBridge({
+    workspaceRoot,
+    harnessConfig,
+    autonomyState,
+    replayReports,
+    campaignResults: campaignReports,
+  });
+  results.coordinated = coordinateRecursiveEvolution({
+    replayReports,
+    campaignResults: campaignReports,
+    promotionLoopResult: results.promotion,
+  });
+
+  results.skillEvolution = await runSkillEvolutionPostTask({
+    workspaceRoot,
+    harnessConfig,
+    task,
+    deps: {
+      replayResults: replayReports,
+    },
+  });
+
+  if (typeof emitEvent === 'function' && results.skillEvolution?.persisted?.length) {
+    await emitEvent({
+      type: 'skill_evolution.candidates_persisted',
+      taskId: task.taskId,
+      persisted: results.skillEvolution.persisted,
+      evidenceOnly: true,
+      canPromote: false,
+    });
+  }
+
+  if (typeof emitEvent === 'function' && results.promotion?.proposal) {
+    await emitEvent({
+      type: 'promotion.proposal_queued',
+      taskId: task.taskId,
+      proposalId: results.promotion.proposal.proposalId,
+      queuePath: results.promotion.queuePath,
+      evidenceOnly: true,
+      canPromote: false,
+    });
+  }
 
   results.productionReports = await runProductionReportCycle({
     workspaceRoot,

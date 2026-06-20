@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 
 import { buildDefaultHeldOutSuite } from '../benchmarks/defaultHeldOutSuite.js';
+import { scaffoldWorkplaceEvolutionGoals } from './workplaceEvolutionGoals.js';
 
 const WORKPLACE_SMOKE_SUITE_ID = 'workplace-smoke';
 
@@ -261,6 +262,10 @@ export async function scaffoldWorkplaceEvolution({
   }
 
   const configPath = await mergeEvolutionIntoConfig({ workspaceRoot: root });
+  const evolutionGoals = await scaffoldWorkplaceEvolutionGoals({
+    workspaceRoot: root,
+    harnessConfig,
+  });
 
   return {
     suitePath,
@@ -268,5 +273,6 @@ export async function scaffoldWorkplaceEvolution({
     configPath,
     suiteId: WORKPLACE_SMOKE_SUITE_ID,
     evolution: mergeEvolutionDefaults(harnessConfig?.evolution),
+    evolutionGoalsPath: evolutionGoals.path,
   };
 }
