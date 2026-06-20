@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/app.css?v=20250627">
+  <link rel="stylesheet" href="/app.css?v=20250628">
   <script src="/vendor/marked.min.js"></script>
   <link rel="stylesheet" href="/vendor/github-dark.min.css">
   <link rel="stylesheet" href="/vendor/katex/katex.min.css">
@@ -119,30 +119,46 @@
     <!-- Main -->
     <main id="main">
       <header id="topbar">
-        <div class="topbar-left">
-          <button id="btn-sidebar-toggle" class="sidebar-toggle" type="button" title="Menu" aria-label="Open menu">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-            </svg>
-          </button>
-          <div id="session-title-bar" class="session-title-bar" title="Click to rename">
-            <span id="session-title">New Chat</span>
-            <input id="session-title-input" class="session-title-input hidden" type="text" aria-label="Session title" />
-            <svg class="title-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+        <div class="topbar-primary">
+          <div class="topbar-left">
+            <button id="btn-sidebar-toggle" class="sidebar-toggle" type="button" title="Menu" aria-label="Open menu">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+            <div id="session-title-bar" class="session-title-bar" title="Click to rename">
+              <span id="session-title">New Chat</span>
+              <input id="session-title-input" class="session-title-input hidden" type="text" aria-label="Session title" />
+              <svg class="title-chevron" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+          </div>
+          <div id="topbar-harness-bar" class="topbar-harness-bar hidden">
+            <span id="harness-subtitle" class="harness-subtitle-inline">Sidecar not started</span>
+            <div class="harness-actions harness-actions-compact">
+              <button id="btn-harness-start" class="harness-btn" type="button">Start</button>
+              <button id="btn-harness-stop" class="harness-btn" type="button">Stop</button>
+            </div>
+          </div>
+          <div id="global-status-bar" class="topbar-right global-status-bar" aria-label="System status">
+            <span id="status-chip-connection" class="status-chip" data-state="connecting">Connecting</span>
+            <span id="status-chip-sidecar" class="status-chip" data-state="unknown">Sidecar unknown</span>
+            <span id="status-chip-approvals" class="status-chip status-chip-clickable" data-state="none" role="button" tabindex="0" title="Open approval inbox">0 approvals</span>
           </div>
         </div>
-        <nav id="mode-nav" class="mode-nav" aria-label="Workspace mode">
-          <button class="mode-nav-btn active" type="button" data-mode="chat">Chat</button>
-          <button class="mode-nav-btn" type="button" data-mode="research">Research</button>
-          <button class="mode-nav-btn" type="button" data-mode="capabilities">Capabilities</button>
-          <button class="mode-nav-btn" type="button" data-mode="traces">Traces</button>
+        <nav id="mode-nav" class="session-nav" role="tablist" aria-label="Session mode">
+          <button class="session-tab active" type="button" role="tab" aria-selected="true" data-session-tab="chat" data-mode="chat">Chat</button>
+          <button class="session-tab" type="button" role="tab" aria-selected="false" data-session-tab="run" data-mode="research">Run</button>
+          <button class="session-tab" type="button" role="tab" aria-selected="false" data-session-tab="deep-research" data-mode="deep-research">Research</button>
+          <button class="session-tab" type="button" role="tab" aria-selected="false" data-session-tab="capabilities" data-mode="capabilities">Capabilities</button>
+          <button class="session-tab" type="button" role="tab" aria-selected="false" data-session-tab="swarm" data-mode="swarm">Swarm</button>
+          <button class="session-tab" type="button" role="tab" aria-selected="false" data-session-tab="traces" data-mode="traces">Traces</button>
         </nav>
-        <div id="global-status-bar" class="topbar-right global-status-bar" aria-label="System status">
-          <span id="status-chip-connection" class="status-chip" data-state="connecting">Connecting</span>
-          <span id="status-chip-sidecar" class="status-chip" data-state="unknown">Sidecar unknown</span>
-          <span id="status-chip-approvals" class="status-chip status-chip-clickable" data-state="none" role="button" tabindex="0" title="Open approval inbox">0 approvals</span>
-        </div>
       </header>
+
+      <div id="harness-swarm-config-banner" class="harness-config-banner harness-top-banner hidden">
+        <span id="harness-swarm-config-banner-text">Swarm routing is not configured.</span>
+        <button id="btn-harness-swarm-configure" class="harness-btn" type="button">Configure in Settings</button>
+      </div>
 
       <div id="config-drift-banner" class="config-drift-banner hidden" role="status">
         <span id="config-drift-text">Harness default model differs from chat model.</span>
@@ -156,23 +172,6 @@
 
       <div id="workspace-layout" class="workspace-layout">
         <aside id="harness-panel" class="harness-panel hidden" aria-label="Helios Harness tools">
-          <div class="harness-panel-header">
-            <div>
-              <div class="harness-title">Helios Harness</div>
-              <div id="harness-subtitle" class="harness-subtitle">Sidecar not started</div>
-            </div>
-            <div class="harness-actions">
-              <button id="btn-harness-start" class="harness-btn">Start</button>
-              <button id="btn-harness-stop" class="harness-btn">Stop</button>
-            </div>
-          </div>
-          <div class="harness-tabs" role="tablist" aria-label="Harness tools">
-            <button class="harness-tab active" type="button" role="tab" aria-selected="true" data-harness-tab="run">Run</button>
-            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="deep-research">Deep Research</button>
-            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="capabilities">Capabilities</button>
-            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="swarm">Swarm</button>
-            <button class="harness-tab" type="button" role="tab" aria-selected="false" data-harness-tab="traces">Traces</button>
-          </div>
           <div id="harness-tab-run" class="harness-tab-panel active">
             <div class="harness-task-row">
               <input id="harness-task-input" class="harness-task-input" type="text" placeholder="Run a harness task..." />
@@ -203,23 +202,140 @@
               </div>
               <div id="harness-adaptive-note" class="harness-muted-line">Waiting for adaptive-search status.</div>
             </section>
-            <section id="harness-production-evidence" class="harness-hierarchy-panel" aria-label="Production Evidence dashboards">
-              <div class="harness-section-title-row compact">
-                <span>Production Evidence</span>
-                <button id="btn-harness-production-evidence-refresh" class="harness-btn" type="button">Refresh</button>
+            <section id="harness-swarm-activity" class="harness-swarm-activity hidden" aria-label="Live swarm activity">
+              <div class="harness-section-title-row">
+                <span class="harness-live-title"><span class="harness-live-dot"></span>Swarm Activity</span>
+                <button id="btn-harness-open-swarm-tab" class="harness-btn" type="button">Open Swarm</button>
               </div>
-              <div id="harness-production-evidence-status" class="harness-muted-line">No production evidence loaded</div>
-              <div id="harness-production-evidence-rows" class="harness-list compact"></div>
+              <div id="harness-swarm-activity-list" class="harness-swarm-activity-list"></div>
             </section>
+            <details id="harness-production-evidence" class="harness-hierarchy-panel harness-collapsible" aria-label="Production Evidence dashboards">
+              <summary class="harness-collapsible-summary">
+                <span>Production Evidence</span>
+                <span id="harness-production-evidence-summary" class="harness-collapsible-meta">not loaded</span>
+              </summary>
+              <div class="harness-collapsible-body">
+                <div class="harness-section-actions">
+                  <div id="harness-production-evidence-status" class="harness-muted-line">No production evidence loaded</div>
+                  <button id="btn-harness-production-evidence-refresh" class="harness-btn" type="button">Refresh</button>
+                </div>
+                <div id="harness-production-evidence-rows" class="harness-evidence-grid"></div>
+              </div>
+            </details>
           </div>
           <div id="harness-tab-deep-research" class="harness-tab-panel">
-            <div class="harness-task-row">
-              <input id="harness-deep-task-input" class="harness-task-input" type="text" placeholder="Deep research task..." />
-              <button id="btn-harness-deep-run" class="harness-run-btn">Run</button>
-            </div>
-            <div class="harness-budget-row">
-              <label>Tool calls<input id="harness-deep-tool-calls" type="number" min="1" max="500" value="80" /></label>
-              <label>Minutes<input id="harness-deep-minutes" type="number" min="1" max="240" value="45" /></label>
+            <div class="harness-deep-shell">
+              <section class="harness-deep-composer" aria-label="Deep research composer">
+                <header class="harness-deep-header">
+                  <div class="harness-deep-header-copy">
+                    <h2 class="harness-deep-title">Deep Research</h2>
+                    <p class="harness-deep-subtitle">Source-grounded literature review with claim–evidence tables, citation audit, contradiction tracking, and implementation handoff.</p>
+                  </div>
+                  <div class="harness-deep-presets" id="harness-deep-presets" role="group" aria-label="Research presets">
+                    <button class="harness-btn harness-btn-sm" type="button" data-deep-preset="quick">Quick scan</button>
+                    <button class="harness-btn harness-btn-sm" type="button" data-deep-preset="standard">Standard</button>
+                    <button class="harness-btn harness-btn-sm" type="button" data-deep-preset="literature">Literature</button>
+                    <button class="harness-btn harness-btn-sm" type="button" data-deep-preset="deep">Deep dive</button>
+                  </div>
+                </header>
+
+                <label class="harness-deep-field">
+                  <span>Research question</span>
+                  <textarea id="harness-deep-task-input" class="harness-deep-textarea" rows="4" placeholder="What should be investigated? Include success criteria, constraints, and desired output."></textarea>
+                </label>
+
+                <div class="harness-deep-scope-row">
+                  <label class="harness-deep-field compact">
+                    <span>Include scope</span>
+                    <input id="harness-deep-scope-include" type="text" placeholder="workspace paths, domains, paper types…" />
+                  </label>
+                  <label class="harness-deep-field compact">
+                    <span>Exclude scope</span>
+                    <input id="harness-deep-scope-exclude" type="text" placeholder="out-of-scope topics, stale sources…" />
+                  </label>
+                </div>
+
+                <details class="harness-deep-settings-drawer" open>
+                  <summary>Run settings</summary>
+                  <div class="harness-deep-settings-grid">
+                    <label class="harness-deep-field compact">
+                      <span>Tool calls</span>
+                      <input id="harness-deep-tool-calls" type="number" min="1" max="500" value="80" />
+                    </label>
+                    <label class="harness-deep-field compact">
+                      <span>Wall minutes</span>
+                      <input id="harness-deep-minutes" type="number" min="1" max="240" value="45" />
+                    </label>
+                    <label class="harness-deep-field compact">
+                      <span>Max sources</span>
+                      <input id="harness-deep-max-sources" type="number" min="1" max="128" value="16" />
+                    </label>
+                    <label class="harness-deep-field compact">
+                      <span>Input token budget (k)</span>
+                      <input id="harness-deep-max-tokens" type="number" min="32" max="512" value="200" />
+                    </label>
+                    <label class="harness-deep-field compact">
+                      <span>Output format</span>
+                      <select id="harness-deep-output-format">
+                        <option value="full_report">Full report + bibliography</option>
+                        <option value="brief">Executive brief</option>
+                        <option value="claim_evidence">Claim–evidence table</option>
+                        <option value="implementation_handoff">Implementation handoff</option>
+                      </select>
+                    </label>
+                    <label class="harness-deep-field compact">
+                      <span>Context profile</span>
+                      <input id="harness-deep-context-profile" type="text" value="deep_research" readonly />
+                    </label>
+                  </div>
+                  <fieldset class="harness-deep-specialists" id="harness-deep-specialists">
+                    <legend>Specialist pipeline</legend>
+                    <div class="harness-deep-specialist-grid">
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="source_finder" checked /><span>Source finder</span></label>
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="paper_reader" checked /><span>Paper reader</span></label>
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="figure_analyst" checked /><span>Figure analyst</span></label>
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="citation_auditor" checked /><span>Citation auditor</span></label>
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="contradiction_reviewer" checked /><span>Contradiction reviewer</span></label>
+                      <label class="harness-deep-specialist"><input type="checkbox" name="deep-specialist" value="implementation_planner" checked /><span>Implementation planner</span></label>
+                    </div>
+                  </fieldset>
+                </details>
+
+                <div class="harness-deep-actions">
+                  <span id="harness-deep-status" class="harness-muted-line">Ready — uses /deep-research skill and workspace corpus.</span>
+                  <button id="btn-harness-deep-run" class="harness-run-btn" type="button">Start research</button>
+                </div>
+              </section>
+
+              <aside class="harness-deep-sidebar" aria-label="Research run status">
+                <section class="harness-deep-panel">
+                  <div class="harness-section-title-row">
+                    <span>Pipeline</span>
+                    <span id="harness-deep-pipeline-status" class="harness-collapsible-meta">idle</span>
+                  </div>
+                  <div id="harness-deep-pipeline" class="harness-deep-pipeline"></div>
+                </section>
+
+                <section class="harness-deep-panel">
+                  <div class="harness-section-title-row">
+                    <span>Current run</span>
+                    <span id="harness-deep-run-badge" class="harness-pill">idle</span>
+                  </div>
+                  <div id="harness-deep-run-summary" class="harness-muted-line">No active research run.</div>
+                  <div id="harness-deep-run-metrics" class="harness-deep-run-metrics"></div>
+                  <div id="harness-deep-run-events" class="harness-deep-run-events"></div>
+                </section>
+
+                <section class="harness-deep-panel">
+                  <div class="harness-section-title-row">
+                    <span>Reports &amp; artifacts</span>
+                    <button id="btn-harness-deep-artifacts-refresh" class="harness-btn harness-btn-sm" type="button">Refresh</button>
+                  </div>
+                  <div id="harness-deep-artifacts" class="harness-deep-artifacts-list">
+                    <div class="harness-empty compact">Research reports appear here after a run completes.</div>
+                  </div>
+                </section>
+              </aside>
             </div>
           </div>
           <div id="harness-tab-capabilities" class="harness-tab-panel">
@@ -246,6 +362,24 @@
               </div>
               <div id="capability-smithery-results" class="harness-smithery-results"></div>
             </div>
+            <section id="harness-pi-bridge-panel" class="harness-skill-candidate-review" aria-label="Pi Bridge Health">
+              <div class="harness-section-title-row">
+                <span>Pi Bridge Health</span>
+                <button id="btn-harness-pi-bridge-refresh" class="harness-btn" type="button">Refresh</button>
+              </div>
+              <div id="harness-pi-bridge-state" class="harness-skill-candidates">
+                <div class="harness-empty compact">Pi bridge health not loaded</div>
+              </div>
+            </section>
+            <section id="harness-promotion-queue-panel" class="harness-skill-candidate-review" aria-label="Promotion Queue">
+              <div class="harness-section-title-row">
+                <span>Promotion Queue</span>
+                <button id="btn-harness-promotion-queue-refresh" class="harness-btn" type="button">Refresh</button>
+              </div>
+              <div id="harness-promotion-queue" class="harness-skill-candidates">
+                <div class="harness-empty compact">No promotion queue records loaded</div>
+              </div>
+            </section>
             <section id="harness-skill-candidate-review" class="harness-skill-candidate-review" aria-label="Skill Candidate Review">
               <div class="harness-section-title-row">
                 <span>Skill Candidate Review</span>
@@ -319,14 +453,47 @@
             </div>
           </div>
           <div id="harness-tab-swarm" class="harness-tab-panel">
-            <div id="harness-swarm-config-banner" class="harness-config-banner hidden">
-              <span id="harness-swarm-config-banner-text">Swarm routing is not configured.</span>
-              <button id="btn-harness-swarm-configure" class="harness-btn" type="button">Configure in Settings</button>
+            <div class="harness-swarm-header">
+              <div class="harness-swarm-toolbar">
+                <span id="harness-swarm-status">No swarm attempts yet</span>
+                <span id="harness-swarm-active-count" class="harness-swarm-active-badge">0 active</span>
+              </div>
+              <div id="harness-swarm-live-strip" class="harness-swarm-live-strip hidden" aria-live="polite">
+                <span class="harness-live-dot"></span>
+                <span id="harness-swarm-live-text">Swarm idle</span>
+              </div>
             </div>
-            <div class="harness-swarm-toolbar">
-              <span id="harness-swarm-status">No swarm attempts yet</span>
-              <span id="harness-swarm-active-count">0 active</span>
+            <div class="harness-swarm-layout">
+              <div id="harness-swarm-attempts" class="harness-swarm-attempts"></div>
+              <div id="harness-swarm-attempt-detail" class="harness-swarm-attempt-detail">
+                <div id="harness-swarm-detail-summary" class="harness-swarm-detail-summary">Select a subagent attempt</div>
+                <div id="harness-swarm-inspector" class="harness-swarm-inspector">
+                  <div id="harness-swarm-inspector-metadata" class="harness-swarm-inspector-metadata"></div>
+                  <div id="harness-swarm-timeline" class="harness-swarm-timeline"></div>
+                  <div class="harness-swarm-inspector-grid">
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Thinking</div>
+                      <div id="harness-swarm-thinking" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Actions</div>
+                      <div id="harness-swarm-actions" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Handoff</div>
+                      <div id="harness-swarm-handoff" class="harness-swarm-inspector-body"></div>
+                    </section>
+                    <section class="harness-swarm-inspector-block">
+                      <div class="harness-swarm-inspector-title">Selected Event</div>
+                      <div id="harness-swarm-event-inspector" class="harness-swarm-inspector-body"></div>
+                    </section>
+                  </div>
+                </div>
+              </div>
             </div>
+            <details class="harness-swarm-telemetry-drawer">
+              <summary>Telemetry &amp; evidence</summary>
+              <div id="harness-swarm-telemetry-body" class="harness-swarm-telemetry-body">
             <section id="harness-local-meta" class="harness-hierarchy-panel" aria-label="Local Meta feedback">
               <div class="harness-section-title-row compact">
                 <span>Local Meta</span>
@@ -392,88 +559,74 @@
               </div>
               <div id="harness-capability-goal-rows" class="harness-list compact"></div>
             </section>
-            <div class="harness-swarm-layout">
-              <div id="harness-swarm-attempts" class="harness-swarm-attempts"></div>
-              <div id="harness-swarm-attempt-detail" class="harness-swarm-attempt-detail">
-                <div id="harness-swarm-detail-summary" class="harness-swarm-detail-summary">Select a subagent attempt</div>
-                <div id="harness-swarm-inspector" class="harness-swarm-inspector">
-                  <div id="harness-swarm-inspector-metadata" class="harness-swarm-inspector-metadata"></div>
-                  <div id="harness-swarm-timeline" class="harness-swarm-timeline"></div>
-                  <div class="harness-swarm-inspector-grid">
-                    <section class="harness-swarm-inspector-block">
-                      <div class="harness-swarm-inspector-title">Thinking</div>
-                      <div id="harness-swarm-thinking" class="harness-swarm-inspector-body"></div>
-                    </section>
-                    <section class="harness-swarm-inspector-block">
-                      <div class="harness-swarm-inspector-title">Actions</div>
-                      <div id="harness-swarm-actions" class="harness-swarm-inspector-body"></div>
-                    </section>
-                    <section class="harness-swarm-inspector-block">
-                      <div class="harness-swarm-inspector-title">Handoff</div>
-                      <div id="harness-swarm-handoff" class="harness-swarm-inspector-body"></div>
-                    </section>
-                    <section class="harness-swarm-inspector-block">
-                      <div class="harness-swarm-inspector-title">Selected Event</div>
-                      <div id="harness-swarm-event-inspector" class="harness-swarm-inspector-body"></div>
-                    </section>
-                  </div>
-                </div>
               </div>
-            </div>
+            </details>
           </div>
           <div id="harness-tab-traces" class="harness-tab-panel">
-            <div class="harness-trace-toolbar">
-              <span id="harness-trace-status">No traces loaded</span>
-              <button id="btn-harness-traces-refresh" class="harness-btn" type="button">Refresh</button>
-            </div>
-            <div class="harness-trace-layout">
-              <div id="harness-trace-list" class="harness-trace-list"></div>
-              <div class="harness-trace-detail">
-                <div class="harness-trace-counters">
-                  <span id="harness-trace-event-count">0 events</span>
-                  <span id="harness-trace-cost-count">cost n/a</span>
-                  <span id="harness-trace-context-count">ctx n/a</span>
+            <div class="harness-trace-shell">
+              <aside class="harness-trace-sidebar">
+                <div class="harness-trace-sidebar-header">
+                  <span id="harness-trace-status">No traces loaded</span>
+                  <button id="btn-harness-traces-refresh" class="harness-btn" type="button">Refresh</button>
                 </div>
-                <div class="harness-replay-controls">
-                  <button id="btn-harness-replay-prepare" class="harness-btn" type="button">Prepare</button>
-                  <button id="btn-harness-replay-next" class="harness-btn" type="button">Next</button>
-                  <button id="btn-harness-replay-reset" class="harness-btn" type="button">Reset</button>
+                <div id="harness-trace-list" class="harness-trace-list"></div>
+              </aside>
+              <div class="harness-trace-main">
+                <div class="harness-trace-main-header">
+                  <div class="harness-trace-counters">
+                    <span id="harness-trace-event-count">0 events</span>
+                    <span id="harness-trace-cost-count">cost n/a</span>
+                    <span id="harness-trace-context-count">ctx n/a</span>
+                  </div>
+                  <div class="harness-replay-controls">
+                    <button id="btn-harness-replay-prepare" class="harness-btn" type="button">Prepare</button>
+                    <button id="btn-harness-replay-next" class="harness-btn" type="button">Next</button>
+                    <button id="btn-harness-replay-reset" class="harness-btn" type="button">Reset</button>
+                  </div>
                 </div>
-                <section id="harness-abmcts-replay-results" class="harness-abmcts-replay-results" aria-label="AB-MCTS Replay Results">
-                  <div class="harness-section-title-row compact">
-                    <span>AB-MCTS Replay Results</span>
-                    <span id="harness-abmcts-replay-status">No replay decisions</span>
-                  </div>
-                  <div id="harness-abmcts-decisions" class="harness-abmcts-decisions">
-                    <div class="harness-empty compact">Prepare replay to inspect AB-MCTS decisions</div>
-                  </div>
-                </section>
+                <details class="harness-trace-replay-drawer">
+                  <summary>AB-MCTS replay</summary>
+                  <section id="harness-abmcts-replay-results" class="harness-abmcts-replay-results" aria-label="AB-MCTS Replay Results">
+                    <div class="harness-section-title-row compact">
+                      <span>Replay decisions</span>
+                      <span id="harness-abmcts-replay-status">No replay decisions</span>
+                    </div>
+                    <div id="harness-abmcts-decisions" class="harness-abmcts-decisions">
+                      <div class="harness-empty compact">Prepare replay to inspect AB-MCTS decisions</div>
+                    </div>
+                  </section>
+                </details>
                 <div id="harness-trace-events" class="harness-trace-events"></div>
               </div>
             </div>
           </div>
           <div id="harness-panel-footer" class="harness-panel-footer">
-            <div class="harness-metrics">
+            <div class="harness-footer-status-bar">
               <span id="harness-state-pill" class="harness-pill">unknown</span>
-              <span id="harness-task-count">0 tasks</span>
-              <span id="harness-approval-count">0 approvals</span>
+              <span id="harness-task-count" class="harness-footer-stat">0 tasks</span>
+              <span id="harness-approval-count" class="harness-footer-stat">0 approvals</span>
             </div>
-            <div id="harness-verifier-evolution" class="harness-metrics">
-              <span id="harness-verifier-evolution-status">verifier evolution idle</span>
-              <span id="harness-verifier-latest-score">score n/a</span>
-              <span id="harness-verifier-baseline-comparison">baseline n/a</span>
-              <span id="harness-verifier-pending-promotions">0 verifier approvals</span>
+            <details id="harness-verifier-evolution" class="harness-footer-section">
+              <summary class="harness-footer-section-summary">Verifier evolution</summary>
+              <div class="harness-footer-section-body harness-metrics">
+                <span id="harness-verifier-evolution-status">verifier evolution idle</span>
+                <span id="harness-verifier-latest-score">score n/a</span>
+                <span id="harness-verifier-baseline-comparison">baseline n/a</span>
+                <span id="harness-verifier-pending-promotions">0 verifier approvals</span>
+              </div>
+              <div id="harness-verifier-artifacts" class="harness-artifact-links"></div>
+            </details>
+            <div class="harness-footer-section open">
+              <div class="harness-activity-heading">
+                <span>Subagents</span>
+                <span id="harness-subagent-count" class="harness-subagent-count-badge">0 active</span>
+              </div>
+              <div id="harness-subagents" class="harness-subagents"></div>
             </div>
-            <div id="harness-verifier-artifacts" class="harness-artifact-links"></div>
-            <div class="harness-activity-heading">
-              <span>Subagents</span>
-              <span id="harness-subagent-count">0 active</span>
-            </div>
-            <div id="harness-subagents" class="harness-subagents"></div>
-            <div class="harness-activity-heading">
-              <span>Events</span>
-            </div>
-            <div id="harness-events" class="harness-events"></div>
+            <details class="harness-footer-section">
+              <summary class="harness-footer-section-summary">Recent events</summary>
+              <div id="harness-events" class="harness-events"></div>
+            </details>
           </div>
         </aside>
         <section id="chat-workspace" class="chat-workspace" aria-label="Chat feed">
@@ -562,31 +715,49 @@
 
     <!-- Stats Modal -->
     <div id="modal-stats" class="modal hidden">
-      <div class="modal-overlay"></div>
-      <div class="modal-content">
-        <div class="modal-header"><h2>Session Stats</h2><button class="modal-close" onclick="closeModal('stats')">&times;</button></div>
-        <div class="modal-body"><div id="stats-content">Loading...</div></div>
+      <div class="modal-overlay" onclick="closeModal('stats')"></div>
+      <div class="modal-content modal-content-medium">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2>Session Stats</h2>
+            <p class="modal-subtitle">Token usage, cost, and context for this chat</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('stats')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body"><div id="stats-content" class="modal-panel">Loading...</div></div>
       </div>
     </div>
 
     <!-- Approval Inbox -->
     <div id="modal-approval-inbox" class="modal hidden">
-      <div class="modal-overlay"></div>
-      <div class="modal-content">
-        <div class="modal-header"><h2>Approval Inbox</h2><button class="modal-close" onclick="closeModal('approval-inbox')">&times;</button></div>
-        <div class="modal-body"><div id="approval-inbox-content" class="approval-inbox-content">No pending approvals</div></div>
+      <div class="modal-overlay" onclick="closeModal('approval-inbox')"></div>
+      <div class="modal-content modal-content-medium">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2>Approval Inbox</h2>
+            <p class="modal-subtitle">Review and respond to pending harness actions</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('approval-inbox')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body"><div id="approval-inbox-content" class="approval-inbox-content modal-panel">No pending approvals</div></div>
       </div>
     </div>
 
     <!-- Keyboard Shortcuts -->
     <div id="modal-shortcuts" class="modal hidden">
-      <div class="modal-overlay"></div>
+      <div class="modal-overlay" onclick="closeModal('shortcuts')"></div>
       <div class="modal-content modal-content-compact">
-        <div class="modal-header"><h2>Keyboard Shortcuts</h2><button class="modal-close" onclick="closeModal('shortcuts')">&times;</button></div>
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2>Keyboard Shortcuts</h2>
+            <p class="modal-subtitle">Composer and navigation keys</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('shortcuts')" aria-label="Close">&times;</button>
+        </div>
         <div class="modal-body">
           <ul class="shortcuts-list">
             <li><kbd>Enter</kbd><span>Send message (or steer while streaming)</span></li>
-            <li><kbd>Shift</kbd> + <kbd>Enter</kbd><span>New line in composer</span></li>
+            <li><kbd>Shift</kbd><span class="shortcut-plus">+</span><kbd>Enter</kbd><span>New line in composer</span></li>
             <li><kbd>?</kbd><span>Show this help</span></li>
             <li><kbd>Esc</kbd><span>Close dropdowns and modals</span></li>
           </ul>
@@ -596,31 +767,47 @@
 
     <!-- Harness Approval -->
     <div id="modal-harness-approval" class="modal hidden">
-      <div class="modal-overlay"></div>
-      <div class="modal-content">
-        <div class="modal-header"><h2>Harness Approval</h2><button class="modal-close" onclick="closeModal('harness-approval')">&times;</button></div>
-        <div class="modal-body"><div id="harness-approval-content">Loading...</div></div>
+      <div class="modal-overlay" onclick="closeModal('harness-approval')"></div>
+      <div class="modal-content modal-content-medium">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2>Harness Approval</h2>
+            <p class="modal-subtitle">A harness action needs your decision</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('harness-approval')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body"><div id="harness-approval-content" class="modal-panel">Loading...</div></div>
       </div>
     </div>
 
     <!-- Harness Artifact -->
     <div id="modal-harness-artifact" class="modal hidden">
-      <div class="modal-overlay"></div>
-      <div class="modal-content">
-        <div class="modal-header"><h2 id="harness-artifact-title">Harness Artifact</h2><button class="modal-close" onclick="closeModal('harness-artifact')">&times;</button></div>
-        <div class="modal-body"><div id="harness-artifact-content" class="harness-artifact-content">Loading...</div></div>
+      <div class="modal-overlay" onclick="closeModal('harness-artifact')"></div>
+      <div class="modal-content modal-content-wide">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2 id="harness-artifact-title">Harness Artifact</h2>
+            <p class="modal-subtitle">Output from the harness run</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('harness-artifact')" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body"><div id="harness-artifact-content" class="harness-artifact-content modal-panel">Loading...</div></div>
       </div>
     </div>
 
     <!-- Settings -->
     <div id="modal-settings" class="modal hidden">
-      <div class="modal-overlay"></div>
+      <div class="modal-overlay" onclick="closeModal('settings')"></div>
       <div class="modal-content settings-modal-content">
         <div class="modal-header">
-          <h2>Settings</h2>
-          <button class="modal-close" onclick="closeModal('settings')">&times;</button>
+          <div class="modal-header-text">
+            <h2>Settings</h2>
+            <p class="modal-subtitle">Connection, workplace, harness, and Pi configuration</p>
+          </div>
+          <button class="modal-close" type="button" onclick="closeModal('settings')" aria-label="Close">&times;</button>
         </div>
-        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <div class="settings-shell">
+        <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
           <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="connection">Connection</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="workplace">Workplace</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="general">General</button>
@@ -630,7 +817,7 @@
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="swarm">Swarm</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="secrets">Secrets</button>
           <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="pi">Pi</button>
-        </div>
+        </nav>
         <div class="modal-body settings-modal-body">
           <section id="settings-tab-connection" class="settings-panel active">
             <label class="settings-label" for="settings-server-url">Server URL</label>
@@ -818,15 +1005,22 @@
             </div>
           </section>
         </div>
+        </div>
       </div>
     </div>
 
     <!-- Extension UI -->
     <div id="modal-extension" class="modal hidden">
-      <div class="modal-overlay"></div>
-      <div class="modal-content">
-        <div class="modal-header"><h2 id="ext-title"></h2><button class="modal-close" id="ext-cancel">&times;</button></div>
-        <div class="modal-body" id="ext-body"></div>
+      <div class="modal-overlay" id="ext-overlay"></div>
+      <div class="modal-content modal-content-medium">
+        <div class="modal-header">
+          <div class="modal-header-text">
+            <h2 id="ext-title">Extension</h2>
+            <p class="modal-subtitle">Pi extension request</p>
+          </div>
+          <button class="modal-close" type="button" id="ext-cancel" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body modal-panel" id="ext-body"></div>
       </div>
     </div>
 
@@ -846,6 +1040,6 @@
     </div>
   </div>
   <script src="/harnessConfigUiSchema.js?v=20250627"></script>
-  <script src="/app.js?v=20250627"></script>
+  <script src="/app.js?v=20250628"></script>
 </body>
 </html>

@@ -1,0 +1,44 @@
+features:
+  skillEvolution: true
+  localMetaHarness: true
+  localMemoryGraph: true
+  swarm: true
+  deepResearch: true
+  icr:
+    enabled: true
+
+icr:
+  enabled: true
+
+skillEvolution:
+  besLane: true
+
+evolution:
+  promotionOrchestration: true
+  campaignMaxCycles: 3
+
+productionCapabilities:
+  operatorDashboards:
+    enabled: true
+    evidenceOnly: true
+  sourceTreeVariants:
+    enabled: true
+    evidenceOnly: true
+  productionAutonomyPolicy:
+    enabled: true
+    evidenceOnly: true
+  modelBackedRhoEmbeddings:
+    enabled: true
+    evidenceOnly: true
+  modelAssistedMemory:
+    enabled: true
+    evidenceOnly: true
+  modelAssistedBesJudgment:
+    enabled: true
+    evidenceOnly: true
+
+piBridge:
+  contextPackEnabled: true
+  fullLeverageProfile: true
+
+# Operator note: set models.swarmBaseUrl and held-out suite commands before production proof cycles.

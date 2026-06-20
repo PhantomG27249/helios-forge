@@ -101,6 +101,7 @@ import { createModelRouterPolicy } from './model/modelRouterPolicy.js';
 import { createModelRouterState } from './model/modelRouterState.js';
 import { createVllmHealthController } from './model/vllmHealthController.js';
 import { buildPiBridgeState } from './pi/piBridgeState.js';
+import { listPromotionQueueRecords } from './meta/promotionQueueReader.js';
 import { scheduleAttempts } from './swarm/attemptScheduler.js';
 import { getAgentProfile } from './swarm/agentProfiles.js';
 import { proposeChampionApply } from './swarm/championApply.js';
@@ -3360,6 +3361,20 @@ export function createHarnessSidecar({
           workspaceRoot: resolvedWorkspaceRoot,
         });
         sendJson(res, 200, state);
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/v1/promotion-queue') {
+        const limit = Number(url.searchParams.get('limit') || 20);
+        const records = await listPromotionQueueRecords({
+          workspaceRoot: resolvedWorkspaceRoot,
+          limit: Number.isFinite(limit) ? limit : 20,
+        });
+        sendJson(res, 200, {
+          records,
+          evidenceOnly: true,
+          canPromote: false,
+        });
         return;
       }
 

@@ -99,6 +99,15 @@ export class HarnessClient {
     return this.getJson(`/v1/skill-candidates${query}`);
   }
 
+  async getPiBridgeState() {
+    return this.getJson('/v1/pi-bridge/state');
+  }
+
+  async listPromotionQueue({ limit } = {}) {
+    const query = Number.isFinite(limit) ? `?limit=${encodeURIComponent(limit)}` : '';
+    return this.getJson(`/v1/promotion-queue${query}`);
+  }
+
   async reviewSkillCandidate({ candidateId, decision, reviewer = 'human', reason } = {}) {
     const action = decision === 'reject' ? 'reject' : 'approve';
     return this.postJson(`/v1/skill-candidates/${encodeURIComponent(candidateId)}/${action}`, {

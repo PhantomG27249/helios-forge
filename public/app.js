@@ -119,6 +119,10 @@ let harnessState = {
     sources: [],
     icrRan: false,
   },
+  research: {
+    activeTaskId: null,
+    runs: [],
+  },
 };
 const PRODUCTION_EVIDENCE_TYPES = [
   ['heldOutSuites', 'Held-out suites'],
@@ -422,6 +426,37 @@ const harnessTaskInput = $('#harness-task-input');
 const harnessDeepTaskInput = $('#harness-deep-task-input');
 const harnessDeepToolCalls = $('#harness-deep-tool-calls');
 const harnessDeepMinutes = $('#harness-deep-minutes');
+const harnessDeepScopeInclude = $('#harness-deep-scope-include');
+const harnessDeepScopeExclude = $('#harness-deep-scope-exclude');
+const harnessDeepMaxSources = $('#harness-deep-max-sources');
+const harnessDeepMaxTokens = $('#harness-deep-max-tokens');
+const harnessDeepOutputFormat = $('#harness-deep-output-format');
+const harnessDeepStatus = $('#harness-deep-status');
+const harnessDeepRunBadge = $('#harness-deep-run-badge');
+const harnessDeepRunSummary = $('#harness-deep-run-summary');
+const harnessDeepRunMetrics = $('#harness-deep-run-metrics');
+const harnessDeepRunEvents = $('#harness-deep-run-events');
+const harnessDeepPipeline = $('#harness-deep-pipeline');
+const harnessDeepPipelineStatus = $('#harness-deep-pipeline-status');
+const harnessDeepArtifacts = $('#harness-deep-artifacts');
+
+const DEEP_RESEARCH_PRESETS = {
+  quick: { maxToolCalls: 40, maxWallMinutes: 20, maxSources: 8, maxInputTokens: 120000 },
+  standard: { maxToolCalls: 80, maxWallMinutes: 45, maxSources: 16, maxInputTokens: 200000 },
+  literature: { maxToolCalls: 120, maxWallMinutes: 60, maxSources: 24, maxInputTokens: 250000 },
+  deep: { maxToolCalls: 150, maxWallMinutes: 90, maxSources: 32, maxInputTokens: 320000 },
+};
+
+const DEEP_RESEARCH_PIPELINE = [
+  { id: 'brief', label: 'Brief & scope', description: 'Restate question, inclusions, and output contract.', events: ['task.started'] },
+  { id: 'discovery', label: 'Source discovery', description: 'Map workspace corpus and approved connectors.', events: [] },
+  { id: 'ingestion', label: 'Source ingestion', description: 'Fetch pages, claims, and figure candidates.', events: [] },
+  { id: 'audit', label: 'Citation audit', description: 'Verify claim coverage and evidence quality.', events: ['research.report_created'] },
+  { id: 'contradictions', label: 'Contradiction review', description: 'Surface conflicts and stale evidence.', events: [] },
+  { id: 'handoff', label: 'Report & handoff', description: 'Compile bibliography and implementation recommendations.', events: ['research.v2_artifacts_created', 'research.handoff_created'] },
+];
+
+const DEEP_RESEARCH_SETTINGS_KEY = 'helios_deep_research_settings';
 const harnessCapabilityStatus = $('#harness-capability-status');
 const harnessCapabilityForm = $('#harness-capability-form');
 const capabilityInstallQuery = $('#capability-install-query');
@@ -439,8 +474,15 @@ const harnessAdaptiveReward = $('#harness-adaptive-reward');
 const harnessAdaptiveArmBalance = $('#harness-adaptive-arm-balance');
 const harnessAdaptiveNote = $('#harness-adaptive-note');
 const harnessProductionEvidenceStatus = $('#harness-production-evidence-status');
+const harnessProductionEvidenceSummary = $('#harness-production-evidence-summary');
 const harnessProductionEvidenceRows = $('#harness-production-evidence-rows');
+const harnessSwarmActivity = $('#harness-swarm-activity');
+const harnessSwarmActivityList = $('#harness-swarm-activity-list');
+const harnessSwarmLiveStrip = $('#harness-swarm-live-strip');
+const harnessSwarmLiveText = $('#harness-swarm-live-text');
 const harnessSkillCandidatesEl = $('#harness-skill-candidates');
+const harnessPiBridgeStateEl = $('#harness-pi-bridge-state');
+const harnessPromotionQueueEl = $('#harness-promotion-queue');
 const harnessAbMctsReplayStatus = $('#harness-abmcts-replay-status');
 const harnessAbMctsDecisions = $('#harness-abmcts-decisions');
 const harnessSwarmStatus = $('#harness-swarm-status');
@@ -478,6 +520,7 @@ const sessionSearchInput = document.getElementById('session-search');
 const sessionTitleBar = document.getElementById('session-title-bar');
 const sessionTitleInput = document.getElementById('session-title-input');
 const modeNav = document.getElementById('mode-nav');
+const topbarHarnessBar = document.getElementById('topbar-harness-bar');
 const configDriftBanner = document.getElementById('config-drift-banner');
 const configDriftText = document.getElementById('config-drift-text');
 const cdnOfflineBanner = document.getElementById('cdn-offline-banner');
@@ -839,8 +882,15 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_task_started' && msg.data) {
     harnessState.activeTasks.set(msg.data.taskId, msg.data);
+    if (msg.data.source === 'deep_research_ui') {
+      ensureDeepResearchRun({
+        taskId: msg.data.taskId,
+        question: compactText(msg.data.task || msg.data.summary || 'Research run', 'Research run'),
+      });
+      if (harnessDeepStatus) harnessDeepStatus.textContent = `Run ${compactText(msg.data.taskId, msg.data.taskId)} started`;
+    }
     scheduleHarnessRender({ immediate: true });
-    toast('Harness task started', 'success');
+    toast(msg.data.source === 'deep_research_ui' ? 'Deep research started' : 'Harness task started', 'success');
     return;
   }
   if (msg.type === 'harness_task_event' && msg.event) {
@@ -892,6 +942,14 @@ function handleMessage(msg) {
   }
   if (msg.type === 'harness_skill_candidates') {
     handleHarnessSkillCandidates(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_pi_bridge_state') {
+    handleHarnessPiBridgeState(msg.data || msg);
+    return;
+  }
+  if (msg.type === 'harness_promotion_queue') {
+    handleHarnessPromotionQueue(msg.data || msg);
     return;
   }
   if (msg.type === 'harness_skill_candidate_reviewed') {
@@ -1043,6 +1101,10 @@ function handleHarnessEvent(event) {
   if (event.type === 'recursive_evolution.coordinated') {
     event.summary = formatRecursiveEvolutionCoordinatedEvent(event);
   }
+  if (event.type?.startsWith('research.')) {
+    event.summary = formatDeepResearchEventSummary(event);
+  }
+  updateDeepResearchFromEvent(event);
   updateAutonomyLoopFromEvent(event);
 
   updateHarnessSubagent(event);
@@ -1461,35 +1523,106 @@ function pruneHarnessSubagents() {
   }
 }
 
+function getAgentLatestTimelineEvent(agent) {
+  if (!agent?.attemptId) return null;
+  const timeline = harnessState.swarm.timelines.get(agent.attemptId) || [];
+  return timeline[0] || null;
+}
+
+function getAgentCurrentPhase(agent) {
+  const latest = getAgentLatestTimelineEvent(agent);
+  return latest?.phase || latest?.type || agent?.status || 'pending';
+}
+
+function renderSwarmActivityCard(agent, { compact = false } = {}) {
+  const isActive = ['running', 'scheduled'].includes(agent.status);
+  const phase = getAgentCurrentPhase(agent);
+  const latest = getAgentLatestTimelineEvent(agent);
+  const activityText = latest?.summary || agent.summary || agent.strategy || 'Waiting for activity';
+  const worker = workerLabel(agent.worker);
+  const meta = [worker, agent.strategy, Number.isFinite(agent.score) ? `score ${agent.score}` : '']
+    .filter(Boolean)
+    .join(' · ');
+  return `
+    <button
+      class="harness-swarm-activity-card ${isActive ? 'active' : ''} ${compact ? 'compact' : ''}"
+      type="button"
+      data-swarm-attempt-id="${escAttr(agent.attemptId || '')}"
+      title="Open swarm inspector"
+    >
+      <div class="harness-swarm-activity-top">
+        <span class="harness-swarm-activity-role">
+          ${isActive ? '<span class="harness-live-dot sm"></span>' : ''}
+          ${esc(agent.role || 'subagent')}
+        </span>
+        <span class="harness-subagent-status ${esc(agent.status || 'unknown')}">${esc(agent.status || 'unknown')}</span>
+      </div>
+      <div class="harness-swarm-activity-phase">${esc(phase)}</div>
+      <div class="harness-swarm-activity-summary">${esc(activityText)}</div>
+      ${meta ? `<div class="harness-swarm-activity-meta">${esc(meta)}</div>` : ''}
+    </button>
+  `;
+}
+
+function renderHarnessSwarmActivity() {
+  if (!harnessSwarmActivity || !harnessSwarmActivityList) return;
+  const agents = Array.from(harnessState.subagents.values())
+    .sort((a, b) => {
+      const aActive = ['running', 'scheduled'].includes(a.status) ? 1 : 0;
+      const bActive = ['running', 'scheduled'].includes(b.status) ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    });
+  const activeAgents = agents.filter(agent => ['running', 'scheduled'].includes(agent.status));
+  const showActivity = activeAgents.length > 0;
+  harnessSwarmActivity.classList.toggle('hidden', !showActivity);
+  if (!showActivity) {
+    harnessSwarmActivityList.innerHTML = '';
+    return;
+  }
+  harnessSwarmActivityList.innerHTML = activeAgents
+    .slice(0, 4)
+    .map(agent => renderSwarmActivityCard(agent))
+    .join('');
+}
+
+function renderHarnessSwarmLiveStrip() {
+  if (!harnessSwarmLiveStrip || !harnessSwarmLiveText) return;
+  const agents = Array.from(harnessState.subagents.values());
+  const activeAgents = agents.filter(agent => ['running', 'scheduled'].includes(agent.status));
+  if (!activeAgents.length) {
+    harnessSwarmLiveStrip.classList.add('hidden');
+    return;
+  }
+  harnessSwarmLiveStrip.classList.remove('hidden');
+  const summaries = activeAgents.slice(0, 3).map((agent) => {
+    const phase = getAgentCurrentPhase(agent);
+    const latest = getAgentLatestTimelineEvent(agent);
+    const detail = latest?.summary || agent.summary || agent.strategy || 'working';
+    return `${agent.role || 'subagent'}: ${phase} — ${detail}`;
+  });
+  harnessSwarmLiveText.textContent = summaries.join(' | ');
+}
+
 function renderHarnessSubagents() {
   if (!harnessSubagents) return;
   const agents = Array.from(harnessState.subagents.values())
-    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+    .sort((a, b) => {
+      const aActive = ['running', 'scheduled'].includes(a.status) ? 1 : 0;
+      const bActive = ['running', 'scheduled'].includes(b.status) ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+    })
     .slice(0, 6);
 
   const activeCount = agents.filter(agent => ['running', 'scheduled'].includes(agent.status)).length;
   if (harnessSubagentCount) {
     harnessSubagentCount.textContent = `${activeCount} active`;
+    harnessSubagentCount.classList.toggle('has-active', activeCount > 0);
   }
 
-  harnessSubagents.innerHTML = agents.map(agent => {
-    const scoreText = Number.isFinite(agent.score) ? `score ${agent.score}` : '';
-    const changedLines = agent.patchStats?.changedLines;
-    const patchText = Number.isFinite(changedLines) ? `${changedLines} line${changedLines === 1 ? '' : 's'}` : '';
-    const verifyText = agent.verifierPassed === true ? 'verified' : agent.verifierPassed === false ? 'unverified' : '';
-    const meta = [scoreText, verifyText, patchText].filter(Boolean).join(' · ');
-    return `
-      <div class="harness-subagent-card">
-        <div class="harness-subagent-top">
-          <span class="harness-subagent-name">${esc(agent.role || 'subagent')} · ${esc(agent.attemptId || '')}</span>
-          <span class="harness-subagent-status ${esc(agent.status || 'unknown')}">${esc(agent.status || 'unknown')}</span>
-        </div>
-        <div class="harness-subagent-strategy">${esc(agent.strategy || 'strategy pending')}</div>
-        <div class="harness-subagent-summary">${esc(agent.summary || 'Waiting for activity')}</div>
-        ${meta ? `<div class="harness-subagent-meta">${esc(meta)}</div>` : ''}
-      </div>
-    `;
-  }).join('') || '<div class="harness-empty compact">No subagents running</div>';
+  harnessSubagents.innerHTML = agents.map(agent => renderSwarmActivityCard(agent, { compact: true })).join('')
+    || '<div class="harness-empty compact">No subagents running</div>';
 }
 
 function workerLabel(worker = {}) {
@@ -1543,21 +1676,29 @@ function renderInspectorObject(value, emptyText = 'None recorded') {
 
 function renderSwarmAttemptCard(agent) {
   const isActive = agent.attemptId === harnessState.swarm.selectedAttemptId;
+  const isRunning = ['running', 'scheduled'].includes(agent.status);
+  const phase = getAgentCurrentPhase(agent);
+  const latest = getAgentLatestTimelineEvent(agent);
+  const activityText = latest?.summary || agent.summary || agent.failure?.message || 'Waiting for activity';
   const scoreText = Number.isFinite(agent.score) ? `score ${formatScore(agent.score)}` : '';
   const verifyText = agent.verifierPassed === true ? 'verified' : agent.verifierPassed === false ? 'needs review' : '';
   const handoffText = Number.isFinite(agent.handoffQuality) ? `handoff ${formatScore(agent.handoffQuality)}` : '';
   const modelText = agent.model?.profileName
     ? `model ${agent.model.profileName}${agent.model?.route?.endpointProfile ? `/${agent.model.route.endpointProfile}` : ''}`
     : '';
-  const meta = [workerLabel(agent.worker), modelText, scoreText, verifyText, handoffText].filter(Boolean).join(' | ');
+  const meta = [workerLabel(agent.worker), modelText, scoreText, verifyText, handoffText].filter(Boolean).join(' · ');
   return `
-    <button class="harness-swarm-attempt-card ${isActive ? 'active' : ''}" type="button" data-swarm-attempt-id="${escAttr(agent.attemptId || '')}">
+    <button class="harness-swarm-attempt-card ${isActive ? 'active' : ''} ${isRunning ? 'running' : ''}" type="button" data-swarm-attempt-id="${escAttr(agent.attemptId || '')}">
       <span class="harness-swarm-attempt-top">
-        <span class="harness-swarm-attempt-name">${esc(agent.role || 'subagent')} | ${esc(agent.attemptId || '')}</span>
+        <span class="harness-swarm-attempt-name">
+          ${isRunning ? '<span class="harness-live-dot sm"></span>' : ''}
+          ${esc(agent.role || 'subagent')}
+        </span>
         <span class="harness-subagent-status ${esc(agent.status || 'unknown')}">${esc(agent.status || 'unknown')}</span>
       </span>
       <span class="harness-swarm-attempt-strategy">${esc(agent.strategy || agent.profile?.name || 'strategy pending')}</span>
-      <span class="harness-swarm-attempt-summary">${esc(agent.summary || agent.failure?.message || 'Waiting for activity')}</span>
+      <span class="harness-swarm-attempt-phase">${esc(phase)}</span>
+      <span class="harness-swarm-attempt-summary">${esc(activityText)}</span>
       ${meta ? `<span class="harness-swarm-attempt-meta">${esc(meta)}</span>` : ''}
     </button>
   `;
@@ -1675,6 +1816,7 @@ function renderHarnessSwarm() {
   }
   if (harnessSwarmActiveCount) {
     harnessSwarmActiveCount.textContent = `${activeCount} active`;
+    harnessSwarmActiveCount.classList.toggle('has-active', activeCount > 0);
   }
 
   harnessSwarmAttempts.innerHTML = agents.map(renderSwarmAttemptCard).join('')
@@ -1688,15 +1830,19 @@ function renderHarnessSwarm() {
   }
 
   const worker = workerLabel(selected.worker) || 'worker pending';
-  const detailSummary = [
-    `${selected.role || 'subagent'} ${selected.attemptId || ''}`,
-    worker,
-    selected.strategy,
-    selected.budgetRationale,
-    selected.thinkingSummary ? `thinking: ${selected.thinkingSummary}` : '',
-    selected.compactHandoff?.summary ? `handoff: ${selected.compactHandoff.summary}` : '',
-  ].filter(Boolean).join(' | ');
-  if (harnessSwarmDetailSummary) harnessSwarmDetailSummary.textContent = detailSummary;
+  const phase = getAgentCurrentPhase(selected);
+  const latest = getAgentLatestTimelineEvent(selected);
+  if (harnessSwarmDetailSummary) {
+    harnessSwarmDetailSummary.innerHTML = `
+      <div class="harness-swarm-detail-head">
+        <span class="harness-swarm-detail-role">${esc(selected.role || 'subagent')}</span>
+        <span class="harness-subagent-status ${esc(selected.status || 'unknown')}">${esc(selected.status || 'unknown')}</span>
+      </div>
+      <div class="harness-swarm-detail-phase">${esc(phase)}</div>
+      <div class="harness-swarm-detail-body">${esc(latest?.summary || selected.summary || selected.thinkingSummary || 'Waiting for activity')}</div>
+      <div class="harness-swarm-detail-meta">${esc([worker, selected.strategy, selected.budgetRationale].filter(Boolean).join(' · '))}</div>
+    `;
+  }
 
   const timeline = harnessState.swarm.timelines.get(selected.attemptId) || [];
   const eventKeys = timeline.map(swarmEventKey);
@@ -1797,11 +1943,14 @@ function renderHarnessPanel() {
   renderHarnessSkillCandidates();
   renderHarnessAbMctsReplay();
   renderHarnessSubagents();
+  renderHarnessSwarmActivity();
   renderHarnessSwarm();
+  renderHarnessSwarmLiveStrip();
   renderHarnessSwarmConfigBanner();
   renderCapabilityGoalRows();
   renderHarnessHierarchyFeedback();
   renderHarnessTraces();
+  renderDeepResearchPanel();
   renderAutonomyLoopStatus();
   harnessEvents.innerHTML = harnessState.latestEvents.map(event => `
     <div class="harness-event">
@@ -2005,33 +2154,41 @@ function renderHarnessProductionEvidence() {
   if (!harnessProductionEvidenceRows) return;
   const reports = harnessState.productionEvidence || {};
   const loadedCount = Object.keys(reports).length;
-  if (harnessProductionEvidenceStatus) {
-    harnessProductionEvidenceStatus.textContent = loadedCount
-      ? `${loadedCount} evidence surface${loadedCount === 1 ? '' : 's'} loaded`
-      : 'No production evidence loaded';
-  }
-  harnessProductionEvidenceRows.innerHTML = PRODUCTION_EVIDENCE_TYPES.map(([type, label]) => {
+  const rows = PRODUCTION_EVIDENCE_TYPES.map(([type, label]) => {
     const report = reports[type] || {};
     const gate = report.gate || {};
     const itemCount = report.summary?.itemCount ?? 0;
-    const mode = [gate.enabled ? 'enabled' : 'disabled', gate.mode || 'offline'].join(' | ');
-    return `
-      <div class="harness-list-row">
-        <div>
-          <strong>${esc(label)}</strong>
-          <span>${esc(mode)}</span>
-        </div>
-        <span>${esc(String(itemCount))} item${itemCount === 1 ? '' : 's'} | evidence_only</span>
-      </div>
-    `;
-  }).join('');
+    const enabled = gate.enabled === true;
+    const mode = gate.mode || 'offline';
+    const stateClass = enabled ? (mode === 'active' ? 'active' : 'enabled') : 'disabled';
+    return { type, label, itemCount, enabled, mode, stateClass };
+  });
+  const enabledCount = rows.filter(row => row.enabled).length;
+  const activeCount = rows.filter(row => row.enabled && row.mode === 'active').length;
+
+  if (harnessProductionEvidenceStatus) {
+    harnessProductionEvidenceStatus.textContent = loadedCount
+      ? `${loadedCount} surface${loadedCount === 1 ? '' : 's'} · ${enabledCount} enabled · ${activeCount} active`
+      : 'No production evidence loaded';
+  }
+  if (harnessProductionEvidenceSummary) {
+    harnessProductionEvidenceSummary.textContent = loadedCount
+      ? `${activeCount} active · ${enabledCount} enabled`
+      : 'not loaded';
+  }
+
+  harnessProductionEvidenceRows.innerHTML = rows.map((row) => `
+    <div class="harness-evidence-chip ${esc(row.stateClass)}" title="${esc(row.label)}">
+      <span class="harness-evidence-chip-label">${esc(row.label)}</span>
+      <span class="harness-evidence-chip-meta">${esc(row.enabled ? row.mode : 'off')} · ${esc(String(row.itemCount))}</span>
+    </div>
+  `).join('');
 }
 
 function ensureRecursiveEvolutionEvidencePanel() {
   if (harnessRecursiveEvolutionEvidenceRows) return;
-  const swarmPanel = document.getElementById('harness-tab-swarm');
-  const toolbar = swarmPanel?.querySelector('.harness-swarm-toolbar');
-  if (!toolbar) return;
+  const telemetryBody = document.getElementById('harness-swarm-telemetry-body');
+  if (!telemetryBody) return;
   const section = document.createElement('section');
   section.id = 'harness-recursive-evolution-evidence';
   section.className = 'harness-hierarchy-panel';
@@ -2044,7 +2201,7 @@ function ensureRecursiveEvolutionEvidencePanel() {
     <div id="harness-recursive-evolution-evidence-status" class="harness-muted-line">No recursive evolution evidence loaded</div>
     <div id="harness-recursive-evolution-evidence-rows" class="harness-list compact"></div>
   `;
-  toolbar.insertAdjacentElement('afterend', section);
+  telemetryBody.appendChild(section);
   harnessRecursiveEvolutionEvidenceStatus = $('#harness-recursive-evolution-evidence-status');
   harnessRecursiveEvolutionEvidenceRows = $('#harness-recursive-evolution-evidence-rows');
   $('#btn-harness-evidence-refresh')?.addEventListener('click', requestHarnessRecursiveEvolutionEvidence);
@@ -2252,6 +2409,46 @@ function requestHarnessSkillCandidates() {
   send({ type: 'harness_skill_candidates_get', workspaceRoot: getSelectedWorkspacePath() || undefined, limit: 20 });
 }
 
+function requestHarnessPiBridgeState() {
+  if (harnessPiBridgeStateEl) harnessPiBridgeStateEl.innerHTML = '<div class="harness-empty compact">Refreshing Pi bridge health...</div>';
+  send({ type: 'harness_pi_bridge_state_get', workspaceRoot: getSelectedWorkspacePath() || undefined });
+}
+
+function requestHarnessPromotionQueue() {
+  if (harnessPromotionQueueEl) harnessPromotionQueueEl.innerHTML = '<div class="harness-empty compact">Refreshing promotion queue...</div>';
+  send({ type: 'harness_promotion_queue_get', workspaceRoot: getSelectedWorkspacePath() || undefined, limit: 20 });
+}
+
+function handleHarnessPiBridgeState(payload = {}) {
+  if (!harnessPiBridgeStateEl) return;
+  const health = payload.bridgeHealth || payload;
+  const consumed = health.manifestConsumedByPi === true;
+  const skills = payload.skillInventory?.skills?.length ?? 0;
+  harnessPiBridgeStateEl.innerHTML = `
+    <article class="harness-skill-candidate">
+      <div class="harness-skill-candidate-name">Bridge manifest</div>
+      <div class="harness-skill-candidate-meta">${health.manifestPresent ? 'present' : 'missing'} | consumed by Pi: ${consumed ? 'yes' : 'no'}</div>
+      <div class="harness-skill-candidate-summary">Skills indexed: ${skills}. Helios Forge extension: ${health.piHeliosForgeExtensionInstalled ? 'installed' : 'missing'}.</div>
+    </article>
+  `;
+}
+
+function handleHarnessPromotionQueue(payload = {}) {
+  if (!harnessPromotionQueueEl) return;
+  const records = Array.isArray(payload.records) ? payload.records : [];
+  if (!records.length) {
+    harnessPromotionQueueEl.innerHTML = '<div class="harness-empty compact">Promotion queue is empty (evidence-only; operator approval required).</div>';
+    return;
+  }
+  harnessPromotionQueueEl.innerHTML = records.map((record) => `
+    <article class="harness-skill-candidate">
+      <div class="harness-skill-candidate-name">${esc(record.proposalId || record.candidateId || 'proposal')}</div>
+      <div class="harness-skill-candidate-meta">${esc(record.status || 'queued')} | ${esc(record.target || 'unknown target')}</div>
+      <div class="harness-skill-candidate-summary">Queued ${esc(record.queuedAt || 'unknown time')} — read-only; use existing approval flow to promote.</div>
+    </article>
+  `).join('');
+}
+
 function handleHarnessSkillCandidates(payload) {
   if (harnessSkillCandidatesRequestTimer) clearTimeout(harnessSkillCandidatesRequestTimer);
   harnessSkillCandidatesLoaded = true;
@@ -2380,13 +2577,49 @@ function renderHarnessAbMctsReplay() {
   }).join('') || '<div class="harness-empty compact">Prepare replay to inspect AB-MCTS decisions</div>';
 }
 
-function switchHarnessTab(tabId) {
-  activeHarnessTab = tabId || 'run';
-  document.querySelectorAll('.harness-tab').forEach(tab => {
-    const active = tab.dataset.harnessTab === activeHarnessTab;
+function syncSessionNav(tabId) {
+  document.querySelectorAll('.session-tab').forEach(tab => {
+    const active = tab.dataset.sessionTab === tabId;
     tab.classList.toggle('active', active);
     tab.setAttribute('aria-selected', active ? 'true' : 'false');
   });
+}
+
+function syncWorkspaceLayout(tabId) {
+  const isChat = tabId === 'chat';
+  const mainEl = document.getElementById('main');
+  const chatWorkspace = document.getElementById('chat-workspace');
+  mainEl?.classList.toggle('harness-focus', !isChat);
+  chatWorkspace?.classList.toggle('hidden', !isChat);
+  if (harnessPanel) {
+    if (isChat) delete harnessPanel.dataset.activeTab;
+    else harnessPanel.dataset.activeTab = tabId;
+  }
+}
+
+function switchSessionTab(tabId) {
+  const nextTab = tabId || 'chat';
+  syncWorkspaceLayout(nextTab);
+  if (nextTab === 'chat') {
+    activeAppMode = 'chat';
+    syncSessionNav('chat');
+    harnessPanel?.classList.add('hidden');
+    topbarHarnessBar?.classList.add('hidden');
+    return;
+  }
+
+  activeAppMode = nextTab;
+  activeHarnessTab = nextTab;
+  syncSessionNav(nextTab);
+  harnessPanel?.classList.remove('hidden');
+  topbarHarnessBar?.classList.remove('hidden');
+  send({ type: 'harness_status' });
+  switchHarnessTab(nextTab, { syncNav: false });
+}
+
+function switchHarnessTab(tabId, { syncNav = true } = {}) {
+  activeHarnessTab = tabId || 'run';
+  if (syncNav) syncSessionNav(activeHarnessTab);
   document.querySelectorAll('.harness-tab-panel').forEach(panel => {
     panel.classList.toggle('active', panel.id === `harness-tab-${activeHarnessTab}`);
   });
@@ -2397,6 +2630,10 @@ function switchHarnessTab(tabId) {
   }
   if (activeHarnessTab === 'capabilities' && !harnessSkillCandidatesLoaded) {
     requestHarnessSkillCandidates();
+  }
+  if (activeHarnessTab === 'capabilities') {
+    requestHarnessPiBridgeState();
+    requestHarnessPromotionQueue();
   }
   if (activeHarnessTab === 'traces' && !harnessTracesLoaded) {
     requestHarnessTraces();
@@ -2413,9 +2650,7 @@ function switchHarnessTab(tabId) {
 }
 
 function openHarnessTab(tabId) {
-  if (harnessPanel) harnessPanel.classList.remove('hidden');
-  send({ type: 'harness_status' });
-  switchHarnessTab(tabId);
+  switchSessionTab(tabId || 'run');
 }
 
 function requestHarnessCapabilities() {
@@ -3003,8 +3238,8 @@ function renderHarnessCapabilities() {
           <span class="harness-capability-meta">${esc(record.pathOrCommandOrUrl || record.approvalMode || 'local')}</span>
         </div>
         <div class="harness-capability-item-actions">
-          <button class="harness-artifact-link" type="button" data-capability-action="edit" data-capability-id="${escAttr(record.id)}">Edit</button>
-          <button class="harness-artifact-link" type="button" data-capability-action="delete" data-capability-id="${escAttr(record.id)}">Delete</button>
+          <button class="harness-btn harness-btn-sm" type="button" data-capability-action="edit" data-capability-id="${escAttr(record.id)}">Edit</button>
+          <button class="harness-btn harness-btn-sm" type="button" data-capability-action="delete" data-capability-id="${escAttr(record.id)}">Delete</button>
         </div>
       </div>
     `).join('') || '<div class="harness-empty compact">No records</div>';
@@ -3226,12 +3461,14 @@ function renderTraceEventRow(event, index) {
   ].filter(Boolean).join(' | ');
   return `
     <div class="harness-trace-event">
-      <div class="harness-trace-event-top">
-        <span class="harness-trace-event-index">${index + 1}</span>
-        <span class="harness-trace-event-type">${esc(event?.type || 'event')}</span>
+      <span class="harness-trace-event-index">${index + 1}</span>
+      <div class="harness-trace-event-body">
+        <div class="harness-trace-event-top">
+          <span class="harness-trace-event-type">${esc(event?.type || 'event')}</span>
+          ${meta ? `<span class="harness-trace-event-meta">${esc(meta)}</span>` : ''}
+        </div>
+        <div class="harness-trace-event-summary">${esc(event?.summary || event?.reason || event?.intent || event?.result || '')}</div>
       </div>
-      <div class="harness-trace-event-summary">${esc(event?.summary || event?.reason || event?.intent || event?.result || '')}</div>
-      ${meta ? `<div class="harness-trace-event-meta">${esc(meta)}</div>` : ''}
     </div>
   `;
 }
@@ -3269,9 +3506,9 @@ function renderHarnessTraces() {
 }
 
 function handleHarnessPanelClick(event) {
-  const tab = event.target.closest('[data-harness-tab]');
-  if (tab) {
-    switchHarnessTab(tab.dataset.harnessTab);
+  const deepPreset = event.target.closest('[data-deep-preset]');
+  if (deepPreset) {
+    applyDeepResearchPreset(deepPreset.dataset.deepPreset);
     return;
   }
 
@@ -3285,7 +3522,8 @@ function handleHarnessPanelClick(event) {
   if (swarmAttempt) {
     harnessState.swarm.selectedAttemptId = swarmAttempt.dataset.swarmAttemptId;
     harnessState.swarm.selectedEventKey = null;
-    renderHarnessPanel();
+    if (activeHarnessTab !== 'swarm') switchSessionTab('swarm');
+    else renderHarnessPanel();
     return;
   }
 
@@ -3394,6 +3632,270 @@ function launchHarnessFromPrompt(text, options = {}) {
   return route;
 }
 
+function readDeepResearchSpecialists() {
+  return Array.from(document.querySelectorAll('input[name="deep-specialist"]:checked'))
+    .map((input) => input.value)
+    .filter(Boolean);
+}
+
+function loadDeepResearchSettings() {
+  try {
+    const raw = localStorage.getItem(DEEP_RESEARCH_SETTINGS_KEY);
+    if (!raw) return;
+    const settings = JSON.parse(raw);
+    if (settings.scopeInclude && harnessDeepScopeInclude) harnessDeepScopeInclude.value = settings.scopeInclude;
+    if (settings.scopeExclude && harnessDeepScopeExclude) harnessDeepScopeExclude.value = settings.scopeExclude;
+    if (settings.maxToolCalls && harnessDeepToolCalls) harnessDeepToolCalls.value = String(settings.maxToolCalls);
+    if (settings.maxWallMinutes && harnessDeepMinutes) harnessDeepMinutes.value = String(settings.maxWallMinutes);
+    if (settings.maxSources && harnessDeepMaxSources) harnessDeepMaxSources.value = String(settings.maxSources);
+    if (settings.maxInputTokens && harnessDeepMaxTokens) {
+      harnessDeepMaxTokens.value = String(Math.round(settings.maxInputTokens / 1000));
+    }
+    if (settings.outputFormat && harnessDeepOutputFormat) harnessDeepOutputFormat.value = settings.outputFormat;
+    if (Array.isArray(settings.specialists)) {
+      document.querySelectorAll('input[name="deep-specialist"]').forEach((input) => {
+        input.checked = settings.specialists.includes(input.value);
+      });
+    }
+  } catch {
+    // ignore invalid persisted settings
+  }
+}
+
+function saveDeepResearchSettings() {
+  try {
+    const maxInputTokens = Number.parseInt(harnessDeepMaxTokens?.value || '200', 10) * 1000;
+    localStorage.setItem(DEEP_RESEARCH_SETTINGS_KEY, JSON.stringify({
+      scopeInclude: harnessDeepScopeInclude?.value?.trim() || '',
+      scopeExclude: harnessDeepScopeExclude?.value?.trim() || '',
+      maxToolCalls: Number.parseInt(harnessDeepToolCalls?.value || '80', 10),
+      maxWallMinutes: Number.parseInt(harnessDeepMinutes?.value || '45', 10),
+      maxSources: Number.parseInt(harnessDeepMaxSources?.value || '16', 10),
+      maxInputTokens: Number.isFinite(maxInputTokens) ? maxInputTokens : 200000,
+      outputFormat: harnessDeepOutputFormat?.value || 'full_report',
+      specialists: readDeepResearchSpecialists(),
+    }));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function applyDeepResearchPreset(presetId) {
+  const preset = DEEP_RESEARCH_PRESETS[presetId];
+  if (!preset) return;
+  if (harnessDeepToolCalls) harnessDeepToolCalls.value = String(preset.maxToolCalls);
+  if (harnessDeepMinutes) harnessDeepMinutes.value = String(preset.maxWallMinutes);
+  if (harnessDeepMaxSources) harnessDeepMaxSources.value = String(preset.maxSources);
+  if (harnessDeepMaxTokens) harnessDeepMaxTokens.value = String(Math.round(preset.maxInputTokens / 1000));
+  saveDeepResearchSettings();
+  if (harnessDeepStatus) {
+    harnessDeepStatus.textContent = `Preset applied: ${presetId.replace('_', ' ')} (${preset.maxToolCalls} calls · ${preset.maxWallMinutes} min · ${preset.maxSources} sources)`;
+  }
+}
+
+function buildDeepResearchTaskPrompt({
+  question,
+  scopeInclude,
+  scopeExclude,
+  outputFormat,
+  specialists,
+}) {
+  const outputLabels = {
+    full_report: 'Full report with bibliography',
+    brief: 'Executive brief',
+    claim_evidence: 'Claim–evidence table',
+    implementation_handoff: 'Implementation handoff',
+  };
+  const lines = [
+    question,
+    '',
+    '---',
+    'Deep research contract:',
+    `Output format: ${outputLabels[outputFormat] || outputFormat}`,
+  ];
+  if (scopeInclude) lines.push(`Scope include: ${scopeInclude}`);
+  if (scopeExclude) lines.push(`Scope exclude: ${scopeExclude}`);
+  if (specialists.length) lines.push(`Activate specialists: ${specialists.join(', ')}`);
+  lines.push('Require citations, claim-evidence separation, contradiction review, and implementation handoff when code changes are implied.');
+  return lines.join('\n');
+}
+
+function getDeepResearchRun(taskId) {
+  return harnessState.research.runs.find((run) => run.taskId === taskId) || null;
+}
+
+function ensureDeepResearchRun({ taskId, question }) {
+  let run = getDeepResearchRun(taskId);
+  if (!run) {
+    run = {
+      taskId,
+      question,
+      status: 'running',
+      startedAt: new Date().toISOString(),
+      events: [],
+      metrics: {},
+      artifactIds: [],
+      completedStages: new Set(),
+    };
+    harnessState.research.runs.unshift(run);
+    harnessState.research.runs = harnessState.research.runs.slice(0, 6);
+  }
+  harnessState.research.activeTaskId = taskId;
+  return run;
+}
+
+function formatDeepResearchEventSummary(event = {}) {
+  if (event.type === 'research.report_created') {
+    return `Report created · ${event.sourceCount || 0} sources · ${event.verifiedClaims || 0}/${event.totalClaims || 0} claims verified`;
+  }
+  if (event.type === 'research.v2_artifacts_created') {
+    return `V2 artifacts · ${(event.artifactNames || []).length} files · risk ${event.riskLevel || 'n/a'}`;
+  }
+  if (event.type === 'research.v2_artifacts_failed') {
+    return event.error || event.reason || 'V2 artifact generation failed';
+  }
+  if (event.type === 'research.handoff_created') {
+    return 'Implementation handoff ready';
+  }
+  if (event.type === 'task.started') {
+    return 'Research run started';
+  }
+  return event.summary || event.reason || event.intent || event.result || '';
+}
+
+function updateDeepResearchFromEvent(event = {}) {
+  if (!event.taskId) return;
+  const isResearchEvent = event.type?.startsWith('research.')
+    || (event.type === 'task.started' && event.source === 'deep_research_ui');
+  const run = getDeepResearchRun(event.taskId)
+    || (isResearchEvent ? ensureDeepResearchRun({ taskId: event.taskId, question: event.summary || 'Research run' }) : null);
+  if (!run) return;
+
+  const summary = formatDeepResearchEventSummary(event);
+  run.events.unshift({
+    type: event.type,
+    summary,
+    timestamp: event.timestamp || new Date().toISOString(),
+  });
+  run.events = run.events.slice(0, 12);
+
+  if (event.type === 'research.report_created') {
+    run.metrics.sources = event.sourceCount;
+    run.metrics.verifiedClaims = event.verifiedClaims;
+    run.metrics.totalClaims = event.totalClaims;
+    for (const artifact of event.artifacts || []) run.artifactIds.push(artifact.artifactId);
+  }
+  if (event.type === 'research.v2_artifacts_created') {
+    run.metrics.artifactCount = (event.artifactNames || []).length;
+    run.metrics.riskLevel = event.riskLevel;
+    run.status = 'completed';
+    harnessState.research.activeTaskId = null;
+  }
+  if (event.type === 'research.handoff_created') {
+    run.status = 'completed';
+    harnessState.research.activeTaskId = null;
+  }
+  if (event.type === 'research.v2_artifacts_failed') {
+    run.status = 'failed';
+    harnessState.research.activeTaskId = null;
+  }
+
+  for (const stage of DEEP_RESEARCH_PIPELINE) {
+    if (stage.events.includes(event.type)) run.completedStages.add(stage.id);
+  }
+  if (event.type === 'research.report_created') {
+    run.completedStages.add('discovery');
+    run.completedStages.add('ingestion');
+    run.completedStages.add('audit');
+  }
+  if (event.type === 'research.v2_artifacts_created' || event.type === 'research.handoff_created') {
+    run.completedStages.add('contradictions');
+    run.completedStages.add('handoff');
+  }
+}
+
+function renderDeepResearchPipeline(run = null) {
+  if (!harnessDeepPipeline) return;
+  const completed = run?.completedStages || new Set();
+  const activeStageId = run?.status === 'running'
+    ? DEEP_RESEARCH_PIPELINE.find((stage) => !completed.has(stage.id))?.id || null
+    : null;
+
+  harnessDeepPipeline.innerHTML = DEEP_RESEARCH_PIPELINE.map((stage, index) => {
+    const done = completed.has(stage.id);
+    const active = stage.id === activeStageId;
+    return `
+      <div class="harness-deep-pipeline-step ${done ? 'done' : ''} ${active ? 'active' : ''}">
+        <span class="harness-deep-pipeline-index">${done ? '✓' : index + 1}</span>
+        <div class="harness-deep-pipeline-copy">
+          <strong>${esc(stage.label)}</strong>
+          <span>${esc(stage.description)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if (harnessDeepPipelineStatus) {
+    if (!run) harnessDeepPipelineStatus.textContent = 'idle';
+    else if (run.status === 'completed') harnessDeepPipelineStatus.textContent = 'complete';
+    else if (run.status === 'failed') harnessDeepPipelineStatus.textContent = 'failed';
+    else harnessDeepPipelineStatus.textContent = `${completed.size}/${DEEP_RESEARCH_PIPELINE.length} stages`;
+  }
+}
+
+function renderDeepResearchArtifacts() {
+  if (!harnessDeepArtifacts) return;
+  const artifacts = Array.from(harnessState.artifacts.values())
+    .filter((artifact) => /research/i.test(String(artifact.type || artifact.title || '')))
+    .slice(0, 12);
+
+  harnessDeepArtifacts.innerHTML = artifacts.map((artifact) => `
+    <button class="harness-deep-artifact-card" type="button" onclick="openHarnessArtifact('${escAttr(artifact.artifactId)}')">
+      <strong>${esc(artifact.title || artifact.type || 'Research artifact')}</strong>
+      <span>${esc(artifact.type || 'artifact')}${artifact.path ? ` · ${esc(compactText(artifact.path, artifact.path))}` : ''}</span>
+    </button>
+  `).join('') || '<div class="harness-empty compact">Research reports appear here after a run completes.</div>';
+}
+
+function renderDeepResearchPanel() {
+  if (!harnessDeepRunBadge) return;
+  const activeRun = harnessState.research.activeTaskId
+    ? getDeepResearchRun(harnessState.research.activeTaskId)
+    : harnessState.research.runs[0] || null;
+
+  renderDeepResearchPipeline(activeRun);
+
+  if (activeRun) {
+    harnessDeepRunBadge.textContent = activeRun.status;
+    harnessDeepRunBadge.className = `harness-pill ${activeRun.status === 'completed' ? 'running' : activeRun.status}`;
+    harnessDeepRunSummary.textContent = compactText(activeRun.question, activeRun.question);
+    const metricParts = [];
+    if (Number.isFinite(activeRun.metrics.sources)) metricParts.push(`${activeRun.metrics.sources} sources`);
+    if (Number.isFinite(activeRun.metrics.verifiedClaims)) {
+      metricParts.push(`${activeRun.metrics.verifiedClaims}/${activeRun.metrics.totalClaims || '?'} claims`);
+    }
+    if (activeRun.metrics.riskLevel) metricParts.push(`risk ${activeRun.metrics.riskLevel}`);
+    if (activeRun.metrics.artifactCount) metricParts.push(`${activeRun.metrics.artifactCount} artifacts`);
+    harnessDeepRunMetrics.innerHTML = metricParts.map((part) => `<span>${esc(part)}</span>`).join('');
+    harnessDeepRunEvents.innerHTML = activeRun.events.map((entry) => `
+      <div class="harness-deep-run-event">
+        <div class="harness-deep-run-event-type">${esc(entry.type)}</div>
+        <div class="harness-deep-run-event-summary">${esc(entry.summary)}</div>
+      </div>
+    `).join('') || '<div class="harness-empty compact">Waiting for research events…</div>';
+  } else {
+    harnessDeepRunBadge.textContent = 'idle';
+    harnessDeepRunBadge.className = 'harness-pill';
+    harnessDeepRunSummary.textContent = 'No active research run.';
+    if (harnessDeepRunMetrics) harnessDeepRunMetrics.innerHTML = '';
+    if (harnessDeepRunEvents) {
+      harnessDeepRunEvents.innerHTML = '<div class="harness-empty compact">Start a research run to see live pipeline progress.</div>';
+    }
+  }
+
+  renderDeepResearchArtifacts();
+}
+
 function runHarnessTask() {
   const task = harnessTaskInput?.value?.trim();
   if (!task) return;
@@ -3409,10 +3911,31 @@ function runHarnessTask() {
 }
 
 function runDeepResearchTask() {
-  const task = harnessDeepTaskInput?.value?.trim();
-  if (!task) return;
+  const question = harnessDeepTaskInput?.value?.trim();
+  if (!question) {
+    toast('Research question required', 'error');
+    return;
+  }
+  saveDeepResearchSettings();
+
   const maxToolCalls = Number.parseInt(harnessDeepToolCalls?.value || '80', 10);
   const maxWallMinutes = Number.parseInt(harnessDeepMinutes?.value || '45', 10);
+  const maxSources = Number.parseInt(harnessDeepMaxSources?.value || '16', 10);
+  const maxInputTokens = Number.parseInt(harnessDeepMaxTokens?.value || '200', 10) * 1000;
+  const scopeInclude = harnessDeepScopeInclude?.value?.trim() || '';
+  const scopeExclude = harnessDeepScopeExclude?.value?.trim() || '';
+  const outputFormat = harnessDeepOutputFormat?.value || 'full_report';
+  const specialists = readDeepResearchSpecialists();
+  const task = buildDeepResearchTaskPrompt({
+    question,
+    scopeInclude,
+    scopeExclude,
+    outputFormat,
+    specialists,
+  });
+
+  if (harnessDeepStatus) harnessDeepStatus.textContent = 'Starting research run…';
+
   send({
     type: 'harness_task_start',
     task,
@@ -3420,6 +3943,8 @@ function runDeepResearchTask() {
     budget: {
       maxToolCalls: Number.isFinite(maxToolCalls) ? maxToolCalls : 80,
       maxWallMinutes: Number.isFinite(maxWallMinutes) ? maxWallMinutes : 45,
+      maxSources: Number.isFinite(maxSources) ? maxSources : 16,
+      maxInputTokens: Number.isFinite(maxInputTokens) ? maxInputTokens : 200000,
     },
     source: 'deep_research_ui',
     workspaceRoot: getSelectedWorkspacePath() || undefined,
@@ -4295,7 +4820,7 @@ function renderModelList(filter = '') {
         <div class="dropdown-item-name">${esc(m.name || m.id)}</div>
         <div class="dropdown-item-sub">${esc(m.provider)}${m.contextWindow ? ' · ' + (m.contextWindow / 1000).toFixed(0) + 'K ctx' : ''}</div>
       </div>
-    </div>`).join('') || '<p style="color:var(--text-tertiary);text-align:center;padding:16px;">No models found</p>';
+    </div>`).join('') || '<div class="dropdown-empty">No models found</div>';
 }
 
 function renderThinkingList() {
@@ -5146,7 +5671,8 @@ function renderHarnessSwarmConfigBanner() {
   const council = config.modelCouncil || {};
   const endpointCount = Object.keys(council.endpointProfiles || {}).length;
   const needsConfig = !council.enabled || endpointCount === 0;
-  harnessSwarmConfigBanner.classList.toggle('hidden', !needsConfig);
+  const showBanner = needsConfig && activeHarnessTab === 'swarm' && activeAppMode !== 'chat';
+  harnessSwarmConfigBanner.classList.toggle('hidden', !showBanner);
   if (harnessSwarmConfigBannerText) {
     harnessSwarmConfigBannerText.textContent = !council.enabled
       ? 'Model council is disabled — swarm routing will use defaults only.'
@@ -5170,7 +5696,7 @@ function renderApprovalInbox() {
   if (!container) return;
   const pending = Array.from(harnessState.pendingApprovals.values());
   if (!pending.length) {
-    container.innerHTML = '<div class="settings-hint">No pending approvals</div>';
+    container.innerHTML = '<div class="approval-inbox-empty">No pending approvals — you&apos;re all caught up.</div>';
     return;
   }
   container.innerHTML = pending.map(event => {
@@ -5199,19 +5725,16 @@ function openApprovalInbox() {
 }
 
 function setAppMode(mode) {
-  activeAppMode = mode || 'chat';
-  document.querySelectorAll('.mode-nav-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.mode === activeAppMode);
-  });
-  if (activeAppMode === 'chat') {
-    harnessPanel?.classList.add('hidden');
-    return;
-  }
-  openHarnessTab({
+  const mapped = {
+    chat: 'chat',
     research: 'run',
     capabilities: 'capabilities',
     traces: 'traces',
-  }[activeAppMode] || 'run');
+    swarm: 'swarm',
+    'deep-research': 'deep-research',
+    run: 'run',
+  }[mode] || mode || 'chat';
+  switchSessionTab(mapped);
 }
 
 function focusTabList(tablist, target) {
@@ -5238,7 +5761,7 @@ function handleTablistKeydown(event, onSelect) {
   const tab = tabs[next];
   if (!tab) return;
   event.preventDefault();
-  onSelect?.(tab.dataset.harnessTab || tab.dataset.settingsTab, tab);
+  onSelect?.(tab.dataset.sessionTab || tab.dataset.harnessTab || tab.dataset.settingsTab, tab);
   tab.focus();
 }
 
@@ -5393,7 +5916,7 @@ function renderStats(data) {
       <div class="stat-card"><div class="stat-label">Input Tokens</div><div class="stat-value">${(tokens.input || 0).toLocaleString()}</div></div>
       <div class="stat-card"><div class="stat-label">Output Tokens</div><div class="stat-value">${(tokens.output || 0).toLocaleString()}</div></div>
       <div class="stat-card"><div class="stat-label">Cost</div><div class="stat-value accent">$${(data.cost || 0).toFixed(4)}</div></div>
-      <div class="stat-card"><div class="stat-label">Session</div><div class="stat-value" style="font-size:11px;word-break:break-all;">${(data.sessionId || '').slice(0, 12)}...</div></div>
+      <div class="stat-card"><div class="stat-label">Session</div><div class="stat-value small">${esc((data.sessionId || '').slice(0, 16))}…</div></div>
       <div class="context-bar">
         <div class="context-bar-label">Context: ${typeof pct === 'number' ? pct.toFixed(1) + '%' : 'N/A'}</div>
         <div class="context-bar-track"><div class="context-bar-fill" style="width:${typeof pct === 'number' ? pct : 0}%"></div></div>
@@ -5897,19 +6420,35 @@ $('#btn-export')?.addEventListener('click', (e) => exportChat(e.shiftKey ? 'json
 sidebarToggle?.addEventListener('click', toggleSidebar);
 sidebarOverlay?.addEventListener('click', closeSidebar);
 modeNav?.addEventListener('click', (event) => {
-  const btn = event.target.closest('.mode-nav-btn');
+  const btn = event.target.closest('.session-tab');
   if (!btn) return;
-  setAppMode(btn.dataset.mode);
+  switchSessionTab(btn.dataset.sessionTab || btn.dataset.mode);
 });
 $('#btn-harness-start').addEventListener('click', startHarness);
 $('#btn-harness-stop').addEventListener('click', stopHarness);
 $('#btn-harness-run').addEventListener('click', runHarnessTask);
 if (harnessPanel) harnessPanel.addEventListener('click', handleHarnessPanelClick);
 $('#btn-harness-deep-run')?.addEventListener('click', runDeepResearchTask);
+$('#btn-harness-deep-artifacts-refresh')?.addEventListener('click', renderDeepResearchArtifacts);
+[
+  harnessDeepScopeInclude,
+  harnessDeepScopeExclude,
+  harnessDeepToolCalls,
+  harnessDeepMinutes,
+  harnessDeepMaxSources,
+  harnessDeepMaxTokens,
+  harnessDeepOutputFormat,
+].forEach((el) => el?.addEventListener('change', saveDeepResearchSettings));
+document.querySelectorAll('input[name="deep-specialist"]').forEach((input) => {
+  input.addEventListener('change', saveDeepResearchSettings);
+});
 $('#btn-harness-adaptive-refresh')?.addEventListener('click', requestHarnessAdaptiveSearchStatus);
 $('#btn-harness-production-evidence-refresh')?.addEventListener('click', requestHarnessProductionEvidence);
+$('#btn-harness-open-swarm-tab')?.addEventListener('click', () => openHarnessTab('swarm'));
 $('#btn-harness-capabilities-refresh')?.addEventListener('click', requestHarnessCapabilities);
 $('#btn-harness-skill-candidates-refresh')?.addEventListener('click', requestHarnessSkillCandidates);
+$('#btn-harness-pi-bridge-refresh')?.addEventListener('click', requestHarnessPiBridgeState);
+$('#btn-harness-promotion-queue-refresh')?.addEventListener('click', requestHarnessPromotionQueue);
 $('#btn-capability-search')?.addEventListener('click', requestSmitherySearch);
 $('#btn-capability-install-quick')?.addEventListener('click', installCapabilityFromQuickSource);
 $('#btn-harness-capability-reset')?.addEventListener('click', resetHarnessCapabilityForm);
@@ -5931,7 +6470,7 @@ $('#harness-task-input').addEventListener('keydown', (e) => {
   }
 });
 $('#harness-deep-task-input')?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     runDeepResearchTask();
   }
@@ -6020,8 +6559,8 @@ sessionTitleInput?.addEventListener('keydown', (event) => {
 sessionTitleInput?.addEventListener('blur', commitInlineSessionRename);
 capabilityViewMode?.addEventListener('change', () => setCapabilitiesViewMode(capabilityViewMode.checked));
 document.querySelector('.workspace-breadcrumb')?.addEventListener('click', () => openSettings('workplace'));
-document.querySelector('.harness-tabs')?.addEventListener('keydown', (event) => {
-  handleTablistKeydown(event, (tabId) => switchHarnessTab(tabId));
+document.querySelector('#mode-nav')?.addEventListener('keydown', (event) => {
+  handleTablistKeydown(event, (tabId) => switchSessionTab(tabId));
 });
 document.querySelector('#modal-settings .settings-tabs')?.addEventListener('keydown', (event) => {
   handleTablistKeydown(event, (tabId) => {
@@ -6061,6 +6600,8 @@ if (autoHarnessToggle) {
 if (btnDebug) btnDebug.addEventListener('click', () => debugPanel.classList.toggle('hidden'));
 const btnDebugClose = document.getElementById('btn-debug-close');
 if (btnDebugClose) btnDebugClose.addEventListener('click', () => debugPanel.classList.add('hidden'));
+document.getElementById('ext-cancel')?.addEventListener('click', extCancel);
+document.getElementById('ext-overlay')?.addEventListener('click', extCancel);
 
 // Auto-open debug on issues
 setInterval(() => {
@@ -6104,4 +6645,5 @@ window.addEventListener('load', () => {
   bootstrapElectronConnection();
 });
 setCapabilitiesViewMode(false);
+loadDeepResearchSettings();
 setAppMode('chat');

@@ -1,4 +1,5 @@
 import { sanitizeIcrEvidenceForDashboard } from '../icr/icrEvidence.js';
+import { buildPiBridgeHealthFromTelemetry } from '../pi/piBridgeTelemetry.js';
 
 export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
   {
@@ -105,13 +106,13 @@ export const CAPABILITY_GOAL_DEFINITIONS = Object.freeze([
     paperGradeAutonomyGaps: ['nested_swarm_production_proof_pending'],
   },
   {
-    goalId: 'oversoul_coverage',
-    label: 'Oversoul advisory runtime coverage',
-    requiredEvidence: ['oversoul_contract', 'role_ecology', 'strategy_posture', 'governance_posture'],
+    goalId: 'pi_bridge_leverage',
+    label: 'Pi bridge leverage and context pack',
+    requiredEvidence: ['context_pack_rendered', 'manifest_consumed', 'shadow_skills_surfaced'],
     maturityStage: 'implemented_substrate',
     productionGate: null,
     productionEvidenceRequired: [],
-    paperGradeAutonomyGaps: ['nested_swarm_production_proof_pending'],
+    paperGradeAutonomyGaps: ['repeated_manifest_consumed_telemetry'],
   },
 ]);
 
@@ -340,6 +341,44 @@ function deriveIcrCapabilitySignal(records = [], config = {}) {
       persistedProductionEvidence: productionReady,
     },
   };
+}
+
+export function buildPiBridgeLeverageSignal({
+  pack = null,
+  bridgeHealth = null,
+  telemetry = null,
+} = {}) {
+  const evidence = [];
+  const blockers = [];
+  if (pack?.renderStats?.bytes > 0 || pack?.skills) evidence.push('context_pack_rendered');
+  else blockers.push('missing_context_pack_render');
+  const consumed = bridgeHealth?.manifestConsumedByPi === true || telemetry?.manifestConsumedByPi === true;
+  if (consumed) evidence.push('manifest_consumed');
+  else blockers.push('manifest_not_consumed_by_pi');
+  const shadowCount = Array.isArray(pack?.skills?.shadowHints) ? pack.skills.shadowHints.length : 0;
+  if (shadowCount > 0) evidence.push('shadow_skills_surfaced');
+  return {
+    goalId: 'pi_bridge_leverage',
+    evidence,
+    blockers,
+    notes: [{
+      renderBytes: pack?.renderStats?.bytes ?? null,
+      shadowSkillCount: shadowCount,
+    }],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function buildPiBridgeLeverageSignalFromWorkspace({
+  workspaceRoot,
+  pack = null,
+} = {}) {
+  const telemetry = await buildPiBridgeHealthFromTelemetry({ workspaceRoot });
+  return buildPiBridgeLeverageSignal({
+    pack,
+    telemetry,
+    bridgeHealth: telemetry,
+  });
 }
 
 export function summarizeCapabilityGoalStatus({

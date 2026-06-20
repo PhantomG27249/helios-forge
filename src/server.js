@@ -562,6 +562,18 @@ async function handleCommand(ws, msg, pi, harness, feedback) {
         ws.send(JSON.stringify({ type: 'harness_skill_candidates', data: result }));
         break;
       }
+      case 'harness_pi_bridge_state_get': {
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const result = await harness.client.getPiBridgeState();
+        ws.send(JSON.stringify({ type: 'harness_pi_bridge_state', data: result }));
+        break;
+      }
+      case 'harness_promotion_queue_get': {
+        await ensureHarnessRunning(harness, pi, feedback, { workspaceRoot: msg.workspaceRoot });
+        const result = await harness.client.listPromotionQueue({ limit: msg.limit || 20 });
+        ws.send(JSON.stringify({ type: 'harness_promotion_queue', data: result }));
+        break;
+      }
       case 'harness_skill_candidate_review': {
         await ensureHarnessRunning(harness, pi, feedback);
         const result = await harness.client.reviewSkillCandidate({
