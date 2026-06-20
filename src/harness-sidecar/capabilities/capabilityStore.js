@@ -1,5 +1,7 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+const registryWriteChains = new Map();
 
 const SUPPORTED_TYPES = ['skill', 'mcp', 'pi_extension', 'profile', 'template', 'slash_command'];
 const LOCAL_PATH_FIELDS = ['path', 'folder', 'file'];
@@ -139,10 +141,45 @@ function policyMetadata(policy) {
   };
 }
 
-async function readStoredRegistry(workspaceRoot) {
+function parseRegistryJson(raw) {
   try {
-    const raw = await readFile(getRegistryPath(workspaceRoot), 'utf8');
     return JSON.parse(raw);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    const positionMatch = error.message.match(/position (\d+)/i);
+    if (!positionMatch || !/after json/i.test(error.message)) {
+      throw error;
+    }
+    const trimmed = raw.slice(0, Number(positionMatch[1])).trimEnd();
+    if (!trimmed) throw error;
+    return JSON.parse(trimmed);
+  }
+}
+
+function withRegistryWriteLock(workspaceRoot, operation) {
+  const key = path.resolve(workspaceRoot);
+  const previous = registryWriteChains.get(key) || Promise.resolve();
+  const next = previous.catch(() => {}).then(operation);
+  registryWriteChains.set(key, next);
+  return next.finally(() => {
+    if (registryWriteChains.get(key) === next) {
+      registryWriteChains.delete(key);
+    }
+  });
+}
+
+async function readStoredRegistry(workspaceRoot) {
+  const registryPath = getRegistryPath(workspaceRoot);
+  try {
+    const raw = await readFile(registryPath, 'utf8');
+    try {
+      return JSON.parse(raw);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      const repaired = parseRegistryJson(raw);
+      await writeRegistry({ workspaceRoot, registry: repaired });
+      return repaired;
+    }
   } catch (error) {
     if (error.code === 'ENOENT') return createEmptyRegistry();
     throw error;
@@ -156,7 +193,10 @@ async function writeRegistry({ workspaceRoot, registry }) {
     version: registry.version || 1,
     capabilities: registry.capabilities || [],
   };
-  await writeFile(registryPath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
+  const content = `${JSON.stringify(stored, null, 2)}\n`;
+  const tempPath = `${registryPath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, content, 'utf8');
+  await rename(tempPath, registryPath);
   return decorateRegistry(stored);
 }
 
@@ -164,37 +204,53 @@ export async function loadCapabilityRegistry({ workspaceRoot } = {}) {
   return decorateRegistry(await readStoredRegistry(workspaceRoot));
 }
 
-export async function saveCapabilityRecord({ workspaceRoot, record } = {}) {
-  const normalized = normalizeRecord({ workspaceRoot, record });
-  const registry = await loadCapabilityRegistry({ workspaceRoot });
-  const existingIndex = registry.capabilities.findIndex((capability) => capability.id === normalized.id);
-  const capabilities = [...registry.capabilities];
+export async function saveCapabilityRecords({ workspaceRoot, records, version } = {}) {
+  if (!workspaceRoot) throw new Error('workspaceRoot is required');
+  if (!Array.isArray(records)) throw new Error('records must be an array');
 
-  if (existingIndex >= 0) {
-    capabilities[existingIndex] = normalized;
-  } else {
-    capabilities.push(normalized);
-  }
+  return withRegistryWriteLock(workspaceRoot, async () => {
+    const normalized = records.map((record) => normalizeRecord({ workspaceRoot, record }));
+    const registry = await loadCapabilityRegistry({ workspaceRoot });
+    const capabilities = [...registry.capabilities];
 
-  await writeRegistry({
-    workspaceRoot,
-    registry: {
-      version: registry.version,
-      capabilities,
-    },
+    for (const record of normalized) {
+      const existingIndex = capabilities.findIndex((capability) => capability.id === record.id);
+      if (existingIndex >= 0) {
+        capabilities[existingIndex] = record;
+      } else {
+        capabilities.push(record);
+      }
+    }
+
+    await writeRegistry({
+      workspaceRoot,
+      registry: {
+        version: version ?? registry.version,
+        capabilities,
+      },
+    });
+    return normalized;
   });
-  return normalized;
+}
+
+export async function saveCapabilityRecord({ workspaceRoot, record } = {}) {
+  const [saved] = await saveCapabilityRecords({ workspaceRoot, records: [record] });
+  return saved;
 }
 
 export async function deleteCapabilityRecord({ workspaceRoot, capabilityId } = {}) {
-  const registry = await loadCapabilityRegistry({ workspaceRoot });
-  const capabilities = registry.capabilities.filter((capability) => capability.id !== capabilityId);
-  return writeRegistry({
-    workspaceRoot,
-    registry: {
-      version: registry.version,
-      capabilities,
-    },
+  if (!workspaceRoot) throw new Error('workspaceRoot is required');
+
+  return withRegistryWriteLock(workspaceRoot, async () => {
+    const registry = await loadCapabilityRegistry({ workspaceRoot });
+    const capabilities = registry.capabilities.filter((capability) => capability.id !== capabilityId);
+    return writeRegistry({
+      workspaceRoot,
+      registry: {
+        version: registry.version,
+        capabilities,
+      },
+    });
   });
 }
 

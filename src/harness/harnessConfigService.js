@@ -362,6 +362,7 @@ export async function repairWorkplace(workspaceRoot) {
   }
 
   const needsScaffold = !before.capabilitiesJson?.present
+    || before.capabilitiesJson?.error
     || !before.runtimeMount?.present
     || !before.bundledPackage?.present
     || !before.harnessDir?.present;

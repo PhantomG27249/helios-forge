@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildRuntimeMountManifest,
-  saveCapabilityRecord,
+  saveCapabilityRecords,
 } from '../src/harness-sidecar/capabilities/capabilityStore.js';
 import { installPiPackage } from '../src/harness-sidecar/capabilities/piPackageInstaller.js';
 import { formatHarnessIcrYamlSection } from '../src/harness-sidecar/icr/icrHarnessDefaults.js';
@@ -89,12 +89,10 @@ export async function setupHeliosForge({
     now,
   });
 
-  for (const capability of installedPackage.capabilities) {
-    await saveCapabilityRecord({
-      workspaceRoot: resolvedWorkspaceRoot,
-      record: capability,
-    });
-  }
+  await saveCapabilityRecords({
+    workspaceRoot: resolvedWorkspaceRoot,
+    records: installedPackage.capabilities,
+  });
 
   const manifest = await buildRuntimeMountManifest({
     workspaceRoot: resolvedWorkspaceRoot,

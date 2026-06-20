@@ -15,6 +15,7 @@ export async function ensurePiWorkplaceBridge(workspaceRoot) {
   const before = await getWorkplaceStatus(resolvedRoot);
   const needsPackage = !before.bundledPackage?.present
     || !before.capabilitiesJson?.present
+    || before.capabilitiesJson?.error
     || !before.runtimeMount?.present;
 
   let repair = null;

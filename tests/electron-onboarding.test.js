@@ -66,6 +66,33 @@ test('ensureWorkspaceReady skips setup when workplace already has harness files'
   });
 });
 
+test('ensureWorkspaceReady runs setup when capabilities.json is invalid JSON', async () => {
+  await withTempDir('electron-onboarding-', async (workspaceRoot) => {
+    const harnessDir = path.join(workspaceRoot, '.harness');
+    await mkdir(harnessDir, { recursive: true });
+    await writeFile(path.join(harnessDir, 'config.yaml'), 'project:\n  name: Existing\n', 'utf8');
+    await writeFile(
+      path.join(harnessDir, 'capabilities.json'),
+      '{"capabilities":[]}\n{"capabilities":[]}\n',
+      'utf8',
+    );
+
+    let setupCalls = 0;
+    const result = await ensureWorkspaceReady({
+      workspaceRoot,
+      bundledPackageRoot: path.join(workspaceRoot, 'unused-package'),
+      setupHeliosForgeImpl: async () => {
+        setupCalls += 1;
+        return { capabilityCount: 11 };
+      },
+    });
+
+    assert.equal(result.alreadyReady, false);
+    assert.equal(result.setupRan, true);
+    assert.equal(setupCalls, 1);
+  });
+});
+
 test('ensureWorkspaceReady runs setupHeliosForge when harness is missing', async () => {
   await withTempDir('electron-onboarding-', async (workspaceRoot) => {
     const calls = [];

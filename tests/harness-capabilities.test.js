@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -238,5 +238,58 @@ test('capability store deletes records and builds enabled-only runtime manifest'
       'enabled-research-command',
       'enabled-brief-template',
     ]);
+  });
+});
+
+test('capability store repairs concatenated registry JSON', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const registryPath = path.join(workspaceRoot, '.harness', 'capabilities.json');
+    await mkdir(path.dirname(registryPath), { recursive: true });
+
+    const first = `${JSON.stringify({
+      version: 1,
+      capabilities: [{
+        id: 'skill-one',
+        type: 'skill',
+        name: 'Workspace Skill',
+        enabled: true,
+      }],
+    }, null, 2)}\n`;
+    const second = `${JSON.stringify({
+      version: 1,
+      capabilities: [{
+        id: 'skill-two',
+        type: 'skill',
+        name: 'Second Skill',
+        enabled: true,
+      }],
+    }, null, 2)}\n`;
+    await writeFile(registryPath, `${first.trimEnd()}\n${second}`, 'utf8');
+
+    const repaired = await loadCapabilityRegistry({ workspaceRoot });
+    assert.equal(repaired.capabilities.length, 1);
+    assert.equal(repaired.capabilities[0].id, 'skill-one');
+    JSON.parse(await readFile(registryPath, 'utf8'));
+  });
+});
+
+test('capability store survives concurrent writes', async () => {
+  await withWorkspace(async (workspaceRoot) => {
+    const registryPath = path.join(workspaceRoot, '.harness', 'capabilities.json');
+    const tasks = [];
+    for (let index = 0; index < 30; index += 1) {
+      tasks.push(saveCapabilityRecord({
+        workspaceRoot,
+        record: {
+          id: `skill-${index}`,
+          type: 'skill',
+          name: `Skill ${index}`,
+          enabled: true,
+        },
+      }));
+    }
+    await Promise.all(tasks);
+    const registry = JSON.parse(await readFile(registryPath, 'utf8'));
+    assert.equal(registry.capabilities.length, 30);
   });
 });

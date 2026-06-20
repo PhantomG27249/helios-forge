@@ -29,10 +29,21 @@ export async function saveOnboardingState(userDataDir, state, fs = { mkdir, writ
   return state;
 }
 
-function workplaceLooksReady(workspaceRoot, exists = existsSync) {
+async function workplaceLooksReady(workspaceRoot, exists = existsSync, read = readFile) {
   const harnessDir = path.join(workspaceRoot, '.harness');
-  return exists(path.join(harnessDir, 'config.yaml'))
-    && exists(path.join(harnessDir, 'capabilities.json'));
+  if (!exists(path.join(harnessDir, 'config.yaml'))) {
+    return false;
+  }
+  const capabilitiesPath = path.join(harnessDir, 'capabilities.json');
+  if (!exists(capabilitiesPath)) {
+    return false;
+  }
+  try {
+    JSON.parse(await read(capabilitiesPath, 'utf8'));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function ensureWorkspaceReady({
@@ -47,7 +58,7 @@ export async function ensureWorkspaceReady({
   }
 
   const resolvedRoot = path.resolve(workspaceRoot);
-  if (workplaceLooksReady(resolvedRoot, exists)) {
+  if (await workplaceLooksReady(resolvedRoot, exists)) {
     return {
       workspaceRoot: resolvedRoot,
       setupRan: false,
