@@ -8,9 +8,11 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
+    "vendor:sync": "node scripts/sync-vendor-assets.js",
+    "postinstall": "node scripts/sync-vendor-assets.js",
     "electron": "electron src/electron/main.js",
-    "electron:pack": "electron-builder --dir --config electron-builder.yml",
-    "electron:dist": "electron-builder --config electron-builder.yml",
+    "electron:pack": "npm run vendor:sync && electron-builder --dir --config electron-builder.yml",
+    "electron:dist": "npm run vendor:sync && electron-builder --config electron-builder.yml",
     "icons:generate": "node scripts/generate-app-icons.js",
     "test": "node --test",
     "setup": "node scripts/setup-helios-forge.js",

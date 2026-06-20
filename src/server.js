@@ -172,13 +172,15 @@ const MIMES = {
   woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf',
 };
 
+const VENDOR_ROOT = join(ROOT, 'public', 'vendor');
+
 const VENDOR_ROUTES = {
-  '/vendor/marked.min.js': join(ROOT, 'node_modules/marked/marked.min.js'),
-  '/vendor/highlight.min.js': join(ROOT, 'node_modules/@highlightjs/cdn-assets/highlight.min.js'),
-  '/vendor/github-dark.min.css': join(ROOT, 'node_modules/@highlightjs/cdn-assets/styles/github-dark.min.css'),
-  '/vendor/katex/katex.min.js': join(ROOT, 'node_modules/katex/dist/katex.min.js'),
-  '/vendor/katex/katex.min.css': join(ROOT, 'node_modules/katex/dist/katex.min.css'),
-  '/vendor/katex/contrib/auto-render.min.js': join(ROOT, 'node_modules/katex/dist/contrib/auto-render.min.js'),
+  '/vendor/marked.min.js': join(VENDOR_ROOT, 'marked.min.js'),
+  '/vendor/highlight.min.js': join(VENDOR_ROOT, 'highlight.min.js'),
+  '/vendor/github-dark.min.css': join(VENDOR_ROOT, 'github-dark.min.css'),
+  '/vendor/katex/katex.min.js': join(VENDOR_ROOT, 'katex', 'katex.min.js'),
+  '/vendor/katex/katex.min.css': join(VENDOR_ROOT, 'katex', 'katex.min.css'),
+  '/vendor/katex/contrib/auto-render.min.js': join(VENDOR_ROOT, 'katex', 'contrib', 'auto-render.min.js'),
 };
 
 function serveFile(res, filePath) {
@@ -196,7 +198,7 @@ function serveStatic(req, res, url) {
 
   if (urlPath.startsWith('/vendor/katex/fonts/')) {
     const rel = urlPath.slice('/vendor/katex/'.length);
-    serveFile(res, join(ROOT, 'node_modules/katex/dist', rel));
+    serveFile(res, join(VENDOR_ROOT, 'katex', rel));
     return;
   }
 

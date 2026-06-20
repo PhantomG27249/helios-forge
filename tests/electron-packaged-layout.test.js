@@ -11,6 +11,9 @@ const requiredPackagedFiles = [
   'src/electron/main.js',
   'src/electron/preload.js',
   'public/index.html',
+  'public/vendor/marked.min.js',
+  'public/vendor/highlight.min.js',
+  'scripts/sync-vendor-assets.js',
   'scripts/setup-helios-forge.js',
   'packages/helios-research-harness/helios-package.json',
 ];
