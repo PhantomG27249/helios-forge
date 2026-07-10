@@ -47,8 +47,17 @@ function isInsideWorkspace(workspaceRoot, candidatePath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function isAbsoluteOnAnyPlatform(value) {
+  return path.posix.isAbsolute(value) || path.win32.isAbsolute(value);
+}
+
 function normalizeLocalPath({ workspaceRoot, value, field }) {
   if (value === undefined || value === null || value === '') return value;
+  // An absolute path from the other platform (e.g. C:\... on Linux) would
+  // otherwise resolve relative to the workspace and slip past containment.
+  if (isAbsoluteOnAnyPlatform(value) && !path.isAbsolute(value)) {
+    throw new Error(`Capability ${field} points outside workspace`);
+  }
   const resolvedWorkspace = path.resolve(workspaceRoot);
   const resolvedPath = path.isAbsolute(value)
     ? path.resolve(value)

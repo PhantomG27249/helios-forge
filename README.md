@@ -4,7 +4,26 @@ Helios Forge is AlphaHelion's workspace-scoped research-agent harness for Pi Age
 
 ## Quick Install
 
+### Linux / macOS
+
 From this repo:
+
+```bash
+./install.sh
+npm run dev
+```
+
+Then open [http://127.0.0.1:3777/](http://127.0.0.1:3777/).
+
+To install and launch in one command:
+
+```bash
+./install.sh --start
+```
+
+Other flags: `--install-pi-kwargs`, `--skip-npm-install`, `--port <port>`.
+
+### Windows
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -21,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Start
 
 ## What The Installer Does
 
-`install.ps1` performs the local setup needed for a working Helios Forge run:
+`install.sh` (Linux/macOS) and `install.ps1` (Windows) perform the local setup needed for a working Helios Forge run:
 
 - verifies Node.js and npm are available
 - installs npm dependencies unless `-SkipNpmInstall` is used
@@ -31,7 +50,13 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Start
 - writes `.harness/runtime/capabilities.mount.json` so the harness can mount enabled capabilities for real tasks
 - runs the release smoke check
 
-The installer does not write to your global Pi install by default. To also install the kwargs extension into `C:\Users\<you>\.pi\agent\extensions`, run:
+The installer does not write to your global Pi install by default. To also install the kwargs extension into `~/.pi/agent/extensions` (Windows: `C:\Users\<you>\.pi\agent\extensions`), run:
+
+```bash
+./install.sh --install-pi-kwargs
+```
+
+or on Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -InstallPiKwargs
@@ -41,7 +66,9 @@ That optional extension preserves model-specific request args such as `temperatu
 
 ## Manual Setup
 
-```powershell
+Same on every platform:
+
+```bash
 npm install
 npm run setup
 npm run release:smoke
@@ -50,8 +77,8 @@ npm run dev
 
 Useful variants:
 
-```powershell
-npm run setup -- --workspace C:\path\to\another\workspace
+```bash
+npm run setup -- --workspace /path/to/another/workspace
 npm run setup -- --force-config
 npm run install:pi-kwargs
 ```
@@ -69,11 +96,11 @@ The app also exposes toolbar access for deep research, capability management, tr
 
 ## Pi Model Setup
 
-Helios Forge reads Pi Agent's normal model configuration:
+Helios Forge reads Pi Agent's normal model configuration from `~/.pi/agent/` (Windows: `C:\Users\<you>\.pi\agent\`):
 
-- `C:\Users\<you>\.pi\agent\settings.json`
-- `C:\Users\<you>\.pi\agent\models.json`
-- `C:\Users\<you>\.pi\agent\auth.json`
+- `settings.json`
+- `models.json`
+- `auth.json`
 
 Configure Pi with the private OpenAI-compatible base URL and model id you want to run. Keep endpoint details out of this repository.
 
@@ -85,7 +112,7 @@ Helios Forge is licensed under the Apache License, Version 2.0. See [LICENSE](./
 
 ## Development
 
-```powershell
+```bash
 npm test
 npm run release:smoke
 npm run electron
@@ -99,5 +126,5 @@ Generated harness runtime files live under `.harness/` and are ignored by git.
 
 - If the browser shows a WebSocket reconnect loop, restart the dev server with `npm run dev`.
 - If bundled skills or slash commands do not appear, run `npm run setup` again.
-- If Pi does not receive model kwargs, confirm `C:\Users\<you>\.pi\agent\models.json` has matching `args`, then run `npm run install:pi-kwargs` if you want the global extension installed.
+- If Pi does not receive model kwargs, confirm `~/.pi/agent/models.json` has matching `args`, then run `npm run install:pi-kwargs` if you want the global extension installed.
 - If a workspace already has a `.harness/config.yaml`, setup preserves it unless `--force-config` is passed.
