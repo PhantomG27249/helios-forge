@@ -5,8 +5,10 @@ function makePatchId() {
 }
 
 function isSafeRelativePath(filePath) {
-  if (!filePath || path.isAbsolute(filePath)) return false;
+  if (!filePath) return false;
+  if (path.posix.isAbsolute(filePath) || path.win32.isAbsolute(filePath)) return false;
   const normalized = filePath.replace(/\\/g, '/');
+  if (/^[a-zA-Z]:/.test(normalized)) return false;
   return !normalized.startsWith('../') && !normalized.includes('/../');
 }
 

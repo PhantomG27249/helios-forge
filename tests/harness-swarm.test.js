@@ -14,7 +14,11 @@ async function makeGitRepo() {
   await runShellCommand({ command: 'git init', cwd: repoRoot, timeoutMs: 5000 });
   await writeFile(path.join(repoRoot, 'README.md'), 'swarm fixture\n');
   await runShellCommand({ command: 'git add README.md', cwd: repoRoot, timeoutMs: 5000 });
-  await runShellCommand({ command: 'git commit -m "init"', cwd: repoRoot, timeoutMs: 5000 });
+  await runShellCommand({
+    command: 'git -c user.email=swarm@test.local -c user.name="Helios Swarm Test" commit -m "init"',
+    cwd: repoRoot,
+    timeoutMs: 5000,
+  });
   return repoRoot;
 }
 
